@@ -1,1 +1,9 @@
+__pycache__/
+.mypy_cache/
+.venv/
+.ruff_cache/
 .DS_Store
+uv.lock
+micromamba/
+*.log
+*.png

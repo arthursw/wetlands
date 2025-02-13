@@ -5,9 +5,18 @@ description = "Conda Environment MAnager, a library to execute code in isolated 
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.10.0"
-dependencies = ["psutil==5.15.0"]
+requires-python = ">=3.11"
+dependencies = ["psutil>=6.1.0"]
 
 [build-system]
 build-backend = "hatchling.build"
 requires = ["hatchling"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "ruff>=0.9.6",
+]
+
+[tool.ruff.lint]
+ignore = ["E701", "F541"]
