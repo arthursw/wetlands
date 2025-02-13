@@ -23,5 +23,6 @@ diameters = env.execute(
     "segment",
     [image_name, image_name.replace(".png", "_segmentation.png")],
 )
+
 print(f"Found diameters of {diameters} pixels.")
 environmentManager.exit(env)

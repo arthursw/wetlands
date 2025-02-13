@@ -5,9 +5,9 @@ from subprocess import Popen
 from importlib import import_module
 from abc import abstractmethod
 from multiprocessing.connection import Client, Connection
+from typing import Any
 import psutil
 from types import ModuleType
-from typing import Optional, Any
 
 from cema import logger
 from cema.exceptions import ExecutionException
@@ -36,7 +36,7 @@ class ClientEnvironment(Environment):
         self.port = port
         self.process = process
         self.stopEvent = threading.Event()
-        self.connection: Optional[Connection] = None
+        self.connection: Connection | None = None
 
     def initialize(self) -> None:
         self.connection = Client(("localhost", self.port))

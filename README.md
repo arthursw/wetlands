@@ -1,26 +1,57 @@
-# Cema
+# Cema - Conda Environment Manager
 
-Cema (Conda Environment MAnager) is a library to manage conda environments.
+**Cema** (Conda Environment MAnager) is a lightweight Python library for managing **Conda** environments.
 
-It can create any conda environment, install its dependencies, and execute arbitrary code in them. This is useful to create a plugin system for any application. Since each plugin is isolated in its own environment, there are no dependency conflicts.
+**Cema** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
 
-## Example usage
+
+## ✨ Features
+
+- **Automatic Environment Management**: Create and configure environments on demand.
+- **Dependency Isolation**: Install dependencies without conflicts.
+- **Embedded Execution**: Run Python functions inside isolated environments.
+- **Micromamba**: Cema uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
+
+---
+
+## 📦 Installation
+
+To install **Cema**, simply use `pip`:
+
+```sh
+pip install cema
+```
+
+## 🚀 Usage Example
+
+If the user doesn't have micromamba installed, Cema will download and set it up automatically.
+
+```python
+from cema.environment_manager import EnvironmentManager
+
+# Initialize the environment manager
+# Cema will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
+# otherwise it will automatically download and install Micromamba in a self-contained manner.
+env_manager = EnvironmentManager("micromamba/")
+
+# Create and launch an isolated Conda environment named "cellpose"
+env = env_manager.createAndLaunch("cellpose", dependencies={"conda": ["cellpose==3.1.0"]})
+
+# Execute the "segment" function from "example_module.py" inside the isolated environment
+diameters = env.execute("example_module.py", "segment", ["image.png", "image_segmentation.png"])
+
+# Clean up and exit the environment
+env_manager.exit(env)
 
 ```
-import cema
 
-cema.initialize(condaPath='path') # if existing conda: use it, otherwise download micromamba
+See the `examples/` folder for a more detailed example.
 
-env = cema.launch('envName', ['deps']) # use existing conda
-# env.install('libName')
-result = env.execute('module.py', 'function', ['arg1', 'arg2'])
-# env.uninstall('libName')
+## 🔗 Related Projects
 
-# Or directly 
-cema.executeCommandsInEnvironment('envName', ['command1'])
-cema.executeModuleInEnvironment('envName', 'module.py', 'function', ['arg1', 'arg2'])
+- [Conda](https://anaconda.org/)
+- [Micromamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html)
 
-env.remove()
+## 📜 License
 
-
-```
+This project is licensed under the MIT License.

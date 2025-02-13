@@ -34,7 +34,8 @@ class CustomHandler(logging.Handler):
             if len(logger.handlers) > 0 and logger.handlers[0].formatter is not None
             else logging.root.handlers[0].formatter
         )
-        self.log(formatter.format(record))
+        if formatter is not None:
+            self.log(formatter.format(record))
 
 
 def attachLogHandler(log: Callable[[str], None], logLevel=logging.INFO) -> None:
