@@ -1,74 +1,71 @@
 import sys
 from pathlib import Path
 import threading
-import subprocess
+from subprocess import Popen
 from importlib import import_module
 from abc import abstractmethod
-from multiprocessing.connection import Client
+from multiprocessing.connection import Client, Connection
 import psutil
+from types import ModuleType
+from typing import Optional, Any
+
 from cema import logger
 from cema.exceptions import ExecutionException
 
 
 class Environment:
-    def __init__(self, name) -> None:
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.process = None
-        self.installedDependencies = {}
+        self.installedDependencies: dict[str, list[str]] = {}
 
     @abstractmethod
-    def execute(self, modulePath: str | Path, function: str, args: list):
-        return
+    def execute(self, modulePath: str | Path, function: str, args: list) -> Any:
+        pass
 
     @abstractmethod
-    def _exit(self):
-        return
+    def _exit(self) -> None:
+        pass
 
-    def launched(self):
+    def launched(self) -> bool:
         return True
 
 
 class ClientEnvironment(Environment):
-    def __init__(self, name, port, process: subprocess.Popen) -> None:
+    def __init__(self, name: str, port: int, process: Popen) -> None:
         super().__init__(name)
         self.port = port
         self.process = process
         self.stopEvent = threading.Event()
-        self.connection = None
+        self.connection: Optional[Connection] = None
 
-    def initialize(self):
+    def initialize(self) -> None:
         self.connection = Client(("localhost", self.port))
 
-    def execute(self, modulePath: str | Path, function: str, args: list):
-        if self.connection.closed:
+    def execute(self, modulePath: str | Path, function: str, args: list) -> Any:
+        connection = self.connection
+        if connection is None or connection.closed:
             logger.warning(
                 f"Connection not ready. Skipping execute {modulePath}.{function}({args})"
             )
-            return
+            return None
         try:
-            self.connection.send(
-                dict(
-                    action="execute",
-                    modulePath=modulePath,
-                    function=function,
-                    args=args,
-                )
+            connection.send(
+                dict(action="execute", modulePath=modulePath, function=function, args=args)
             )
-            while message := self.connection.recv():
+            while message := connection.recv():
                 if message["action"] == "execution finished":
                     logger.info("execution finished")
-                    return message["result"] if "result" in message else None
+                    return message.get("result")
                 elif message["action"] == "error":
                     raise ExecutionException(message)
                 else:
-                    logger.warning("Got an unexpected message: ", message)
+                    logger.warning(f"Got an unexpected message: {message}")
         # If the connection was closed (subprocess killed): catch and ignore the exception, otherwise: raise it
         except EOFError:
             print("Connection closed gracefully by the peer.")
         except BrokenPipeError as e:
-            print(
-                f"Broken pipe. The peer process might have terminated. Exception: {e}."
-            )
+            print(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
+
         # except (PicklingError, TypeError) as e:
         # 	print(f"Failed to serialize the message: {e}")
         except OSError as e:
@@ -77,17 +74,19 @@ class ClientEnvironment(Environment):
             else:
                 print(f"Unexpected OSError: {e}")
                 raise e
+        return None
 
-    def launched(self):
+    def launched(self) -> bool:
         return (
-            self.process.poll() is None
+            self.process is not None
+            and self.process.poll() is None
             and self.connection is not None
+            and not self.connection.closed
             and self.connection.writable
             and self.connection.readable
-            and not self.connection.closed
         )
 
-    def _exit(self):
+    def _exit(self) -> None:
         if self.connection is not None:
             try:
                 self.connection.send(dict(action="exit"))
@@ -98,22 +97,21 @@ class ClientEnvironment(Environment):
         self.stopEvent.set()
 
         # Terminate the process and its children
-        parent = psutil.Process(self.process.pid)
-        for child in parent.children(recursive=True):  # Get all child processes
-            if child.is_running():
-                child.kill()
-        if parent.is_running():
-            parent.kill()
-
-        return
+        if self.process is not None:
+            parent = psutil.Process(self.process.pid)
+            for child in parent.children(recursive=True):  # Get all child processes
+                if child.is_running():
+                    child.kill()
+            if parent.is_running():
+                parent.kill()
 
 
 class DirectEnvironment(Environment):
-    def __init__(self, name) -> None:
+    def __init__(self, name: str) -> None:
         super().__init__(name)
-        self.modules = {}
+        self.modules: dict[str, ModuleType] = {}
 
-    def execute(self, modulePath: str | Path, function: str, args: list):
+    def execute(self, modulePath: str | Path, function: str, args: list) -> Any:
         modulePath = Path(modulePath)
         module = modulePath.stem
         if module not in self.modules:
@@ -123,5 +121,5 @@ class DirectEnvironment(Environment):
             raise Exception(f"Module {module} has no function {function}.")
         return getattr(self.modules[module], function)(*args)
 
-    def _exit(self):
-        return
+    def _exit(self) -> None:
+        pass

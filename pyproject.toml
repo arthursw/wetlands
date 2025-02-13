@@ -16,6 +16,8 @@ requires = ["hatchling"]
 dev = [
     "mypy>=1.15.0",
     "ruff>=0.9.6",
+    "types-psutil>=6.1.0.20241221",
+    "types-pyyaml>=6.0.12.20241230",
 ]
 
 [tool.ruff.lint]
