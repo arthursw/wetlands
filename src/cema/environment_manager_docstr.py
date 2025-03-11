@@ -12,6 +12,15 @@ from cema.dependencies import Dependencies, Dependency
 from cema.exceptions import IncompatibilityException
 
 class EnvironmentManager:
+	"""Manages Conda environments using micromamba for isolation and dependency management.
+	
+	Attributes:
+		condaBin (str): Name of the micromamba binary.
+		condaBinConfig (str): Configuration command for micromamba.
+		environments (dict[str, Environment]): Active environments managed by this instance.
+		proxies (dict[str, str] | None): Proxy configuration for network requests.
+	"""
+
 	# Default settings for conda binaries
 	condaBin = "micromamba"
 	condaBinConfig = "micromamba --rc-file ~/.mambarc"
@@ -20,11 +29,22 @@ class EnvironmentManager:
 	proxies: dict[str, str] | None = None
 
 	def __init__(self, condaPath: str | Path = Path("micromamba")) -> None:
-		# Sets the path for conda binaries
+		"""Initializes the EnvironmentManager with a micromamba path.
+		
+		Args:
+			condaPath: Path to the micromamba binary. Defaults to "micromamba".
+		"""
 		self.setCondaPath(condaPath)
 
 	def setCondaPath(self, condaPath: str | Path) -> None:
-		# Updates the conda path and loads proxy settings if exists
+		"""Updates the micromamba path and loads proxy settings if exists.
+		
+		Args:
+			condaPath: New path to micromamba binary.
+			
+		Side Effects:
+			Updates condaBinConfig and proxies from the .mambarc file.
+		"""
 		self.condaPath = Path(condaPath).resolve()
 		condaConfigPath = self.condaPath / ".mambarc"
 		self.condaBinConfig = f'{self.condaBin} --rc-file "{condaConfigPath}"'
@@ -37,10 +57,16 @@ class EnvironmentManager:
 					self.proxies = condaConfig["proxies"]
 
 	def _insertCommandErrorChecks(self, commands: list[str]) -> list[str]:
-		# Inserts error-checking commands after each command. Useful for scripts.
+		"""Inserts error checking commands after each shell command.
+		
+		Args:
+			commands: List of original shell commands.
+			
+		Returns:
+			Augmented command list with error checking logic.
+		"""
 		commandsWithChecks = []
 		errorMessage = "Errors encountered during execution. Exited with status:"
-		# Commands to check for errors on Windows vs POSIX systems
 		windowsChecks = ["", "if (! $?) { exit 1 } "]
 		posixChecks = [
 			"",
@@ -60,8 +86,21 @@ class EnvironmentManager:
 
 	def _getOutput(
 		self, process: subprocess.Popen, commands: list[str], log: bool = True, strip: bool = True
-	) -> tuple[list[str], int]:
-		# Processes the output of a subprocess, logging and checking for errors
+	) -> list[str]:
+		"""Captures and processes output from a subprocess.
+		
+		Args:
+			process: Subprocess to monitor.
+			commands: Commands that were executed (for error messages).
+			log: Whether to log output lines.
+			strip: Whether to strip whitespace from output lines.
+			
+		Returns:
+			Putput lines.
+			
+		Raises:
+			Exception: If CondaSystemExit is detected or non-zero exit code.
+		"""
 		prefix: str = "[...] " if len(str(commands)) > 150 else ""
 		commandString = (
 			prefix + str(commands)[-150:]
@@ -82,10 +121,17 @@ class EnvironmentManager:
 		process.wait()
 		if process.returncode != 0:
 			raise Exception(f'The execution of the commands "{commandString}" failed.')
-		return (outputs, process.returncode)
+		return outputs
 
 	def setProxies(self, proxies: dict[str, str]) -> None:
-		# Sets proxy settings and writes them to the conda configuration
+		"""Configures proxy settings for Conda operations.
+		
+		Args:
+			proxies: Proxy configuration dictionary (e.g., {'http': '...', 'https': '...'}).
+			
+		Side Effects:
+			Updates .mambarc configuration file with proxy settings.
+		"""
 		self.proxies = proxies
 		condaConfigPath = self.condaPath / ".mambarc"
 		condaConfig = dict()
@@ -104,7 +150,16 @@ class EnvironmentManager:
 		env: dict[str, str] | None = None,
 		exitIfCommandError: bool = True
 	) -> subprocess.Popen:
-		# Executes a list of shell commands in sequence
+		"""Executes shell commands in a subprocess.
+		
+		Args:
+			commands: List of shell commands to execute.
+			env: Environment variables for the subprocess.
+			exitIfCommandError: Whether to insert error checking.
+			
+		Returns:
+			Subprocess handle for the executed commands.
+		"""
 		logger.debug(f"Execute commands: {commands}")
 		with tempfile.NamedTemporaryFile(
 			suffix=".ps1" if self._isWindows() else ".sh", mode="w", delete=False
@@ -142,8 +197,18 @@ class EnvironmentManager:
 		env: dict[str, str] | None = None,
 		exitIfCommandError: bool = True,
 		log: bool = True,
-	) -> tuple[list[str], int]:
-		# Runs commands and fetches their output
+	) -> list[str]:
+		"""Executes commands and captures their output.
+		
+		Args:
+			commands: Shell commands to execute.
+			env: Environment variables for the subprocess.
+			exitIfCommandError: Enable automatic error checking.
+			log: Enable logging of command output.
+			
+		Returns:
+			Output lines.
+		"""
 		rawCommands = commands.copy()
 		process = self.executeCommands(commands, env, exitIfCommandError)
 		with process:
@@ -151,7 +216,7 @@ class EnvironmentManager:
 		return
 
 	def _removeChannel(self, condaDependency: str) -> str:
-		# Removes channel from a conda dependency string, if present (e.g., "channel::package")
+		"""Removes channel prefix from a Conda dependency string (e.g., 'channel::package' -> 'package')."""
 		return (
 			condaDependency.split("::")[1]
 			if "::" in condaDependency
@@ -159,7 +224,15 @@ class EnvironmentManager:
 		)
 
 	def dependenciesAreInstalled(self, environment: str, dependencies: Dependencies) -> bool:
-		# Checks if specified dependencies are installed in an environment
+		"""Verifies if all specified dependencies are installed in the given environment.
+		
+		Args:
+			environment: Target environment name.
+			dependencies: Dependencies to check.
+			
+		Returns:
+			True if all dependencies are installed, False otherwise.
+		"""
 		condaDependencies, condaDependenciesNoDeps, hasCondaDependencies = (
 			self._formatDependencies("conda", dependencies, False)
 		)
@@ -174,7 +247,7 @@ class EnvironmentManager:
 		)
 		if hasCondaDependencies:
 			if "conda" not in installedDependencies:
-				installedDependencies["conda"], _ = self.executeCommandAndGetOutput(
+				installedDependencies["conda"] = self.executeCommandAndGetOutput(
 					self._activateConda()
 					+ [
 						f"{self.condaBin} activate {environment}",
@@ -194,7 +267,7 @@ class EnvironmentManager:
 
 		if "pip" not in installedDependencies:
 			if environment is not None:
-				installedDependencies["pip"], _ = self.executeCommandAndGetOutput(
+				installedDependencies["pip"] = self.executeCommandAndGetOutput(
 					self._activateConda()
 					+ [f"{self.condaBin} activate {environment}", f"pip freeze"],
 					log=False,
@@ -213,21 +286,29 @@ class EnvironmentManager:
 		)
 
 	def _getPlatformCommonName(self) -> str:
-		# Returns a common name for the current platform (e.g., "mac" for Darwin)
+		"""Gets common platform name (mac/linux/windows)."""
 		return "mac" if platform.system() == "Darwin" else platform.system().lower()
 
 	def _isWindows(self) -> bool:
-		# Checks if the current platform is Windows
+		"""Checks if the current OS is Windows."""
 		return platform.system() == "Windows"
 
 	def _getCondaPaths(self) -> tuple[Path, Path]:
-		# Returns the full path to conda binary and the path within the conda directory
+		"""Gets micromamba root path and binary path.
+		
+		Returns:
+			Tuple of (conda directory path, binary relative path).
+		"""
 		return self.condaPath.resolve(), Path(
 			"bin/micromamba" if platform.system() != "Windows" else "micromamba.exe"
 		)
 
 	def _setupCondaChannels(self) -> list[str]:
-		# Sets up conda channels in the configuration
+		"""Configures default Conda channels.
+		
+		Returns:
+			List of channel configuration commands.
+		"""
 		return [
 			f"{self.condaBinConfig} config append channels conda-forge",
 			f"{self.condaBinConfig} config append channels nodefaults",
@@ -235,7 +316,11 @@ class EnvironmentManager:
 		]
 
 	def _shellHook(self) -> list[str]:
-		# Returns shell commands for activating conda shell hook
+		"""Generates shell commands for Conda initialization.
+		
+		Returns:
+			OS-specific commands to activate Conda shell hooks.
+		"""
 		currentPath = Path.cwd().resolve()
 		condaPath, condaBinPath = self._getCondaPaths()
 		if platform.system() == "Windows":
@@ -254,7 +339,11 @@ class EnvironmentManager:
 			]
 
 	def _installCondaIfNecessary(self) -> list[str]:
-		# Installs conda if not already installed
+		"""Generates commands to install micromamba if missing.
+		
+		Returns:
+			List of installation commands for the current OS.
+		"""
 		condaPath, condaBinPath = self._getCondaPaths()
 		if (condaPath / condaBinPath).exists():
 			return []
@@ -264,7 +353,6 @@ class EnvironmentManager:
 		commands = self._getProxyEnvironmentVariablesCommands()
 		proxyString = self._getProxyString()
 
-		# Windows-specific commands for installing micromamba
 		if platform.system() == "Windows":
 			if proxyString is not None:
 				match = re.search(r"^[a-zA-Z]+://(.*?):(.*?)@", proxyString)
@@ -292,7 +380,6 @@ class EnvironmentManager:
 				f"New-Item .mambarc -type file",
 			]
 		else:
-			# Non-Windows commands for installing micromamba
 			system = "osx" if platform.system() == "Darwin" else "linux"
 			machine = platform.machine()
 			machine = "64" if machine == "x86_64" else machine
@@ -307,17 +394,30 @@ class EnvironmentManager:
 		return commands + self._setupCondaChannels()
 
 	def _activateConda(self) -> list[str]:
-		# Combines commands for installing conda, if necessary, and activating the shell hook
+		"""Generates commands to install (if needed) and activate Conda."""
 		commands = self._installCondaIfNecessary()
 		return commands + self._shellHook()
 
 	def environmentExists(self, environment: str) -> bool:
-		# Determines if a conda environment exists
+		"""Checks if a Conda environment exists.
+		
+		Args:
+			environment: Environment name to check.
+			
+		Returns:
+			True if environment exists, False otherwise.
+		"""
 		condaMeta = Path(self.condaPath) / "envs" / environment / "conda-meta"
 		return condaMeta.is_dir()
 
 	def install(self, environment: str, package: str, channel: str | None = None) -> None:
-		# Installs a package in a specified conda environment
+		"""Installs a package into a Conda environment.
+		
+		Args:
+			environment: Target environment name.
+			package: Package to install.
+			channel: Optional Conda channel for the package.
+		"""
 		channel = channel + "::" if channel is not None else ""
 		self.executeCommandAndGetOutput(
 			self._activateConda()
@@ -329,14 +429,11 @@ class EnvironmentManager:
 		self.environments[environment].installedDependencies = {}
 
 	def _platformCondaFormat(self) -> str:
-		# Returns a formatted string for the current platform, used for conda commands
+		"""Get conda-compatible platform string (e.g., 'linux-64', 'osx-arm64', 'win-64')."""
 		machine = platform.machine()
 		machine = "64" if machine == "x86_64" or machine == "AMD64" else machine
-		return (
-			dict(Darwin="osx", Windows="win", Linux="linux")[platform.system()]
-			+ "-"
-			+ machine
-		)
+		system = dict(Darwin="osx", Windows="win", Linux="linux")[platform.system()]
+		return f'{system}-{machine}'
 
 	def _formatDependencies(
 		self,
@@ -344,7 +441,19 @@ class EnvironmentManager:
 		dependencies: Dependencies,
 		raiseIncompatibilityError: bool = True,
 	) -> tuple[list[str], list[str], bool]:
-		# Formats dependencies for installation and checks platform compatibility
+		"""Formats dependencies for installation with platform checks.
+		
+		Args:
+			package_manager: 'conda' or 'pip'.
+			dependencies: Dependencies to process.
+			raiseIncompatibilityError: Whether to raise on incompatible platforms.
+			
+		Returns:
+			Tuple of (dependencies, no-deps dependencies, has_dependencies).
+			
+		Raises:
+			IncompatibilityException: For non-optional incompatible dependencies.
+		"""
 		dependencyList: list[str | Dependency] = dependencies.get(package_manager, [])  # type: ignore
 		finalDependencies: list[str] = []
 		finalDependenciesNoDeps: list[str] = []
@@ -376,7 +485,11 @@ class EnvironmentManager:
 		)
 
 	def _getProxyEnvironmentVariablesCommands(self) -> list[str]:
-		# Prepares commands for proxy environment variables
+		"""Generates proxy environment variable commands.
+		
+		Returns:
+			List of OS-specific proxy export commands.
+		"""
 		if self.proxies is None:
 			return []
 		return [
@@ -387,15 +500,24 @@ class EnvironmentManager:
 		]
 
 	def _getProxyString(self) -> str | None:
-		# Returns proxy string for HTTP or HTTPS
+		"""Gets active proxy string from configuration (HTTPS preferred, fallback to HTTP)."""
 		if self.proxies is None:
 			return None
-		return (
-			self.proxies.get("https", self.proxies.get("http", None))
-		)
+		return self.proxies.get("https", self.proxies.get("http", None))
 
 	def installDependencies(self, environment: str, dependencies: Dependencies) -> list[str]:
-		# Installs a list of dependencies in the given environment
+		"""Generates commands to install dependencies in the given environment.
+		
+		Args:
+			environment: Target environment name.
+			dependencies: Dependencies to install.
+			
+		Returns:
+			List of installation commands.
+			
+		Raises:
+			Exception: If pip dependencies contain Conda channel syntax.
+		"""
 		condaDependencies, condaDependenciesNoDeps, hasCondaDependencies = (
 			self._formatDependencies("conda", dependencies)
 		)
@@ -404,7 +526,7 @@ class EnvironmentManager:
 		)
 		if any("::" in d for d in pipDependencies + pipDependenciesNoDeps):
 			raise Exception(
-				f'One pip dependency has a channel specifier "::" is it a conda dependency?\n\n({dependencies["pip"]})'
+				f'One pip dependency has a channel specifier "::". Is it a conda dependency?\n\n({dependencies["pip"]})'
 			)
 		installDepsCommands = self._getProxyEnvironmentVariablesCommands()
 		installDepsCommands += (
@@ -456,15 +578,19 @@ class EnvironmentManager:
 	def _getCommandsForCurrentPlatform(
 		self, additionalCommands: dict[str, list[str]] = {}
 	) -> list[str]:
-		# Retrieves commands specific to the current platform
+		"""Selects platform-specific commands from a dictionary.
+		
+		Args:
+			additionalCommands: Dictionary mapping platforms to command lists.
+			
+		Returns:
+			Merged list of commands for 'all' and current platform.
+		"""
 		commands = []
-		if additionalCommands is not None and "all" in additionalCommands:
-			commands += additionalCommands["all"]
-		if (
-			additionalCommands is not None
-			and self._getPlatformCommonName() in additionalCommands
-		):
-			commands += additionalCommands[self._getPlatformCommonName()]
+		if additionalCommands is None: return commands
+		for name in ['all', self._getPlatformCommonName()]:
+			if name in additionalCommands:
+				commands += additionalCommands[name]
 		return commands
 
 	def create(
@@ -472,11 +598,24 @@ class EnvironmentManager:
 		environment: str,
 		dependencies: Dependencies,
 		additionalInstallCommands: dict[str, list[str]] = {},
-		additionalActivateCommands: dict[str, list[str]] = {},
 		mainEnvironment: str | None = None,
 		errorIfExists: bool = False,
 	) -> bool:
-		# Creates a conda environment with the specified dependencies
+		"""Creates a new Conda environment with specified dependencies.
+		
+		Args:
+			environment: Name for the new environment.
+			dependencies: Dependencies to install.
+			additionalInstallCommands: Platform-specific commands during installation (e.g. {'mac': ['cd ...', 'wget https://...', 'unzip ...'], 'all'=[], ...}).
+			mainEnvironment: Environment to check for existing dependencies.
+			errorIfExists: Whether to raise error if environment exists.
+			
+		Returns:
+			True if environment was created, False if dependencies already met.
+			
+		Raises:
+			Exception: For existing environments when errorIfExists=True.
+		"""
 		if mainEnvironment is not None and self.dependenciesAreInstalled(
 			mainEnvironment, dependencies
 		):
@@ -502,19 +641,30 @@ class EnvironmentManager:
 		]
 		createEnvCommands += self.installDependencies(environment, dependencies)
 		createEnvCommands += self._getCommandsForCurrentPlatform(additionalInstallCommands)
-		createEnvCommands += self._getCommandsForCurrentPlatform(additionalActivateCommands)
 		self.executeCommandAndGetOutput(createEnvCommands)
 		return True
 
 	def environmentIsLaunched(self, environment: str) -> bool:
-		# Checks if the environment is launched
+		"""Checks if an environment is currently running.
+		
+		Args:
+			environment: Environment name to check.
+			
+		Returns:
+			True if environment process is active.
+		"""
 		return (
 			environment in self.environments
 			and self.environments[environment].launched()
 		)
 
 	def logOutput(self, process: subprocess.Popen, stopEvent: threading.Event) -> None:
-		# Logs output from a process until a stop event is detected
+		"""Logs output from a subprocess until stopped.
+		
+		Args:
+			process: Subprocess to monitor.
+			stopEvent: Event to signal stopping logging.
+		"""
 		if process.stdout is None or process.stdout.readline is None: return
 		try:
 			for line in iter(process.stdout.readline, ""):  # Use iter to avoid buffering issues
@@ -528,32 +678,36 @@ class EnvironmentManager:
 	def launch(
 		self,
 		environment: str,
-		customCommand: str | None = None,
 		environmentVariables: dict[str, str] | None = None,
 		condaEnvironment: bool = True,
 		additionalActivateCommands: dict[str, list[str]] = {},
 		logOutput: bool = True,
 	) -> Environment:
-		# Launches a process in the specified conda environment
+		"""Launches a process in the specified environment.
+		
+		Args:
+			environment: Environment name to launch.
+			environmentVariables: Environment variables for the process.
+			condaEnvironment: Whether to activate Conda environment.
+			additionalActivateCommands: Platform-specific activation commands.
+			logOutput: Enable logging of process output.
+			
+		Returns:
+			ClientEnvironment instance for the launched process.
+		"""
 		if self.environmentIsLaunched(environment):
 			return self.environments[environment]
 
-		moduleCallerPath = Path(__file__).parent.resolve() / "module_caller.py"
 		commands = (
 			self._activateConda() + [f"{self.condaBin} activate {environment}"]
 			if condaEnvironment
 			else []
 		)
 		commands += self._getCommandsForCurrentPlatform(additionalActivateCommands)
-		commands += [
-			f'python -u "{moduleCallerPath}" {environment}'
-			if customCommand is None
-			else customCommand
-		]
+		moduleCallerPath = Path(__file__).parent.resolve() / "module_caller.py"
+		commands += [f'python -u "{moduleCallerPath}" {environment}']
 		port = -1
 		process = self.executeCommands(commands, env=environmentVariables)
-		# The python command is called with the -u (unbuffered) option, we can wait for a specific print before letting the process run by itself
-		# if the unbuffered option is not set, the following can wait for the whole python process to finish
 		if process.stdout is not None:
 			try:
 				for line in process.stdout:
@@ -564,7 +718,6 @@ class EnvironmentManager:
 			except Exception as e:
 				process.stdout.close()
 				raise e
-		# If process is finished: check if error
 		if process.poll() is not None:
 			if process.stdout is not None:
 				process.stdout.close()
@@ -582,24 +735,33 @@ class EnvironmentManager:
 		self,
 		environment: str,
 		dependencies: Dependencies,
-		customCommand: str | None = None,
 		environmentVariables: dict[str, str] | None = None,
 		additionalInstallCommands: dict[str, list[str]] = {},
 		additionalActivateCommands: dict[str, list[str]] = {},
 		mainEnvironment: str | None = None,
 	) -> Environment:
-		# Creates the environment if necessary and launches it
+		"""Creates and/or launches an environment.
+		
+		Args:
+			environment: Environment name.
+			dependencies: Dependencies to install.
+			environmentVariables: Environment variables for the process.
+			additionalInstallCommands: Platform-specific install commands.
+			additionalActivateCommands: Platform-specific activation commands.
+			mainEnvironment: Environment to check for existing dependencies.
+			
+		Returns:
+			Environment instance (ClientEnvironment or DirectEnvironment).
+		"""
 		environmentIsRequired = self.create(
 			environment,
 			dependencies,
 			additionalInstallCommands=additionalInstallCommands,
-			additionalActivateCommands=additionalActivateCommands,
 			mainEnvironment=mainEnvironment,
 		)
 		if environmentIsRequired:
 			return self.launch(
 				environment,
-				customCommand,
 				environmentVariables=environmentVariables,
 				additionalActivateCommands=additionalActivateCommands,
 			)
@@ -607,7 +769,11 @@ class EnvironmentManager:
 			return DirectEnvironment(environment)
 
 	def exit(self, environment: Environment | str) -> None:
-		# Exits the specified environment and cleans up resources
+		"""Terminates an environment process and cleans up.
+		
+		Args:
+			environment: Environment name or instance to terminate.
+		"""
 		environmentName = (
 			environment if isinstance(environment, str) else environment.name
 		)
