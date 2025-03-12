@@ -248,7 +248,7 @@ class EnvironmentManager:
 		if hasCondaDependencies:
 			if "conda" not in installedDependencies:
 				installedDependencies["conda"] = self.executeCommandAndGetOutput(
-					self._activateConda()
+					self._getActivateCondaComands()
 					+ [
 						f"{self.condaBin} activate {environment}",
 						f"{self.condaBin} list -y",
@@ -268,7 +268,7 @@ class EnvironmentManager:
 		if "pip" not in installedDependencies:
 			if environment is not None:
 				installedDependencies["pip"] = self.executeCommandAndGetOutput(
-					self._activateConda()
+					self._getActivateCondaComands()
 					+ [f"{self.condaBin} activate {environment}", f"pip freeze"],
 					log=False,
 				)
@@ -315,7 +315,7 @@ class EnvironmentManager:
 			f"{self.condaBinConfig} config set channel_priority flexible",
 		]
 
-	def _shellHook(self) -> list[str]:
+	def _getShellHookCommands(self) -> list[str]:
 		"""Generates shell commands for Conda initialization.
 		
 		Returns:
@@ -338,7 +338,7 @@ class EnvironmentManager:
 				f'cd "{currentPath}"',
 			]
 
-	def _installCondaIfNecessary(self) -> list[str]:
+	def _getInstallCondaCommands(self) -> list[str]:
 		"""Generates commands to install micromamba if missing.
 		
 		Returns:
@@ -390,13 +390,13 @@ class EnvironmentManager:
 				f"curl {proxyArgs} -Ls https://micro.mamba.pm/api/micromamba/{system}-{machine}/latest | tar -xvj bin/micromamba",
 				f"touch .mambarc",
 			]
-		commands += self._shellHook()
+		commands += self._getShellHookCommands()
 		return commands + self._setupCondaChannels()
 
-	def _activateConda(self) -> list[str]:
+	def _getActivateCondaComands(self) -> list[str]:
 		"""Generates commands to install (if needed) and activate Conda."""
-		commands = self._installCondaIfNecessary()
-		return commands + self._shellHook()
+		commands = self._getInstallCondaCommands()
+		return commands + self._getShellHookCommands()
 
 	def environmentExists(self, environment: str) -> bool:
 		"""Checks if a Conda environment exists.
@@ -410,22 +410,19 @@ class EnvironmentManager:
 		condaMeta = Path(self.condaPath) / "envs" / environment / "conda-meta"
 		return condaMeta.is_dir()
 
-	def install(self, environment: str, package: str, channel: str | None = None) -> None:
-		"""Installs a package into a Conda environment.
+	def install(self, environment: str, dependencies: Dependencies, additionalInstallCommands: dict[str, list[str]] = {}) -> None:
+		"""Installs dependencies into a Conda environment.
 		
 		Args:
 			environment: Target environment name.
-			package: Package to install.
-			channel: Optional Conda channel for the package.
+			dependencies: Dependencies to install, in the form dict(python='3.12.7', conda=['conda-forge::pyimagej==1.5.0', dict(name='openjdk=11', platforms=['osx-64', 'osx-arm64', 'win-64', 'linux-64'], dependencies=True, optional=False)], pip=['numpy==1.26.4']).
+			additionalInstallCommands: Platform-specific commands during installation (e.g. {'mac': ['cd ...', 'wget https://...', 'unzip ...'], 'all'=[], ...}).
 		"""
-		channel = channel + "::" if channel is not None else ""
-		self.executeCommandAndGetOutput(
-			self._activateConda()
-			+ [
-				f"{self.condaBin} activate {environment}",
-				f"{self.condaBinConfig} install {channel}{package} -y",
-			]
-		)
+
+		installCommands = self._getActivateCondaComands()
+		installCommands += self._getInstallDependenciesCommands(environment, dependencies)
+		installCommands += self._getCommandsForCurrentPlatform(additionalInstallCommands)
+		self.executeCommandAndGetOutput(installCommands)
 		self.environments[environment].installedDependencies = {}
 
 	def _platformCondaFormat(self) -> str:
@@ -505,8 +502,8 @@ class EnvironmentManager:
 			return None
 		return self.proxies.get("https", self.proxies.get("http", None))
 
-	def installDependencies(self, environment: str, dependencies: Dependencies) -> list[str]:
-		"""Generates commands to install dependencies in the given environment.
+	def _getInstallDependenciesCommands(self, environment: str, dependencies: Dependencies) -> list[str]:
+		"""Generates commands to install dependencies in the given environment. Note: this does not activate conda, use self._getActivateCondaComands() first.
 		
 		Args:
 			environment: Target environment name.
@@ -605,7 +602,7 @@ class EnvironmentManager:
 		
 		Args:
 			environment: Name for the new environment.
-			dependencies: Dependencies to install.
+			dependencies: Dependencies to install, in the form dict(python='3.12.7', conda=['conda-forge::pyimagej==1.5.0', dict(name='openjdk=11', platforms=['osx-64', 'osx-arm64', 'win-64', 'linux-64'], dependencies=True, optional=False)], pip=['numpy==1.26.4']).
 			additionalInstallCommands: Platform-specific commands during installation (e.g. {'mac': ['cd ...', 'wget https://...', 'unzip ...'], 'all'=[], ...}).
 			mainEnvironment: Environment to check for existing dependencies.
 			errorIfExists: Whether to raise error if environment exists.
@@ -636,10 +633,9 @@ class EnvironmentManager:
 		pythonRequirement = " python=" + (
 			pythonVersion if len(pythonVersion) > 0 else platform.python_version()
 		)
-		createEnvCommands = self._activateConda() + [
-			f"{self.condaBinConfig} create -n {environment}{pythonRequirement} -y"
-		]
-		createEnvCommands += self.installDependencies(environment, dependencies)
+		createEnvCommands = self._getActivateCondaComands()
+		createEnvCommands += [f"{self.condaBinConfig} create -n {environment}{pythonRequirement} -y"]
+		createEnvCommands += self._getInstallDependenciesCommands(environment, dependencies)
 		createEnvCommands += self._getCommandsForCurrentPlatform(additionalInstallCommands)
 		self.executeCommandAndGetOutput(createEnvCommands)
 		return True
@@ -668,28 +664,60 @@ class EnvironmentManager:
 		if process.stdout is None or process.stdout.readline is None: return
 		try:
 			for line in iter(process.stdout.readline, ""):  # Use iter to avoid buffering issues
-				if stopEvent.is_set():
+				if stopEvent is not None and stopEvent.is_set():
 					break
 				logger.info(line.strip())
 		except Exception as e:
 			logger.error(f"Exception in logging thread: {e}")
 		return
+	
+	def _getActivateEnvironmentCommands(self, environment: str, additionalActivateCommands: dict[str, list[str]] = {}):
+		"""Generates commands to activate the given environment
+		
+		Args:
+			environment: Environment name to launch.
+			additionalActivateCommands: Platform-specific activation commands.
+			
+		Returns:
+			List of commands to activate the environment
+		"""
+		commands = self._getActivateCondaComands() + [f"{self.condaBin} activate {environment}"]
+		return commands + self._getCommandsForCurrentPlatform(additionalActivateCommands)
+
+	def executeCommandsInEnvironment(
+		self,
+		environment: str,
+		commands: list[str],
+		additionalActivateCommands: dict[str, list[str]] = {},
+		environmentVariables: dict[str, str] | None = None,
+	) -> subprocess.Popen:
+		"""Executes the given commands in the specified environment.
+		
+		Args:
+			environment: Environment name to launch.
+			commands: The commands to execute in the environment.
+			additionalActivateCommands: Platform-specific activation commands.
+			environmentVariables: Environment variables for the process.
+			
+		Returns:
+			The launched process.
+		"""
+		commands = self._getActivateEnvironmentCommands(environment, additionalActivateCommands) + commands
+		return self.executeCommands(commands, env=environmentVariables)
 
 	def launch(
 		self,
 		environment: str,
-		environmentVariables: dict[str, str] | None = None,
-		condaEnvironment: bool = True,
 		additionalActivateCommands: dict[str, list[str]] = {},
+		environmentVariables: dict[str, str] | None = None,
 		logOutput: bool = True,
 	) -> Environment:
-		"""Launches a process in the specified environment.
+		"""Launches a server listening for orders in the specified environment.
 		
 		Args:
 			environment: Environment name to launch.
-			environmentVariables: Environment variables for the process.
-			condaEnvironment: Whether to activate Conda environment.
 			additionalActivateCommands: Platform-specific activation commands.
+			environmentVariables: Environment variables for the process.
 			logOutput: Enable logging of process output.
 			
 		Returns:
@@ -698,16 +726,10 @@ class EnvironmentManager:
 		if self.environmentIsLaunched(environment):
 			return self.environments[environment]
 
-		commands = (
-			self._activateConda() + [f"{self.condaBin} activate {environment}"]
-			if condaEnvironment
-			else []
-		)
-		commands += self._getCommandsForCurrentPlatform(additionalActivateCommands)
 		moduleCallerPath = Path(__file__).parent.resolve() / "module_caller.py"
-		commands += [f'python -u "{moduleCallerPath}" {environment}']
+		process = self.executeCommandsInEnvironment(environment, [f'python -u "{moduleCallerPath}" {environment}'], additionalActivateCommands, environmentVariables)
+
 		port = -1
-		process = self.executeCommands(commands, env=environmentVariables)
 		if process.stdout is not None:
 			try:
 				for line in process.stdout:
