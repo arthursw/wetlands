@@ -411,12 +411,13 @@ class EnvironmentManager:
 		return condaMeta.is_dir()
 
 	def install(self, environment: str, dependencies: Dependencies, additionalInstallCommands: dict[str, list[str]] = {}) -> None:
-		"""Installs dependencies into a Conda environment.
+		"""Installs dependencies into a Conda environment. 
+		See :meth:`EnvironmentManager.create` for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
 		
 		Args:
 			environment: Target environment name.
-			dependencies: Dependencies to install, in the form dict(python='3.12.7', conda=['conda-forge::pyimagej==1.5.0', dict(name='openjdk=11', platforms=['osx-64', 'osx-arm64', 'win-64', 'linux-64'], dependencies=True, optional=False)], pip=['numpy==1.26.4']).
-			additionalInstallCommands: Platform-specific commands during installation (e.g. {'mac': ['cd ...', 'wget https://...', 'unzip ...'], 'all'=[], ...}).
+			dependencies: Dependencies to install.
+			additionalInstallCommands: Platform-specific commands during installation.
 		"""
 
 		installCommands = self._getActivateCondaComands()
