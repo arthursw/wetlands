@@ -12,7 +12,6 @@ from types import ModuleType
 from cema import logger
 from cema.exceptions import ExecutionException
 
-
 class Environment:
     def __init__(self, name: str) -> None:
         self.name = name
