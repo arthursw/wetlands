@@ -3,6 +3,8 @@ import platform
 import re
 from typing import NotRequired, TypedDict
 
+import yaml
+
 from cema.settings_manager import SettingsManager
 from cema.dependency_manager import DependencyManager
 
@@ -42,18 +44,6 @@ class CommandGenerator:
 				f'cd "{currentPath}"',
 			]
 
-	def getSetupCondaChannels(self) -> list[str]:
-		"""Configures default Conda channels.
-		
-		Returns:
-			List of channel configuration commands.
-		"""
-		return [
-			f"{self.settingsManager.condaBinConfig} config append channels conda-forge",
-			f"{self.settingsManager.condaBinConfig} config append channels nodefaults",
-			f"{self.settingsManager.condaBinConfig} config set channel_priority flexible",
-		]
-
 	def getInstallCondaCommands(self) -> list[str]:
 		"""Generates commands to install micromamba if missing.
 		
@@ -65,7 +55,12 @@ class CommandGenerator:
 			return []
 		if platform.system() not in ["Windows", "Linux", "Darwin"]:
 			raise Exception(f"Platform {platform.system()} is not supported.")
+		
 		condaPath.mkdir(exist_ok=True, parents=True)
+		with open(condaPath / '.mambarc', 'w') as f:
+			mambaSettings = dict(channel_priority='flexible', channels=['conda-forge', 'nodefaults'], default_channels='conda-forge')
+			yaml.safe_dump(mambaSettings, f)
+
 		commands = self.settingsManager.getProxyEnvironmentVariablesCommands()
 		proxyString = self.settingsManager.getProxyString()
 
@@ -93,7 +88,6 @@ class CommandGenerator:
 				f'Invoke-WebRequest {proxyArgs} -URI "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$env:Temp\\vc_redist.x64.exe"; Start-Process "$env:Temp\\vc_redist.x64.exe" -ArgumentList "/quiet /norestart" -Wait; Remove-Item "$env:Temp\\vc_redist.x64.exe"',
 				f'echo "Installing micromamba..."',
 				f"Invoke-Webrequest {proxyArgs} -URI https://github.com/mamba-org/micromamba-releases/releases/download/2.0.4-0/micromamba-win-64 -OutFile micromamba.exe",
-				f"New-Item .mambarc -type file",
 			]
 		else:
 			system = "osx" if platform.system() == "Darwin" else "linux"
@@ -104,10 +98,9 @@ class CommandGenerator:
 				f'cd "{condaPath}"',
 				f'echo "Installing micromamba..."',
 				f"curl {proxyArgs} -Ls https://micro.mamba.pm/api/micromamba/{system}-{machine}/latest | tar -xvj bin/micromamba",
-				f"touch .mambarc",
 			]
 		commands += self.getShellHookCommands()
-		return commands + self.getSetupCondaChannels()
+		return commands
 
 	def getActivateCondaComands(self) -> list[str]:
 		"""Generates commands to install (if needed) and activate Conda."""
