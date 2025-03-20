@@ -220,29 +220,29 @@ class EnvironmentManager:
 			and self.environments[environment].launched()
 		)
 
-	def logOutput(self, process: subprocess.Popen, stopEvent: threading.Event) -> None:
-		"""Logs output from a subprocess until stopped.
+	def logOutput(self, process: subprocess.Popen) -> None:
+		"""Logs output from a subprocess.
 		
 		Args:
 			process: Subprocess to monitor.
-			stopEvent: Event to signal stopping logging.
 		"""
 		if process.stdout is None or process.stdout.readline is None: return
 		try:
-			for line in iter(process.stdout.readline, ""):  # Use iter to avoid buffering issues
-				if stopEvent is not None and stopEvent.is_set():
-					break
+			for line in iter(process.stdout.readline, ""):  # Use iter to avoid buffering issues:
+															# iter(callable, sentinel) repeatedly calls callable (process.stdout.readline) until it returns the sentinel value ("", an empty string).
+															# Since readline() is called directly in each iteration, it immediately processes available output instead of accumulating it in a buffer.
+															# This effectively forces line-by-line reading in real-time rather than waiting for the subprocess to fill its buffer.
 				logger.info(line.strip())
 		except Exception as e:
 			logger.error(f"Exception in logging thread: {e}")
 		return
-	
+
 	def executeCommandsInEnvironment(
 		self,
 		environment: str,
 		commands: list[str],
 		additionalActivateCommands: dict[str, list[str]] = {},
-		environmentVariables: dict[str, str] | None = None,
+		popenKwargs: dict[str, any] = {}
 	) -> subprocess.Popen:
 		"""Executes the given commands in the specified environment.
 		
@@ -250,28 +250,26 @@ class EnvironmentManager:
 			environment: Environment name to launch.
 			commands: The commands to execute in the environment.
 			additionalActivateCommands: Platform-specific activation commands.
-			environmentVariables: Environment variables for the process.
+			popenKwargs: Keyword arguments for subprocess.Popen(). See :meth:`CommandExecutor.executeCommands`.
 			
 		Returns:
 			The launched process.
 		"""
 		commands = self.commandGenerator.getActivateEnvironmentCommands(environment, additionalActivateCommands) + commands
-		return self.commandExecutor.executeCommands(commands, env=environmentVariables)
+		return self.commandExecutor.executeCommands(commands, popenKwargs=popenKwargs)
 
 	def launch(
 		self,
 		environment: str,
 		additionalActivateCommands: dict[str, list[str]] = {},
-		environmentVariables: dict[str, str] | None = None,
-		logOutput: bool = True,
+		logOutputInThread: bool = True,
 	) -> Environment:
 		"""Launches a server listening for orders in the specified environment.
 		
 		Args:
 			environment: Environment name to launch.
 			additionalActivateCommands: Platform-specific activation commands.
-			environmentVariables: Environment variables for the process.
-			logOutput: Enable logging of process output.
+			logOutputInThread: Logs the process output in a separate thread.
 			
 		Returns:
 			ClientEnvironment instance for the launched process.
@@ -279,8 +277,8 @@ class EnvironmentManager:
 		if self.environmentIsLaunched(environment):
 			return self.environments[environment]
 
-		moduleCallerPath = Path(__file__).parent.resolve() / "module_caller.py"
-		process = self.executeCommandsInEnvironment(environment, [f'python -u "{moduleCallerPath}" {environment}'], additionalActivateCommands, environmentVariables)
+		moduleExecutorPath = Path(__file__).parent.resolve() / "module_executor.py"
+		process = self.executeCommandsInEnvironment(environment, [f'python -u "{moduleExecutorPath}" {environment}'], additionalActivateCommands)
 
 		port = -1
 		if process.stdout is not None:
@@ -298,9 +296,9 @@ class EnvironmentManager:
 				process.stdout.close()
 			raise Exception(f"Process exited with return code {process.returncode}.")
 		ce = ClientEnvironment(environment, port, process)
-		if logOutput:
+		if logOutputInThread:
 			threading.Thread(
-				target=self.logOutput, args=[process, ce.stopEvent]
+				target=self.logOutput, args=[process]
 			).start()
 		self.environments[environment] = ce
 		ce.initialize()
@@ -310,7 +308,6 @@ class EnvironmentManager:
 		self,
 		environment: str,
 		dependencies: Dependencies,
-		environmentVariables: dict[str, str] | None = None,
 		additionalInstallCommands: dict[str, list[str]] = {},
 		additionalActivateCommands: dict[str, list[str]] = {},
 		mainEnvironment: str | None = None,
@@ -320,7 +317,6 @@ class EnvironmentManager:
 		Args:
 			environment: Environment name.
 			dependencies: Dependencies to install.
-			environmentVariables: Environment variables for the process.
 			additionalInstallCommands: Platform-specific install commands.
 			additionalActivateCommands: Platform-specific activation commands.
 			mainEnvironment: Environment to check for existing dependencies.
@@ -337,7 +333,6 @@ class EnvironmentManager:
 		if environmentIsRequired:
 			return self.launch(
 				environment,
-				environmentVariables=environmentVariables,
 				additionalActivateCommands=additionalActivateCommands,
 			)
 		else:

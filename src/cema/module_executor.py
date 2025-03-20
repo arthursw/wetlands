@@ -8,8 +8,8 @@ from importlib import import_module
 from multiprocessing.connection import Listener
 
 parser = argparse.ArgumentParser(
-    "Cema module caller",
-    "Module caller is executed in a conda environment. It listens to a port and wait for execution orders. When told, it can import a module and execute one of its function.",
+    "Cema module executor",
+    "Module executor is executed in a conda environment. It listens to a port and wait for execution orders. When told, it can import a module and execute one of its function.",
 )
 parser.add_argument("environment", help="The name of the execution environment.")
 args = parser.parse_args()

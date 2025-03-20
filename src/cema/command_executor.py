@@ -2,10 +2,22 @@ import platform
 import subprocess
 import tempfile
 import threading
+import psutil
 from cema import logger
 
 class CommandExecutor:
 	"""Handles execution of shell commands with error checking and logging."""
+
+	@staticmethod
+	def killProcess(process)-> None:
+		"""Terminates the process and its children"""
+		if process is None: return
+		parent = psutil.Process(process.pid)
+		for child in parent.children(recursive=True):  # Get all child processes
+			if child.is_running():
+				child.kill()
+		if parent.is_running():
+			parent.kill()
 
 	def _isWindows(self) -> bool:
 		"""Checks if the current OS is Windows."""
@@ -39,6 +51,13 @@ class CommandExecutor:
 			commandsWithChecks += checks
 		return commandsWithChecks
 
+	def _commandsExcerpt(self, commands: list[str]) -> str:
+		"""Returns the command list as a string but cap the length at 150 characters 
+		(for example to be able to display it in a dialog window)."""
+		if commands is None or len(commands) == 0: return ""
+		prefix: str = "[...] " if len(str(commands)) > 150 else ""
+		return prefix + str(commands)[-150:]
+	
 	def getOutput(
 		self, process: subprocess.Popen, commands: list[str], log: bool = True, strip: bool = True
 	) -> list[str]:
@@ -51,17 +70,11 @@ class CommandExecutor:
 			strip: Whether to strip whitespace from output lines.
 			
 		Returns:
-			Putput lines.
+			Output lines.
 			
 		Raises:
 			Exception: If CondaSystemExit is detected or non-zero exit code.
 		"""
-		prefix: str = "[...] " if len(str(commands)) > 150 else ""
-		commandString = (
-			prefix + str(commands)[-150:]
-			if commands is not None and len(commands) > 0
-			else ""
-		)
 		outputs = []
 		if process.stdout is not None:
 			for line in process.stdout:
@@ -69,46 +82,29 @@ class CommandExecutor:
 					line = line.strip()
 				if log:
 					logger.info(line)
-				if "CondaSystemExit" in line:
-					process.kill()
-					raise Exception(f'The execution of the commands "{commandString}" failed.')
+				if "CondaSystemExit" in line: 	# Sometime conda exists with a CondaSystemExit and a return code 0
+												# we want to stop our script when this happens (and not run the later commands)
+					self.killProcess(process)
+					raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
 				outputs.append(line)
 		process.wait()
 		if process.returncode != 0:
-			raise Exception(f'The execution of the commands "{commandString}" failed.')
+			raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
 		return outputs
-	
-	def logOutput(self, process: subprocess.Popen, stopEvent: threading.Event) -> None:
-		"""Logs output from a subprocess until stopped.
-		
-		Args:
-			process: Subprocess to monitor.
-			stopEvent: Event to signal stopping logging.
-		"""
-		if process.stdout is None or process.stdout.readline is None: return
-		try:
-			for line in iter(process.stdout.readline, ""):  # Use iter to avoid buffering issues
-				if stopEvent is not None and stopEvent.is_set():
-					break
-				logger.info(line.strip())
-		except Exception as e:
-			logger.error(f"Exception in logging thread: {e}")
-		return
-
 
 	def executeCommands(
 		self,
 		commands: list[str],
-		env: dict[str, str] | None = None,
-		exitIfCommandError: bool = True
+		exitIfCommandError: bool = True,
+		popenKwargs: dict[str, any] = {}
 	) -> subprocess.Popen:
 		"""Executes shell commands in a subprocess.
 		
 		Args:
 			commands: List of shell commands to execute.
-			env: Environment variables for the subprocess.
-			exitIfCommandError: Whether to insert error checking.
-			
+			exitIfCommandError: Whether to insert error checking after each command to make sure the whole command chain stops if an error occurs (otherwise the script will be executed entirely even when one command fails at the beginning).
+			popenKwargs: Keyword arguments for subprocess.Popen() (see https://docs.python.org/3/library/subprocess.html#popen-constructor). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+
 		Returns:
 			Subprocess handle for the executed commands.
 		"""
@@ -131,38 +127,41 @@ class CommandExecutor:
 			if not self._isWindows():
 				subprocess.run(["chmod", "u+x", tmp.name])
 			logger.debug(f"Script file: {tmp.name}")
+			defaultPopenKwargs = dict(
+				stdout=subprocess.PIPE,
+				stderr=subprocess.STDOUT, # Merge stderr and stdout to handle all them with a single loop
+				stdin=subprocess.DEVNULL, # Prevent the command to wait for input: instead we want to stop if this happens
+				encoding="utf-8",
+				errors="replace", # Determines how encoding and decoding errors should be handled: replaces invalid characters with a placeholder (e.g., ? in ASCII).
+				bufsize=1, # 1 means line buffered
+			)
 			process = subprocess.Popen(
 				executeFile,
-				env=env,
-				stdout=subprocess.PIPE,
-				stderr=subprocess.STDOUT,
-				stdin=subprocess.DEVNULL,
-				encoding="utf-8",
-				errors="replace",
-				bufsize=1,
+				** (defaultPopenKwargs | popenKwargs)
 			)
 			return process
 
 	def executeCommandAndGetOutput(
 		self,
 		commands: list[str],
-		env: dict[str, str] | None = None,
 		exitIfCommandError: bool = True,
 		log: bool = True,
+		popenKwargs: dict[str, any] = {}
+
 	) -> list[str]:
-		"""Executes commands and captures their output.
+		"""Executes commands and captures their output. See :meth:`CommandExecutor.executeCommands` for more details on the arguments.
 		
 		Args:
 			commands: Shell commands to execute.
-			env: Environment variables for the subprocess.
-			exitIfCommandError: Enable automatic error checking.
+			exitIfCommandError: Whether to insert error checking.
 			log: Enable logging of command output.
+			popenKwargs: Keyword arguments for subprocess.Popen().
 			
 		Returns:
 			Output lines.
 		"""
 		rawCommands = commands.copy()
-		process = self.executeCommands(commands, env, exitIfCommandError)
+		process = self.executeCommands(commands, exitIfCommandError, popenKwargs)
 		with process:
 			return self.getOutput(process, rawCommands, log=log)
 		return

@@ -1,16 +1,15 @@
 import sys
 from pathlib import Path
-import threading
 from subprocess import Popen
 from importlib import import_module
 from abc import abstractmethod
 from multiprocessing.connection import Client, Connection
 from typing import Any
-import psutil
 from types import ModuleType
 
 from cema import logger
 from cema.exceptions import ExecutionException
+from cema.command_executor import CommandExecutor
 
 class Environment:
     def __init__(self, name: str) -> None:
@@ -34,7 +33,6 @@ class ClientEnvironment(Environment):
         super().__init__(name)
         self.port = port
         self.process = process
-        self.stopEvent = threading.Event()
         self.connection: Connection | None = None
 
     def initialize(self) -> None:
@@ -93,17 +91,8 @@ class ClientEnvironment(Environment):
                 if e.args[0] == "handle is closed":
                     pass
             self.connection.close()
-        self.stopEvent.set()
 
-        # Terminate the process and its children
-        if self.process is not None:
-            parent = psutil.Process(self.process.pid)
-            for child in parent.children(recursive=True):  # Get all child processes
-                if child.is_running():
-                    child.kill()
-            if parent.is_running():
-                parent.kill()
-
+        CommandExecutor.killProcess(self.process)
 
 class DirectEnvironment(Environment):
     def __init__(self, name: str) -> None:
