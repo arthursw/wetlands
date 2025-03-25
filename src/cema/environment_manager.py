@@ -1,6 +1,5 @@
 import re
 import platform
-import tempfile
 import subprocess
 import threading
 from importlib import metadata
@@ -17,10 +16,10 @@ class EnvironmentManager:
 	"""Manages Conda environments using micromamba for isolation and dependency management.
 	
 	Attributes:
-		condaBin (str): Name of the micromamba binary.
-		condaBinConfig (str): Configuration command for micromamba.
-		environments (dict[str, Environment]): Active environments managed by this instance.
-		proxies (dict[str, str] | None): Proxy configuration for network requests.
+		settingsManager: SettingsManager(condaPath)
+		dependencyManager: DependencyManager(settingsManager)
+		commandGenerator: CommandGenerator(settingsManager, dependencyManager)
+		commandExecutor: CommandExecutor()
 	"""
 
 	environments: dict[str, Environment] = {}
@@ -200,7 +199,7 @@ class EnvironmentManager:
 			pythonVersion if len(pythonVersion) > 0 else platform.python_version()
 		)
 		createEnvCommands = self.commandGenerator.getActivateCondaComands()
-		createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"]
+		createEnvCommands += [f"{self.settingsManager.condaBin} create -n {environment}{pythonRequirement} -y"]
 		createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
 		createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
 		self.commandExecutor.executeCommandAndGetOutput(createEnvCommands)

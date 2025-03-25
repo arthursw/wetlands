@@ -1,7 +1,6 @@
 import platform
 import subprocess
 import tempfile
-import threading
 import psutil
 from cema import logger
 

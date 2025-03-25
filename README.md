@@ -52,6 +52,12 @@ See the `examples/` folder for a more detailed example.
 - [Conda](https://anaconda.org/)
 - [Micromamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html)
 
+## Development
+
+### Tests
+
+To run the tests with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
+
 ## 📜 License
 
 This project is licensed under the MIT License.

@@ -44,6 +44,13 @@ class CommandGenerator:
 				f'cd "{currentPath}"',
 			]
 
+	def createMambaConfigFile(self, condaPath):
+		"""Create Mamba config file .mambarc in condaPath, with nodefaults and conda-forge channels."""
+		condaPath.mkdir(exist_ok=True, parents=True)
+		with open(condaPath / '.mambarc', 'w') as f:
+			mambaSettings = dict(channel_priority='flexible', channels=['conda-forge', 'nodefaults'], default_channels='conda-forge')
+			yaml.safe_dump(mambaSettings, f)
+
 	def getInstallCondaCommands(self) -> list[str]:
 		"""Generates commands to install micromamba if missing.
 		
@@ -56,10 +63,7 @@ class CommandGenerator:
 		if platform.system() not in ["Windows", "Linux", "Darwin"]:
 			raise Exception(f"Platform {platform.system()} is not supported.")
 		
-		condaPath.mkdir(exist_ok=True, parents=True)
-		with open(condaPath / '.mambarc', 'w') as f:
-			mambaSettings = dict(channel_priority='flexible', channels=['conda-forge', 'nodefaults'], default_channels='conda-forge')
-			yaml.safe_dump(mambaSettings, f)
+		self.createMambaConfigFile(condaPath)
 
 		commands = self.settingsManager.getProxyEnvironmentVariablesCommands()
 		proxyString = self.settingsManager.getProxyString()

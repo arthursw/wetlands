@@ -31,10 +31,10 @@ class SettingsManager:
 					self.proxies = condaConfig["proxies"]
 
 	def setProxies(self, proxies: dict[str, str]) -> None:
-		"""Configures proxy settings for Conda operations.
+		"""Configures proxy settings for Conda operations (see https://www.anaconda.com/docs/tools/working-with-conda/reference/proxy).
 		
 		Args:
-			proxies: Proxy configuration dictionary (e.g., {'http': '...', 'https': '...'}).
+			proxies: Proxy configuration dictionary (e.g., {'http': 'http://username:password@corp.com:8080', 'https': 'https://username:password@corp.com:8080'}).
 			
 		Side Effects:
 			Updates .mambarc configuration file with proxy settings.

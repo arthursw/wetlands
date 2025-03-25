@@ -17,6 +17,7 @@ requires = ["hatchling"]
 
 [dependency-groups]
 dev = [
+    "ipdb>=0.13.13",
     "mypy>=1.15.0",
     "pytest>=8.3.5",
     "ruff>=0.9.6",

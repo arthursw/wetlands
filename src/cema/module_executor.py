@@ -24,7 +24,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(args.environment)
 
-
 def getMessage(connection):
     logger.debug(f"Waiting for message...")
     return connection.recv()

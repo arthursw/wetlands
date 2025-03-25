@@ -113,7 +113,7 @@ class DependencyManager:
 		installDepsCommands += (
 			[
 				f'echo "Installing conda dependencies..."',
-				f"{self.settingsManager.condaBinConfig} install {' '.join(condaDependencies)} -y",
+				f"{self.settingsManager.condaBin} install {' '.join(condaDependencies)} -y",
 			]
 			if len(condaDependencies) > 0
 			else []
@@ -121,7 +121,7 @@ class DependencyManager:
 		installDepsCommands += (
 			[
 				f'echo "Installing conda dependencies without their dependencies..."',
-				f"{self.settingsManager.condaBinConfig} install --no-deps {' '.join(condaDependenciesNoDeps)} -y",
+				f"{self.settingsManager.condaBin} install --no-deps {' '.join(condaDependenciesNoDeps)} -y",
 			]
 			if len(condaDependenciesNoDeps) > 0
 			else []
