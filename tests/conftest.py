@@ -3,6 +3,7 @@ import pytest
 from cema.settings_manager import SettingsManager
 from cema.dependency_manager import DependencyManager
 
+
 @pytest.fixture
 def mock_settings_manager(tmp_path_factory):
     temp_dir = tmp_path_factory.mktemp("conda_env")  # Creates a unique temp directory
@@ -13,6 +14,7 @@ def mock_settings_manager(tmp_path_factory):
     mock.condaBin = "micromamba"
     mock.condaBinConfig = "micromamba --rc-file ~/.mambarc"
     return mock
+
 
 @pytest.fixture
 def mock_dependency_manager():

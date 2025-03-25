@@ -1,6 +1,7 @@
 import pytest
 from cema.command_executor import CommandExecutor
 
+
 @pytest.fixture
 def executor():
     return CommandExecutor()

@@ -11,6 +11,7 @@ from cema import logger
 from cema.exceptions import ExecutionException
 from cema.command_executor import CommandExecutor
 
+
 class Environment:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -47,7 +48,12 @@ class ClientEnvironment(Environment):
             return None
         try:
             connection.send(
-                dict(action="execute", modulePath=modulePath, function=function, args=args)
+                dict(
+                    action="execute",
+                    modulePath=modulePath,
+                    function=function,
+                    args=args,
+                )
             )
             while message := connection.recv():
                 if message["action"] == "execution finished":
@@ -61,7 +67,9 @@ class ClientEnvironment(Environment):
         except EOFError:
             print("Connection closed gracefully by the peer.")
         except BrokenPipeError as e:
-            print(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
+            print(
+                f"Broken pipe. The peer process might have terminated. Exception: {e}."
+            )
 
         # except (PicklingError, TypeError) as e:
         # 	print(f"Failed to serialize the message: {e}")
@@ -93,6 +101,7 @@ class ClientEnvironment(Environment):
             self.connection.close()
 
         CommandExecutor.killProcess(self.process)
+
 
 class DirectEnvironment(Environment):
     def __init__(self, name: str) -> None:
