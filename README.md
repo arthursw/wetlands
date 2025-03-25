@@ -54,9 +54,13 @@ See the `examples/` folder for a more detailed example.
 
 ## Development
 
+### Check & Format
+
+Check for code errors with `uv run ruff check` and format the code with `uv run ruff format`.
+
 ### Tests
 
-To run the tests with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
+Test cema with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
 
 ## 📜 License
 
