@@ -86,7 +86,7 @@ class DependencyManager:
     def getInstallDependenciesCommands(
         self, environment: str, dependencies: Dependencies
     ) -> list[str]:
-        """Generates commands to install dependencies in the given environment. Note: this does not activate conda, use self.getActivateCondaComands() first.
+        """Generates commands to install dependencies in the given environment. Note: this does not activate conda, use self.getActivateCondaCommands() first.
 
         Args:
                 environment: Target environment name.

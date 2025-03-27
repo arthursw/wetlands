@@ -86,7 +86,6 @@ def launchListener():
                             logger.info(f"exit")
                             with lock:
                                 connection.send(dict(action="exited"))
-                            connection.close()
                             listener.close()
                             return
                 except Exception as e:

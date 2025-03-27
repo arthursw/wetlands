@@ -25,5 +25,6 @@ dev = [
     "types-pyyaml>=6.0.12.20241230",
 ]
 
-[tool.ruff.lint]
-ignore = ["E701", "F541"]
+[tool.ruff]
+max-line-length = 120
+lint.ignore = ["E701", "F541"]

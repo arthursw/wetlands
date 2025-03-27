@@ -2,7 +2,6 @@ from pathlib import Path
 
 model = None
 
-
 def segment(
     input_image: Path | str,
     segmentation: Path | str,

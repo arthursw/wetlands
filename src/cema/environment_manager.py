@@ -1,12 +1,9 @@
 import re
 import platform
-import subprocess
-import threading
 from importlib import metadata
 from pathlib import Path
 
-from cema import logger
-from cema.environment import Environment, DirectEnvironment, ClientEnvironment
+from cema.environment import Environment, InternalEnvironment, ExternalEnvironment
 from cema.dependency_manager import Dependencies, DependencyManager
 from cema.command_executor import CommandExecutor
 from cema.command_generator import CommandGenerator
@@ -17,20 +14,27 @@ class EnvironmentManager:
     """Manages Conda environments using micromamba for isolation and dependency management.
 
     Attributes:
+            mainEnvironment: Path of the main conda environment in which cema is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
+            installedPackages: map of the installed packaged (e.g. {pip: ['numpy==2.2.4'], conda=['icu==75.1']})
+            environments: map of the environments
+
             settingsManager: SettingsManager(condaPath)
             dependencyManager: DependencyManager(settingsManager)
             commandGenerator: CommandGenerator(settingsManager, dependencyManager)
             commandExecutor: CommandExecutor()
     """
 
+    mainEnvironment: Path = None
+    installedPackages: dict[str, list[str]] = {}
     environments: dict[str, Environment] = {}
 
-    def __init__(self, condaPath: str | Path = Path("micromamba")) -> None:
+    def __init__(self, condaPath: str | Path = Path("micromamba"), mainEnvironment: str | Path = None) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
         Args:
                 condaPath: Path to the micromamba binary. Defaults to "micromamba".
         """
+        self.mainEnvironment = Path(mainEnvironment) if isinstance(mainEnvironment, str) else mainEnvironment
         self.settingsManager = SettingsManager(condaPath)
         self.dependencyManager = DependencyManager(self.settingsManager)
         self.commandGenerator = CommandGenerator(
@@ -45,7 +49,7 @@ class EnvironmentManager:
                 condaPath: New path to micromamba binary.
 
         Side Effects:
-                Updates condaBinConfig and proxies from the .mambarc file.
+                Updates self.settingsManager.condaBinConfig, and self.settingsManager.proxies from the .mambarc file.
         """
         self.settingsManager.setCondaPath(condaPath)
 
@@ -68,13 +72,10 @@ class EnvironmentManager:
             else condaDependency
         )
 
-    def dependenciesAreInstalled(
-        self, environment: str, dependencies: Dependencies
-    ) -> bool:
-        """Verifies if all specified dependencies are installed in the given environment.
+    def _dependenciesAreInstalled(self, dependencies: Dependencies) -> bool:
+        """Verifies if all specified dependencies are installed in the main environment.
 
         Args:
-                environment: Target environment name.
                 dependencies: Dependencies to check.
 
         Returns:
@@ -86,27 +87,17 @@ class EnvironmentManager:
         pipDependencies, pipDependenciesNoDeps, hasPipDependencies = (
             self.dependencyManager.formatDependencies("pip", dependencies, False)
         )
-
-        installedDependencies = (
-            self.environments[environment].installedDependencies
-            if environment in self.environments
-            else {}
-        )
+        
         if hasCondaDependencies:
-            if "conda" not in installedDependencies:
-                installedDependencies["conda"] = (
-                    self.commandExecutor.executeCommandAndGetOutput(
-                        self.commandGenerator.getActivateCondaComands()
-                        + [
-                            f"{self.settingsManager.condaBin} activate {environment}",
-                            f"{self.settingsManager.condaBin} list -y",
-                        ],
-                        log=False,
-                    )
-                )
+            if self.mainEnvironment is not None and "conda" not in self.installedPackages:
+                commands = self.commandGenerator.getActivateCondaCommands() + [
+                    f"{self.settingsManager.condaBin} activate {self.mainEnvironment}",
+                    f"{self.settingsManager.condaBin} list -y",
+                ]
+                self.installedPackages["conda"] = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
             if not all(
                 [
-                    self._removeChannel(d) in installedDependencies["conda"]
+                    self._removeChannel(d) in self.installedPackages["conda"]
                     for d in condaDependencies + condaDependenciesNoDeps
                 ]
             ):
@@ -114,27 +105,19 @@ class EnvironmentManager:
         if not hasPipDependencies:
             return True
 
-        if "pip" not in installedDependencies:
-            if environment is not None:
-                installedDependencies["pip"] = (
-                    self.commandExecutor.executeCommandAndGetOutput(
-                        self.commandGenerator.getActivateCondaComands()
-                        + [
-                            f"{self.settingsManager.condaBin} activate {environment}",
-                            f"pip freeze",
-                        ],
-                        log=False,
-                    )
-                )
+        if "pip" not in self.installedPackages:
+            if self.mainEnvironment is not None:
+                commands = self.commandGenerator.getActivateCondaCommands() + [f"{self.settingsManager.condaBin} activate {self.mainEnvironment}", f"pip freeze --all"]
+                self.installedPackages["pip"] = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
             else:
-                installedDependencies["pip"] = [
+                self.installedPackages["pip"] = [
                     f"{dist.metadata['Name']}=={dist.version}"
                     for dist in metadata.distributions()
                 ]
 
         return all(
             [
-                d in installedDependencies["pip"]
+                d in self.installedPackages["pip"]
                 for d in pipDependencies + pipDependenciesNoDeps
             ]
         )
@@ -153,63 +136,31 @@ class EnvironmentManager:
         )
         return condaMeta.is_dir()
 
-    def install(
-        self,
-        environment: str,
-        dependencies: Dependencies,
-        additionalInstallCommands: dict[str, list[str]] = {},
-    ) -> None:
-        """Installs dependencies into a Conda environment.
-        See :meth:`EnvironmentManager.create` for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
-
-        Args:
-                environment: Target environment name.
-                dependencies: Dependencies to install.
-                additionalInstallCommands: Platform-specific commands during installation.
-        """
-
-        installCommands = self.commandGenerator.getActivateCondaComands()
-        installCommands += self.commandGenerator.getInstallDependenciesCommands(
-            environment, dependencies
-        )
-        installCommands += self.commandGenerator.getCommandsForCurrentPlatform(
-            additionalInstallCommands
-        )
-        self.commandExecutor.executeCommandAndGetOutput(installCommands)
-        self.environments[environment].installedDependencies = {}
-
     def create(
         self,
         environment: str,
         dependencies: Dependencies,
         additionalInstallCommands: dict[str, list[str]] = {},
-        mainEnvironment: str | None = None,
-        errorIfExists: bool = False,
-    ) -> bool:
-        """Creates a new Conda environment with specified dependencies.
+        forceExternal=False
+    ) -> Environment:
+        """Creates a new Conda environment with specified dependencie or a fake environment if dependencies are met in the main environment (in which case additional install commands will not be called). Return the existing environment if it was already created.
 
         Args:
                 environment: Name for the new environment.
                 dependencies: Dependencies to install, in the form dict(python='3.12.7', conda=['conda-forge::pyimagej==1.5.0', dict(name='openjdk=11', platforms=['osx-64', 'osx-arm64', 'win-64', 'linux-64'], dependencies=True, optional=False)], pip=['numpy==1.26.4']).
                 additionalInstallCommands: Platform-specific commands during installation (e.g. {'mac': ['cd ...', 'wget https://...', 'unzip ...'], 'all'=[], ...}).
-                mainEnvironment: Environment to check for existing dependencies.
-                errorIfExists: Whether to raise error if environment exists.
+                forceExternal: force create external environment even if dependencies are met in main environment
 
         Returns:
-                True if environment was created, False if dependencies already met.
-
-        Raises:
-                Exception: For existing environments when errorIfExists=True.
+                The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
-        if mainEnvironment is not None and self.dependenciesAreInstalled(
-            mainEnvironment, dependencies
-        ):
-            return False
         if self.environmentExists(environment):
-            if errorIfExists:
-                raise Exception(f"Error: the environment {environment} already exists.")
-            else:
-                return True
+            if environment not in self.environments:
+                self.environments[environment] = ExternalEnvironment(environment, self)
+            return self.environments[environment]
+        if not forceExternal and self._dependenciesAreInstalled(dependencies):
+            self.environments[environment] = InternalEnvironment(environment, self)
+            return self.environments[environment]
         pythonVersion = (
             str(dependencies.get("python", "")).replace("=", "")
             if "python" in dependencies and dependencies["python"]
@@ -221,7 +172,7 @@ class EnvironmentManager:
         pythonRequirement = " python=" + (
             pythonVersion if len(pythonVersion) > 0 else platform.python_version()
         )
-        createEnvCommands = self.commandGenerator.getActivateCondaComands()
+        createEnvCommands = self.commandGenerator.getActivateCondaCommands()
         createEnvCommands += [
             f"{self.settingsManager.condaBin} create -n {environment}{pythonRequirement} -y"
         ]
@@ -232,159 +183,14 @@ class EnvironmentManager:
             additionalInstallCommands
         )
         self.commandExecutor.executeCommandAndGetOutput(createEnvCommands)
-        return True
-
-    def environmentIsLaunched(self, environment: str) -> bool:
-        """Checks if an environment is currently running.
-
-        Args:
-                environment: Environment name to check.
-
-        Returns:
-                True if environment process is active.
-        """
-        return (
-            environment in self.environments
-            and self.environments[environment].launched()
-        )
-
-    def logOutput(self, process: subprocess.Popen) -> None:
-        """Logs output from a subprocess.
+        self.environments[environment] = ExternalEnvironment(environment, self)
+        return self.environments[environment]
+    
+    def _removeEnvironment(self, environment: Environment) -> None:
+        """Remove an environment.
 
         Args:
-                process: Subprocess to monitor.
+                environment: instance to remove.
         """
-        if process.stdout is None or process.stdout.readline is None:
-            return
-        try:
-            for line in iter(
-                process.stdout.readline, ""
-            ):  # Use iter to avoid buffering issues:
-                # iter(callable, sentinel) repeatedly calls callable (process.stdout.readline) until it returns the sentinel value ("", an empty string).
-                # Since readline() is called directly in each iteration, it immediately processes available output instead of accumulating it in a buffer.
-                # This effectively forces line-by-line reading in real-time rather than waiting for the subprocess to fill its buffer.
-                logger.info(line.strip())
-        except Exception as e:
-            logger.error(f"Exception in logging thread: {e}")
-        return
-
-    def executeCommandsInEnvironment(
-        self,
-        environment: str,
-        commands: list[str],
-        additionalActivateCommands: dict[str, list[str]] = {},
-        popenKwargs: dict[str, any] = {},
-    ) -> subprocess.Popen:
-        """Executes the given commands in the specified environment.
-
-        Args:
-                environment: Environment name to launch.
-                commands: The commands to execute in the environment.
-                additionalActivateCommands: Platform-specific activation commands.
-                popenKwargs: Keyword arguments for subprocess.Popen(). See :meth:`CommandExecutor.executeCommands`.
-
-        Returns:
-                The launched process.
-        """
-        commands = (
-            self.commandGenerator.getActivateEnvironmentCommands(
-                environment, additionalActivateCommands
-            )
-            + commands
-        )
-        return self.commandExecutor.executeCommands(commands, popenKwargs=popenKwargs)
-
-    def launch(
-        self,
-        environment: str,
-        additionalActivateCommands: dict[str, list[str]] = {},
-        logOutputInThread: bool = True,
-    ) -> Environment:
-        """Launches a server listening for orders in the specified environment.
-
-        Args:
-                environment: Environment name to launch.
-                additionalActivateCommands: Platform-specific activation commands.
-                logOutputInThread: Logs the process output in a separate thread.
-
-        Returns:
-                ClientEnvironment instance for the launched process.
-        """
-        if self.environmentIsLaunched(environment):
-            return self.environments[environment]
-
-        moduleExecutorPath = Path(__file__).parent.resolve() / "module_executor.py"
-        process = self.executeCommandsInEnvironment(
-            environment,
-            [f'python -u "{moduleExecutorPath}" {environment}'],
-            additionalActivateCommands,
-        )
-
-        port = -1
-        if process.stdout is not None:
-            try:
-                for line in process.stdout:
-                    logger.info(line.strip())
-                    if line.strip().startswith("Listening port "):
-                        port = int(line.strip().replace("Listening port ", ""))
-                        break
-            except Exception as e:
-                process.stdout.close()
-                raise e
-        if process.poll() is not None:
-            if process.stdout is not None:
-                process.stdout.close()
-            raise Exception(f"Process exited with return code {process.returncode}.")
-        ce = ClientEnvironment(environment, port, process)
-        if logOutputInThread:
-            threading.Thread(target=self.logOutput, args=[process]).start()
-        self.environments[environment] = ce
-        ce.initialize()
-        return ce
-
-    def createAndLaunch(
-        self,
-        environment: str,
-        dependencies: Dependencies,
-        additionalInstallCommands: dict[str, list[str]] = {},
-        additionalActivateCommands: dict[str, list[str]] = {},
-        mainEnvironment: str | None = None,
-    ) -> Environment:
-        """Creates and/or launches an environment.
-
-        Args:
-                environment: Environment name.
-                dependencies: Dependencies to install.
-                additionalInstallCommands: Platform-specific install commands.
-                additionalActivateCommands: Platform-specific activation commands.
-                mainEnvironment: Environment to check for existing dependencies.
-
-        Returns:
-                Environment instance (ClientEnvironment or DirectEnvironment).
-        """
-        environmentIsRequired = self.create(
-            environment,
-            dependencies,
-            additionalInstallCommands=additionalInstallCommands,
-            mainEnvironment=mainEnvironment,
-        )
-        if environmentIsRequired:
-            return self.launch(
-                environment,
-                additionalActivateCommands=additionalActivateCommands,
-            )
-        else:
-            return DirectEnvironment(environment)
-
-    def exit(self, environment: Environment | str) -> None:
-        """Terminates an environment process and cleans up.
-
-        Args:
-                environment: Environment name or instance to terminate.
-        """
-        environmentName = (
-            environment if isinstance(environment, str) else environment.name
-        )
-        if environmentName in self.environments:
-            self.environments[environmentName]._exit()
-            del self.environments[environmentName]
+        if environment.name in self.environments:
+            del self.environments[environment.name]

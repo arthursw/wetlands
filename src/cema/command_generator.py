@@ -114,7 +114,7 @@ class CommandGenerator:
         commands += self.getShellHookCommands()
         return commands
 
-    def getActivateCondaComands(self) -> list[str]:
+    def getActivateCondaCommands(self) -> list[str]:
         """Generates commands to install (if needed) and activate Conda."""
         commands = self.getInstallCondaCommands()
         return commands + self.getShellHookCommands()
@@ -131,7 +131,7 @@ class CommandGenerator:
         Returns:
                 List of commands to activate the environment
         """
-        commands = self.getActivateCondaComands() + [
+        commands = self.getActivateCondaCommands() + [
             f"{self.settingsManager.condaBin} activate {environment}"
         ]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
