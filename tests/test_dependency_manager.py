@@ -60,7 +60,7 @@ def test_format_dependencies(mock_settings_manager):
     assert len(deps_no_deps) == 0
 
     # Test case where platform is incompatible and non-optional
-    dependencies["conda"][2]["optional"] = False
+    dependencies["conda"][2]["optional"] = False # type: ignore
     with pytest.raises(IncompatibilityException):
         dependency_manager.formatDependencies("conda", dependencies)
 
@@ -82,7 +82,7 @@ def test_get_install_dependencies_commands(mock_settings_manager):
     )
 
     assert any(
-        f'{mock_settings_manager.condaBin} install "numpy" -y' in cmd
+        f'{mock_settings_manager.condaBinConfig} install "numpy" -y' in cmd
         for cmd in commands
     )
     assert any('pip install  "requests"' in cmd for cmd in commands)

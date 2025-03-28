@@ -7,12 +7,6 @@ from pathlib import Path
 from importlib import import_module
 from multiprocessing.connection import Listener
 
-parser = argparse.ArgumentParser(
-    "Cema module executor",
-    "Module executor is executed in a conda environment. It listens to a port and wait for execution orders. When told, it can import a module and execute one of its function.",
-)
-parser.add_argument("environment", help="The name of the execution environment.")
-args = parser.parse_args()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,7 +16,17 @@ logging.basicConfig(
     ],
 )
 
-logger = logging.getLogger(args.environment)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        "Cema module executor",
+        "Module executor is executed in a conda environment. It listens to a port and wait for execution orders. When told, it can import a module and execute one of its function.",
+    )
+    parser.add_argument("environment", help="The name of the execution environment.")
+    args = parser.parse_args()
+
+    logger = logging.getLogger(args.environment)
+else:
+    logger = logging.getLogger("module_executor")
 
 
 def getMessage(connection):
@@ -68,6 +72,7 @@ def launchListener():
             print(f"Listening port {listener.address[1]}")
             with listener.accept() as connection:
                 logger.debug(f"Connection accepted {listener.address}")
+                message = ""
                 try:
                     while message := getMessage(connection):
                         logger.debug(f"Got message: {message}")

@@ -1,3 +1,4 @@
+from cema.dependency_manager import Dependencies
 from cema.environment_manager import EnvironmentManager
 import logging
 import cema
@@ -9,7 +10,7 @@ environmentManager = EnvironmentManager(
     "micromamba"
 )  # if existing conda: use it, otherwise download micromamba
 
-env = environmentManager.create("cellpose", dict(conda=["cellpose==3.1.0"]))
+env = environmentManager.create("cellpose", Dependencies(conda=["cellpose==3.1.0"]))
 env.launch()
 
 # Download example image from cellpose
@@ -27,7 +28,7 @@ example_module = env.importModule('example_module.py')
 example_module.segment(imagePath, segmentationPath)
 
 # Or use env.execute() to call example_module.segment()
-diameters = env.execute("example_module.py", "segment", [imagePath, segmentationPath])
+diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
 
 print(f"Found diameters of {diameters} pixels.")
 

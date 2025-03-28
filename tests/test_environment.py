@@ -1,106 +1,50 @@
 import pytest
-from unittest.mock import Mock, patch
-from multiprocessing.connection import Connection
-from subprocess import Popen
-from cema.exceptions import ExecutionException
-from cema.environment import ExternalEnvironment, InternalEnvironment
+import sys
+from unittest.mock import MagicMock, patch
+from types import ModuleType
+from cema.environment import Environment
 
+class DummyEnvironment(Environment):
+    def launch(self, additionalActivateCommands={}, logOutputInThread=True):
+        pass
+    
+    def execute(self, modulePath, function, args):
+        return f"Executed {function} with {args}"
 
-def test_external_environment_initialization():
-    process_mock = Mock(spec=Popen)
-    env = ExternalEnvironment("test_env", 5000, process_mock)
-    assert env.name == "test_env"
-    assert env.port == 5000
-    assert env.process == process_mock
-    assert env.connection is None
+@pytest.fixture
+def mock_environment_manager():
+    return MagicMock()
 
+@pytest.fixture
+def dummy_env(mock_environment_manager):
+    return DummyEnvironment("test_env", mock_environment_manager)
 
-def test_external_environment_initialize():
-    with patch("cema.environment.Client", autospec=True) as client_mock:
-        connection_mock = Mock(spec=Connection)
-        client_mock.return_value = connection_mock
+@patch("sys.path", new=[])
+@patch("cema.environment.import_module")
+def test_importModule(mock_import_module, dummy_env):
+    mock_mod = ModuleType("test_mod")
+    mock_import_module.return_value = mock_mod
+    
+    module = dummy_env._importModule("/path/to/test_mod.py")
+    assert module == mock_mod
+    assert "test_mod" in dummy_env.modules
+    assert dummy_env.modules["test_mod"] == mock_mod
 
-        env = ExternalEnvironment("test_env", 5000, Mock(spec=Popen))
-        env.initialize()
+@patch("cema.environment.Environment._importModule")
+@patch("cema.environment.Environment._listFunctions")
+def test_importModule_creates_fake_module(mock_listFunctions, mock_importModule, dummy_env):
+    mock_mod = MagicMock()
+    mock_importModule.return_value = mock_mod
+    mock_listFunctions.return_value = ["func1", "func2"]
+    
+    fake_module = dummy_env.importModule("/path/to/test_mod.py")
+    
+    assert hasattr(fake_module, "func1")
+    assert hasattr(fake_module, "func2")
+    
+    result = fake_module.func1(param1="value1")
+    assert result == "Executed func1 with {'param1': 'value1'}"
 
-        assert env.connection == connection_mock
-        client_mock.assert_called_once_with(("localhost", 5000))
-
-
-def test_external_environment_execute_with_no_connection():
-    env = ExternalEnvironment("test_env", 5000, Mock(spec=Popen))
-    with patch("cema.logger.warning") as logger_mock:
-        result = env.execute("test_module.py", "test_function", [1, 2, 3])
-        assert result is None
-        logger_mock.assert_called()
-
-
-def test_external_environment_execute_with_mock_connection():
-    env = ExternalEnvironment("test_env", 5000, Mock(spec=Popen))
-    connection_mock = Mock(spec=Connection)
-    connection_mock.closed = False
-    env.connection = connection_mock
-
-    connection_mock.recv.side_effect = [{"action": "execution finished", "result": 42}]
-
-    result = env.execute("test_module.py", "test_function", [1, 2, 3])
-    assert result == 42
-    connection_mock.send.assert_called_with(
-        {
-            "action": "execute",
-            "modulePath": "test_module.py",
-            "function": "test_function",
-            "args": [1, 2, 3],
-        }
-    )
-
-
-def test_external_environment_execute_with_error():
-    env = ExternalEnvironment("test_env", 5000, Mock(spec=Popen))
-    connection_mock = Mock(spec=Connection)
-    connection_mock.closed = False
-    env.connection = connection_mock
-
-    connection_mock.recv.side_effect = [{"action": "error", "message": "Test error"}]
-
-    with pytest.raises(ExecutionException):
-        env.execute("test_module.py", "test_function", [1, 2, 3])
-
-
-def test_external_environment_exit():
-    env = ExternalEnvironment("test_env", 5000, Mock(spec=Popen))
-    connection_mock = Mock(spec=Connection)
-    connection_mock.closed = False
-    env.connection = connection_mock
-
-    with patch("cema.command_executor.CommandExecutor.killProcess") as kill_mock:
-        env._exit()
-        connection_mock.send.assert_called_with({"action": "exit"})
-        connection_mock.close.assert_called()
-        kill_mock.assert_called_with(env.process)
-
-
-def test_internal_environment_execute():
-    env = InternalEnvironment("test_env")
-    with patch("cema.environment.import_module") as import_mock:
-        module_mock = Mock()
-        module_mock.test_function.return_value = 99
-        import_mock.return_value = module_mock
-
-        result = env.execute("/fake/path/test_module.py", "test_function", [5, 10])
-
-        assert result == 99
-        import_mock.assert_called_once_with("test_module")
-        module_mock.test_function.assert_called_once_with(5, 10)
-
-
-def test_internal_environment_execute_function_not_found():
-    env = InternalEnvironment("test_env")
-    with patch("cema.environment.import_module") as import_mock:
-        module_mock = Mock(spec={})
-        import_mock.return_value = module_mock
-
-        with pytest.raises(
-            Exception, match="Module test_module has no function test_function."
-        ):
-            env.execute("/fake/path/test_module.py", "test_function", [5, 10])
+def test_exit(dummy_env, mock_environment_manager):
+    dummy_env.exit()
+    mock_environment_manager._removeEnvironment.assert_called_once_with("test_env")

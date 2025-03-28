@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, cast
 
 model = None
 
@@ -21,6 +22,7 @@ def segment(
     print("Loading libraries...")
     import cellpose.models
     import cellpose.io
+    import numpy as np
 
     if model is None or model.cp.model_type != model_type:
         print("Loading model...")
@@ -29,12 +31,13 @@ def segment(
         )
 
     print(f"[[2/4]] Load image {input_image}")
-    image = cellpose.io.imread(str(input_image))
+    image = cast(np.ndarray, cellpose.io.imread(str(input_image)))
 
     print("[[3/4]] Compute segmentation", image.shape)
     try:
+        kwargs: Any = dict(diameter=int(diameter)) if auto_diameter else {}
         masks, flows, styles, diams = model.eval(
-            image, diameter=None if auto_diameter else int(diameter), channels=channels
+            image, channels=channels, **kwargs
         )
     except Exception as e:
         print(e)

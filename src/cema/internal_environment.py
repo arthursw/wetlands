@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 class InternalEnvironment(Environment):
 
-    def __init__(self, name: str, environmentManager: EnvironmentManager) -> None:
+    def __init__(self, name: str, environmentManager: 'EnvironmentManager') -> None:
         super().__init__(name, environmentManager)
 
     def install(self, 
@@ -19,7 +19,7 @@ class InternalEnvironment(Environment):
         """Useful in ExternalEnvironment only"""
         raise Exception(f'{self.name} is not a conda environment, it cannot install dependencies. Create a conda environment first with EnvironmentManager.create(force=True).')
     
-    def execute(self, modulePath: str | Path, function: str, args: list) -> Any:
+    def execute(self, modulePath: str | Path, function: str, args: tuple) -> Any:
         """Executes a function in the given module
         
         Args:

@@ -2,11 +2,15 @@ import re
 import platform
 from importlib import metadata
 from pathlib import Path
+import sys
 
-from cema.environment import Environment, InternalEnvironment, ExternalEnvironment
+from cema import environment
+from cema.environment import Environment
+from cema.internal_environment import InternalEnvironment
+from cema.external_environment import ExternalEnvironment
 from cema.dependency_manager import Dependencies, DependencyManager
 from cema.command_executor import CommandExecutor
-from cema.command_generator import CommandGenerator
+from cema.command_generator import Command, CommandGenerator
 from cema.settings_manager import SettingsManager
 
 
@@ -24,11 +28,11 @@ class EnvironmentManager:
             commandExecutor: CommandExecutor()
     """
 
-    mainEnvironment: Path = None
+    mainEnvironment: Path | None = None
     installedPackages: dict[str, list[str]] = {}
     environments: dict[str, Environment] = {}
 
-    def __init__(self, condaPath: str | Path = Path("micromamba"), mainEnvironment: str | Path = None) -> None:
+    def __init__(self, condaPath: str | Path = Path("micromamba"), mainEnvironment: str | Path | None = None) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
         Args:
@@ -81,6 +85,10 @@ class EnvironmentManager:
         Returns:
                 True if all dependencies are installed, False otherwise.
         """
+        # If the version
+        if not sys.version.startswith(dependencies.get("python", "").replace("=", "")):
+            return False
+        
         condaDependencies, condaDependenciesNoDeps, hasCondaDependencies = (
             self.dependencyManager.formatDependencies("conda", dependencies, False)
         )
@@ -89,7 +97,9 @@ class EnvironmentManager:
         )
         
         if hasCondaDependencies:
-            if self.mainEnvironment is not None and "conda" not in self.installedPackages:
+            if self.mainEnvironment is None:
+                return False
+            elif "conda" not in self.installedPackages:
                 commands = self.commandGenerator.getActivateCondaCommands() + [
                     f"{self.settingsManager.condaBin} activate {self.mainEnvironment}",
                     f"{self.settingsManager.condaBin} list -y",
@@ -140,7 +150,7 @@ class EnvironmentManager:
         self,
         environment: str,
         dependencies: Dependencies,
-        additionalInstallCommands: dict[str, list[str]] = {},
+        additionalInstallCommands: Command = {},
         forceExternal=False
     ) -> Environment:
         """Creates a new Conda environment with specified dependencie or a fake environment if dependencies are met in the main environment (in which case additional install commands will not be called). Return the existing environment if it was already created.
@@ -161,11 +171,7 @@ class EnvironmentManager:
         if not forceExternal and self._dependenciesAreInstalled(dependencies):
             self.environments[environment] = InternalEnvironment(environment, self)
             return self.environments[environment]
-        pythonVersion = (
-            str(dependencies.get("python", "")).replace("=", "")
-            if "python" in dependencies and dependencies["python"]
-            else ""
-        )
+        pythonVersion = dependencies.get("python", "").replace("=", "")
         match = re.search(r"(\d+)\.(\d+)", pythonVersion)
         if match and (int(match.group(1)) < 3 or int(match.group(2)) < 9):
             raise Exception("Python version must be greater than 3.8")
@@ -174,7 +180,7 @@ class EnvironmentManager:
         )
         createEnvCommands = self.commandGenerator.getActivateCondaCommands()
         createEnvCommands += [
-            f"{self.settingsManager.condaBin} create -n {environment}{pythonRequirement} -y"
+            f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"
         ]
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(
             environment, dependencies

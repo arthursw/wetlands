@@ -1,3 +1,4 @@
+from functools import partial
 import sys
 from pathlib import Path
 from importlib import import_module
@@ -6,6 +7,8 @@ from typing import Any, TYPE_CHECKING
 from types import ModuleType
 import inspect
 
+from cema.command_generator import Command
+
 if TYPE_CHECKING:
     from cema.environment_manager import EnvironmentManager
 
@@ -13,7 +16,7 @@ class Environment:
     
     modules: dict[str, ModuleType] = {}
 
-    def __init__(self, name: str, environmentManager: EnvironmentManager) -> None:
+    def __init__(self, name: str, environmentManager: 'EnvironmentManager') -> None:
         self.name = name
         self.environmentManager = environmentManager
 
@@ -35,24 +38,25 @@ class Environment:
             self.modules[module] = import_module(module)
         return self.modules[module]
 
-    def importModule(self, modulePath: Path | str):
+    def importModule(self, modulePath: Path | str)-> Any:
         """Imports the given module (if necessary) and returns a fake module object
           that contains the same methods of the module which will be executed within the environment."""
         module = self._importModule(modulePath)
-        fakeModule = object()
+        class FakeModule: pass
         for f in self._listFunctions(module):
-            setattr(fakeModule, f, lambda **args: self.execute(modulePath, f, args))
-        return fakeModule
+            fakeFunction = lambda f=f, *args: self.execute(modulePath, f, args)
+            setattr(FakeModule, f, partial(fakeFunction, f=f))
+        return FakeModule
     
     @abstractmethod
     def launch(self,
-        additionalActivateCommands: dict[str, list[str]] = {},
+        additionalActivateCommands: Command = {},
         logOutputInThread: bool = True) -> None:
         """See :meth:`ExternalEnvironment.launch`"""
         pass
 
     @abstractmethod
-    def execute(self, modulePath: str | Path, function: str, args: list) -> Any:
+    def execute(self, modulePath: str | Path, function: str, args: tuple) -> Any:
         """Execute the given function in the given module. See :meth:`ExternalEnvironment.execute` and :meth:`InternalEnvironment.execute`"""
         pass
 
@@ -67,4 +71,4 @@ class Environment:
     def exit(self) -> None:
         """Exit the environment"""
         self._exit()
-        self.environmentManager._removeEnvironment(self.name)
+        self.environmentManager._removeEnvironment(self)

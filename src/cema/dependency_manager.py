@@ -16,7 +16,7 @@ class Dependency(TypedDict):
 
 
 class Dependencies(TypedDict):
-    python: str
+    python: NotRequired[str]
     conda: NotRequired[list[str | Dependency]]
     pip: NotRequired[list[str | Dependency]]
 
@@ -61,7 +61,7 @@ class DependencyManager:
                 finalDependencies.append(dependency)
             else:
                 currentPlatform = self._platformCondaFormat()
-                platforms = dependency["platforms"]
+                platforms = dependency.get("platforms", "all")
                 if (
                     currentPlatform in platforms
                     or platforms == "all"
@@ -72,7 +72,7 @@ class DependencyManager:
                         finalDependencies.append(dependency["name"])
                     else:
                         finalDependenciesNoDeps.append(dependency["name"])
-                elif not dependency["optional"]:
+                elif not dependency.get("optional", False):
                     platformsString = ", ".join(platforms)
                     raise IncompatibilityException(
                         f"Error: the library {dependency['name']} is not available on this platform ({currentPlatform}). It is only available on the following platforms: {platformsString}."
@@ -106,7 +106,7 @@ class DependencyManager:
         )
         if any("::" in d for d in pipDependencies + pipDependenciesNoDeps):
             raise Exception(
-                f'One pip dependency has a channel specifier "::". Is it a conda dependency?\n\n({dependencies["pip"]})'
+                f'One pip dependency has a channel specifier "::". Is it a conda dependency?\n\n({dependencies.get("pip")})'
             )
         installDepsCommands = (
             self.settingsManager.getProxyEnvironmentVariablesCommands()
@@ -122,7 +122,7 @@ class DependencyManager:
         installDepsCommands += (
             [
                 f'echo "Installing conda dependencies..."',
-                f"{self.settingsManager.condaBin} install {' '.join(condaDependencies)} -y",
+                f"{self.settingsManager.condaBinConfig} install {' '.join(condaDependencies)} -y",
             ]
             if len(condaDependencies) > 0
             else []
@@ -130,7 +130,7 @@ class DependencyManager:
         installDepsCommands += (
             [
                 f'echo "Installing conda dependencies without their dependencies..."',
-                f"{self.settingsManager.condaBin} install --no-deps {' '.join(condaDependenciesNoDeps)} -y",
+                f"{self.settingsManager.condaBinConfig} install --no-deps {' '.join(condaDependenciesNoDeps)} -y",
             ]
             if len(condaDependenciesNoDeps) > 0
             else []

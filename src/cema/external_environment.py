@@ -5,6 +5,7 @@ import threading
 from typing import Any, TYPE_CHECKING
 
 from cema import logger
+from cema.command_generator import Command
 from cema.dependency_manager import Dependencies
 from cema.environment import Environment
 from cema.exceptions import ExecutionException
@@ -15,17 +16,17 @@ if TYPE_CHECKING:
 
 class ExternalEnvironment(Environment):
     
-    port: int = None
-    process: subprocess.Popen = None
-    connection: Connection = None
+    port: int | None = None
+    process: subprocess.Popen | None = None
+    connection: Connection | None = None
 
-    def __init__(self, name: str, environmentManager: EnvironmentManager) -> None:
+    def __init__(self, name: str, environmentManager: 'EnvironmentManager') -> None:
         super().__init__(name, environmentManager)
 
     def executeCommands(self, 
         commands: list[str],
-        additionalActivateCommands: dict[str, list[str]] = {},
-        popenKwargs: dict[str, any] = {}) -> subprocess.Popen:
+        additionalActivateCommands: Command = {},
+        popenKwargs: dict[str, Any] = {}) -> subprocess.Popen:
         """Executes the given commands in this environment.
 
         Args:
@@ -42,11 +43,11 @@ class ExternalEnvironment(Environment):
             )
             + commands
         )
-        return self.commandExecutor.executeCommands(commands, popenKwargs=popenKwargs)
+        return self.environmentManager.commandExecutor.executeCommands(commands, popenKwargs=popenKwargs)
     
     def logOutput(self) -> None:
         """Logs output from the subprocess."""
-        if self.process.stdout is None or self.process.stdout.readline is None:
+        if self.process is None or self.process.stdout is None or self.process.stdout.readline is None:
             return
         try:
             for line in iter(
@@ -61,7 +62,7 @@ class ExternalEnvironment(Environment):
         return
     
     def launch(self,
-        additionalActivateCommands: dict[str, list[str]] = {},
+        additionalActivateCommands: Command = {},
         logOutputInThread: bool = True) -> None:
         """Launches a server listening for orders in the environment.
 
@@ -90,14 +91,16 @@ class ExternalEnvironment(Environment):
             if self.process.stdout is not None:
                 self.process.stdout.close()
             raise Exception(f"Process exited with return code {self.process.returncode}.")
+        if self.port is None:
+            raise Exception(f"Could not find the server port.")
         self.connection = Client(("localhost", self.port))
         
         if logOutputInThread:
-            threading.Thread(target=self.logOutput, args=[self.process]).start()
+            threading.Thread(target=self.logOutput, args=[]).start()
 
     def install(self, 
         dependencies: Dependencies,
-        additionalInstallCommands: dict[str, list[str]] = {}) -> None:
+        additionalInstallCommands: Command = {}) -> None:
         """Installs dependencies.
         See :meth:`EnvironmentManager.create` for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
 
@@ -107,11 +110,11 @@ class ExternalEnvironment(Environment):
         """
 
         installCommands = self.environmentManager.commandGenerator.getActivateCondaCommands()
-        installCommands += self.environmentManager.commandGenerator.getInstallDependenciesCommands(self.name, dependencies)
+        installCommands += self.environmentManager.dependencyManager.getInstallDependenciesCommands(self.name, dependencies)
         installCommands += self.environmentManager.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         self.environmentManager.commandExecutor.executeCommandAndGetOutput(installCommands)
 
-    def execute(self, modulePath: str | Path, function: str, args: list) -> Any:
+    def execute(self, modulePath: str | Path, function: str, args: tuple) -> Any:
         """Executes a function in the given module and return the result.
         
         Args:

@@ -55,7 +55,7 @@ class CommandGenerator:
             mambaSettings = dict(
                 channel_priority="flexible",
                 channels=["conda-forge", "nodefaults"],
-                default_channels="conda-forge",
+                default_channels=["conda-forge"],
             )
             yaml.safe_dump(mambaSettings, f)
 
@@ -77,9 +77,9 @@ class CommandGenerator:
         proxyString = self.settingsManager.getProxyString()
 
         if platform.system() == "Windows":
+            proxyCredentials = ""
             if proxyString is not None:
                 match = re.search(r"^[a-zA-Z]+://(.*?):(.*?)@", proxyString)
-                proxyCredentials = ""
                 if match:
                     username, password = match.groups()
                     commands += [
@@ -120,7 +120,7 @@ class CommandGenerator:
         return commands + self.getShellHookCommands()
 
     def getActivateEnvironmentCommands(
-        self, environment: str, additionalActivateCommands: dict[str, list[str]] = {}
+        self, environment: str, additionalActivateCommands: Command = {}
     ):
         """Generates commands to activate the given environment
 

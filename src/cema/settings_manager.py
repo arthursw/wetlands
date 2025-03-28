@@ -47,7 +47,10 @@ class SettingsManager:
         if condaConfigPath.exists():
             with open(condaConfigPath, "r") as f:
                 condaConfig = yaml.safe_load(f)
-            condaConfig["proxy_servers"] = proxies
+            if proxies:
+                condaConfig["proxy_servers"] = proxies
+            else:
+                del condaConfig["proxy_servers"]
             with open(condaConfigPath, "w") as f:
                 yaml.safe_dump(condaConfig, f)
 

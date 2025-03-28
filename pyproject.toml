@@ -20,6 +20,7 @@ dev = [
     "ipdb>=0.13.13",
     "mypy>=1.15.0",
     "pytest>=8.3.5",
+    "pytest-mock>=3.14.0",
     "ruff>=0.9.6",
     "types-psutil>=6.1.0.20241221",
     "types-pyyaml>=6.0.12.20241230",
