@@ -60,9 +60,7 @@ class SettingsManager:
         Returns:
                 Tuple of (conda directory path, binary relative path).
         """
-        return self.condaPath.resolve(), Path(
-            "bin/micromamba" if platform.system() != "Windows" else "micromamba.exe"
-        )
+        return self.condaPath.resolve(), Path("bin/micromamba" if platform.system() != "Windows" else "micromamba.exe")
 
     def getProxyEnvironmentVariablesCommands(self) -> list[str]:
         """Generates proxy environment variable commands.

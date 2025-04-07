@@ -1,16 +1,18 @@
+import json
 import re
 import platform
 from importlib import metadata
 from pathlib import Path
+import subprocess
 import sys
+from typing import Any, Literal
 
-from cema import environment
 from cema.environment import Environment
 from cema.internal_environment import InternalEnvironment
 from cema.external_environment import ExternalEnvironment
 from cema.dependency_manager import Dependencies, DependencyManager
 from cema.command_executor import CommandExecutor
-from cema.command_generator import Command, CommandGenerator
+from cema.command_generator import Commands, CommandGenerator
 from cema.settings_manager import SettingsManager
 
 
@@ -18,8 +20,8 @@ class EnvironmentManager:
     """Manages Conda environments using micromamba for isolation and dependency management.
 
     Attributes:
-            mainEnvironment: Path of the main conda environment in which cema is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
-            installedPackages: map of the installed packaged (e.g. {pip: ['numpy==2.2.4'], conda=['icu==75.1']})
+            mainEnvironment: The main conda environment in which cema is installed.
+            installedPackages: map of the installed packaged (e.g. {"pip": {"numpy":2.2.4"}, "conda":{"icu":"75.1"}})
             environments: map of the environments
 
             settingsManager: SettingsManager(condaPath)
@@ -28,8 +30,8 @@ class EnvironmentManager:
             commandExecutor: CommandExecutor()
     """
 
-    mainEnvironment: Path | None = None
-    installedPackages: dict[str, list[str]] = {}
+    mainEnvironment: InternalEnvironment
+    installedPackages: dict[str, dict[str, str]] = {}
     environments: dict[str, Environment] = {}
 
     def __init__(self, condaPath: str | Path = Path("micromamba"), mainEnvironment: str | Path | None = None) -> None:
@@ -37,13 +39,12 @@ class EnvironmentManager:
 
         Args:
                 condaPath: Path to the micromamba binary. Defaults to "micromamba".
+                mainEnvironment: Path of the main conda environment in which cema is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
         """
-        self.mainEnvironment = Path(mainEnvironment) if isinstance(mainEnvironment, str) else mainEnvironment
+        self.mainEnvironment = InternalEnvironment(mainEnvironment, self)
         self.settingsManager = SettingsManager(condaPath)
         self.dependencyManager = DependencyManager(self.settingsManager)
-        self.commandGenerator = CommandGenerator(
-            self.settingsManager, self.dependencyManager
-        )
+        self.commandGenerator = CommandGenerator(self.settingsManager, self.dependencyManager)
         self.commandExecutor = CommandExecutor()
 
     def setCondaPath(self, condaPath: str | Path) -> None:
@@ -61,7 +62,7 @@ class EnvironmentManager:
         """Configures proxy settings for Conda operations.
 
         Args:
-                proxies: Proxy configuration dictionary (e.g., {'http': '...', 'https': '...'}).
+                proxies: Proxy configuration dictionary (e.g., {"http": "...", "https": "..."}).
 
         Side Effects:
                 Updates .mambarc configuration file with proxy settings.
@@ -69,11 +70,18 @@ class EnvironmentManager:
         self.settingsManager.setProxies(proxies)
 
     def _removeChannel(self, condaDependency: str) -> str:
-        """Removes channel prefix from a Conda dependency string (e.g., 'channel::package' -> 'package')."""
-        return (
-            condaDependency.split("::")[1]
-            if "::" in condaDependency
-            else condaDependency
+        """Removes channel prefix from a Conda dependency string (e.g., "channel::package" -> "package")."""
+        return condaDependency.split("::")[1] if "::" in condaDependency else condaDependency
+
+    def checkRequirement(self, dependency: str, packageManager: Literal["pip", "conda"]) -> bool:
+        if packageManager == "conda":
+            dependency = self._removeChannel(dependency)
+        nameVersion = dependency.split("==")
+        return any(
+            [
+                nameVersion[0] == name and (len(nameVersion) == 1 or version.startswith(nameVersion[1]))
+                for name, version in self.installedPackages[packageManager].items()
+            ]
         )
 
     def _dependenciesAreInstalled(self, dependencies: Dependencies) -> bool:
@@ -85,52 +93,58 @@ class EnvironmentManager:
         Returns:
                 True if all dependencies are installed, False otherwise.
         """
-        # If the version
+
         if not sys.version.startswith(dependencies.get("python", "").replace("=", "")):
             return False
-        
-        condaDependencies, condaDependenciesNoDeps, hasCondaDependencies = (
-            self.dependencyManager.formatDependencies("conda", dependencies, False)
+
+        condaDependencies, condaDependenciesNoDeps, hasCondaDependencies = self.dependencyManager.formatDependencies(
+            "conda", dependencies, False, False
         )
-        pipDependencies, pipDependenciesNoDeps, hasPipDependencies = (
-            self.dependencyManager.formatDependencies("pip", dependencies, False)
+        pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.dependencyManager.formatDependencies(
+            "pip", dependencies, False, False
         )
-        
+
         if hasCondaDependencies:
-            if self.mainEnvironment is None:
+            if self.mainEnvironment.name is None:
                 return False
             elif "conda" not in self.installedPackages:
                 commands = self.commandGenerator.getActivateCondaCommands() + [
-                    f"{self.settingsManager.condaBin} activate {self.mainEnvironment}",
-                    f"{self.settingsManager.condaBin} list -y",
+                    f"{self.settingsManager.condaBin} activate {self.mainEnvironment.name}",
+                    f"{self.settingsManager.condaBin} list --json",
                 ]
-                self.installedPackages["conda"] = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
-            if not all(
-                [
-                    self._removeChannel(d) in self.installedPackages["conda"]
-                    for d in condaDependencies + condaDependenciesNoDeps
-                ]
-            ):
+                condaList = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
+
+                json_output = "".join(condaList)
+                conda_list = json.loads(json_output)
+
+                for package_info in conda_list:
+                    name = package_info.get("name")
+                    version = package_info.get("version")
+                    if name and version:
+                        if "conda" not in self.installedPackages:
+                            self.installedPackages["conda"] = {}
+                        self.installedPackages["conda"][name] = version
+
+            if not all([self.checkRequirement(d, "conda") for d in condaDependencies + condaDependenciesNoDeps]):
                 return False
         if not hasPipDependencies:
             return True
 
         if "pip" not in self.installedPackages:
-            if self.mainEnvironment is not None:
-                commands = self.commandGenerator.getActivateCondaCommands() + [f"{self.settingsManager.condaBin} activate {self.mainEnvironment}", f"pip freeze --all"]
-                self.installedPackages["pip"] = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
-            else:
-                self.installedPackages["pip"] = [
-                    f"{dist.metadata['Name']}=={dist.version}"
-                    for dist in metadata.distributions()
+            if self.mainEnvironment.name is not None:
+                commands = self.commandGenerator.getActivateCondaCommands() + [
+                    f"{self.settingsManager.condaBin} activate {self.mainEnvironment.name}",
+                    f"pip freeze --all",
                 ]
+                output = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
+                parsedOutput = [o.split("==") for o in output if "==" in o]
+                self.installedPackages["pip"] = {name: version for name, version in parsedOutput}
+            else:
+                self.installedPackages["pip"] = {
+                    dist.metadata["Name"]: dist.version for dist in metadata.distributions()
+                }
 
-        return all(
-            [
-                d in self.installedPackages["pip"]
-                for d in pipDependencies + pipDependenciesNoDeps
-            ]
-        )
+        return all([self.checkRequirement(d, "pip") for d in pipDependencies + pipDependenciesNoDeps])
 
     def environmentExists(self, environment: str) -> bool:
         """Checks if a Conda environment exists.
@@ -141,24 +155,22 @@ class EnvironmentManager:
         Returns:
                 True if environment exists, False otherwise.
         """
-        condaMeta = (
-            Path(self.settingsManager.condaPath) / "envs" / environment / "conda-meta"
-        )
+        condaMeta = Path(self.settingsManager.condaPath) / "envs" / environment / "conda-meta"
         return condaMeta.is_dir()
 
     def create(
         self,
         environment: str,
-        dependencies: Dependencies,
-        additionalInstallCommands: Command = {},
-        forceExternal=False
+        dependencies: Dependencies = {},
+        additionalInstallCommands: Commands = {},
+        forceExternal=False,
     ) -> Environment:
-        """Creates a new Conda environment with specified dependencie or a fake environment if dependencies are met in the main environment (in which case additional install commands will not be called). Return the existing environment if it was already created.
+        """Creates a new Conda environment with specified dependencie or the main environment if dependencies are met in the main environment and forceExternal is False (in which case additional install commands will not be called). Return the existing environment if it was already created.
 
         Args:
-                environment: Name for the new environment.
-                dependencies: Dependencies to install, in the form dict(python='3.12.7', conda=['conda-forge::pyimagej==1.5.0', dict(name='openjdk=11', platforms=['osx-64', 'osx-arm64', 'win-64', 'linux-64'], dependencies=True, optional=False)], pip=['numpy==1.26.4']).
-                additionalInstallCommands: Platform-specific commands during installation (e.g. {'mac': ['cd ...', 'wget https://...', 'unzip ...'], 'all'=[], ...}).
+                environment: Name for the new environment. Ignore if dependencies are already installed in the main environment and forceExternal is False.
+                dependencies: Dependencies to install, in the form dict(python="3.12.7", conda=["conda-forge::pyimagej==1.5.0", dict(name="openjdk=11", platforms=["osx-64", "osx-arm64", "win-64", "linux-64"], dependencies=True, optional=False)], pip=["numpy==1.26.4"]).
+                additionalInstallCommands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
                 forceExternal: force create external environment even if dependencies are met in main environment
 
         Returns:
@@ -169,29 +181,63 @@ class EnvironmentManager:
                 self.environments[environment] = ExternalEnvironment(environment, self)
             return self.environments[environment]
         if not forceExternal and self._dependenciesAreInstalled(dependencies):
-            self.environments[environment] = InternalEnvironment(environment, self)
-            return self.environments[environment]
+            return self.mainEnvironment
         pythonVersion = dependencies.get("python", "").replace("=", "")
         match = re.search(r"(\d+)\.(\d+)", pythonVersion)
         if match and (int(match.group(1)) < 3 or int(match.group(2)) < 9):
             raise Exception("Python version must be greater than 3.8")
-        pythonRequirement = " python=" + (
-            pythonVersion if len(pythonVersion) > 0 else platform.python_version()
-        )
+        pythonRequirement = " python=" + (pythonVersion if len(pythonVersion) > 0 else platform.python_version())
         createEnvCommands = self.commandGenerator.getActivateCondaCommands()
-        createEnvCommands += [
-            f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"
-        ]
-        createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(
-            environment, dependencies
-        )
-        createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(
-            additionalInstallCommands
-        )
+        createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"]
+        createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
+        createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         self.commandExecutor.executeCommandAndGetOutput(createEnvCommands)
         self.environments[environment] = ExternalEnvironment(environment, self)
         return self.environments[environment]
-    
+
+    def install(
+        self, environmentName: str | None, dependencies: Dependencies, additionalInstallCommands: Commands = {}
+    ) -> list[str]:
+        """Installs dependencies.
+        See :meth:`EnvironmentManager.create` for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
+
+        Args:
+                environmentName: The environment to install dependencies.
+                dependencies: Dependencies to install.
+                additionalInstallCommands: Platform-specific commands during installation.
+
+        Returns:
+                Output lines of the installation commands.
+        """
+        installCommands = self.commandGenerator.getActivateCondaCommands()
+        installCommands += self.dependencyManager.getInstallDependenciesCommands(environmentName, dependencies)
+        installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
+        return self.commandExecutor.executeCommandAndGetOutput(installCommands)
+
+    def executeCommands(
+        self,
+        environmentName: str | None,
+        commands: Commands,
+        additionalActivateCommands: Commands = {},
+        popenKwargs: dict[str, Any] = {},
+    ) -> subprocess.Popen:
+        """Executes the given commands in the given environment.
+
+        Args:
+                environmentName: The environment in which to execute commands.
+                commands: The commands to execute in the environment.
+                additionalActivateCommands: Platform-specific activation commands.
+                popenKwargs: Keyword arguments for subprocess.Popen(). See :meth:`CommandExecutor.executeCommands`.
+
+        Returns:
+                The launched process.
+        """
+        activateCommands = self.commandGenerator.getActivateEnvironmentCommands(
+            environmentName, additionalActivateCommands
+        )
+        platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
+        return self.commandExecutor.executeCommands(activateCommands + platformCommands, popenKwargs=popenKwargs)
+
     def _removeEnvironment(self, environment: Environment) -> None:
         """Remove an environment.
 

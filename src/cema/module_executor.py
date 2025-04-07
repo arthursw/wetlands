@@ -40,10 +40,10 @@ def functionExecutor(lock, connection, message):
         sys.path.append(str(modulePath.parent))
         module = import_module(modulePath.stem)
         if not hasattr(module, message["function"]):
-            raise Exception(
-                f"Module {modulePath} has no function {message['function']}."
-            )
-        result = getattr(module, message["function"])(*message["args"])
+            raise Exception(f"Module {modulePath} has no function {message['function']}.")
+        args = message.get("args", [])
+        kwargs = message.get("kwargs", {})
+        result = getattr(module, message["function"])(*args, **kwargs)
         logger.info(f"Executed")
         with lock:
             connection.send(
@@ -77,9 +77,7 @@ def launchListener():
                     while message := getMessage(connection):
                         logger.debug(f"Got message: {message}")
                         if message["action"] == "execute":
-                            logger.info(
-                                f"Execute {message['modulePath']}.{message['function']}({message['args']})"
-                            )
+                            logger.info(f"Execute {message['modulePath']}.{message['function']}({message['args']})")
 
                             thread = threading.Thread(
                                 target=functionExecutor,

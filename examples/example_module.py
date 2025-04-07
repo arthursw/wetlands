@@ -3,6 +3,7 @@ from typing import Any, cast
 
 model = None
 
+
 def segment(
     input_image: Path | str,
     segmentation: Path | str,
@@ -26,9 +27,7 @@ def segment(
 
     if model is None or model.cp.model_type != model_type:
         print("Loading model...")
-        model = cellpose.models.Cellpose(
-            gpu=True if use_gpu == "True" else False, model_type=model_type
-        )
+        model = cellpose.models.Cellpose(gpu=True if use_gpu == "True" else False, model_type=model_type)
 
     print(f"[[2/4]] Load image {input_image}")
     image = cast(np.ndarray, cellpose.io.imread(str(input_image)))
@@ -36,9 +35,7 @@ def segment(
     print("[[3/4]] Compute segmentation", image.shape)
     try:
         kwargs: Any = dict(diameter=int(diameter)) if auto_diameter else {}
-        masks, flows, styles, diams = model.eval(
-            image, channels=channels, **kwargs
-        )
+        masks, flows, styles, diams = model.eval(image, channels=channels, **kwargs)
     except Exception as e:
         print(e)
         raise e

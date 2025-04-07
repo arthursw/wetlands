@@ -17,17 +17,11 @@ def test_get_install_conda_commands_exists(mock_exists, command_generator):
 
 
 @patch("platform.system", return_value="Windows")
-def test_get_install_conda_commands_windows(
-    mock_platform, command_generator, mock_settings_manager
-):
+def test_get_install_conda_commands_windows(mock_platform, command_generator, mock_settings_manager):
     commands = command_generator.getInstallCondaCommands()
     condaPath, condaBinPath = mock_settings_manager.getCondaPaths()
-    assert any(
-        re.match(r"Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands
-    )
-    assert any(
-        re.match(rf'\$Env\:MAMBA_ROOT_PREFIX\="{condaPath}"', cmd) for cmd in commands
-    )
+    assert any(re.match(r"Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands)
+    assert any(re.match(rf'\$Env\:MAMBA_ROOT_PREFIX\="{condaPath}"', cmd) for cmd in commands)
     assert any(
         re.match(
             rf"\.\\{condaBinPath} shell hook -s powershell \| Out-String \| Invoke-Expression",
@@ -38,19 +32,12 @@ def test_get_install_conda_commands_windows(
 
 
 @patch("platform.system", return_value="Linux")
-def test_get_install_conda_commands_linux(
-    mock_platform, command_generator, mock_settings_manager
-):
+def test_get_install_conda_commands_linux(mock_platform, command_generator, mock_settings_manager):
     commands = command_generator.getInstallCondaCommands()
     condaPath, condaBinPath = mock_settings_manager.getCondaPaths()
     assert any(re.match(r"curl.* -Ls.*micromamba", cmd) for cmd in commands)
-    assert any(
-        re.match(rf'export MAMBA_ROOT_PREFIX="{condaPath}"', cmd) for cmd in commands
-    )
-    assert any(
-        re.match(rf'eval "\$\({condaBinPath} shell hook -s posix\)"', cmd)
-        for cmd in commands
-    )
+    assert any(re.match(rf'export MAMBA_ROOT_PREFIX="{condaPath}"', cmd) for cmd in commands)
+    assert any(re.match(rf'eval "\$\({condaBinPath} shell hook -s posix\)"', cmd) for cmd in commands)
 
 
 @patch("platform.system", return_value="Darwin")
@@ -82,9 +69,5 @@ def test_get_platform_common_name_windows(mock_platform, command_generator):
     ],
 )
 @patch("platform.system", return_value="Linux")
-def test_get_commands_for_current_platform(
-    mock_platform, command_generator, additional_commands, expected
-):
-    assert (
-        command_generator.getCommandsForCurrentPlatform(additional_commands) == expected
-    )
+def test_get_commands_for_current_platform(mock_platform, command_generator, additional_commands, expected):
+    assert command_generator.getCommandsForCurrentPlatform(additional_commands) == expected

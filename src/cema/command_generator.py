@@ -9,19 +9,20 @@ from cema.settings_manager import SettingsManager
 from cema.dependency_manager import DependencyManager
 
 
-class Command(TypedDict):
-    all: NotRequired[str]
+class CommandsDict(TypedDict):
+    all: NotRequired[list[str]]
     linux: NotRequired[list[str]]
     mac: NotRequired[list[str]]
     windows: NotRequired[list[str]]
 
 
+type Commands = CommandsDict | list[str]
+
+
 class CommandGenerator:
     """Generate Conda commands."""
 
-    def __init__(
-        self, settingsManager: SettingsManager, dependencyManager: DependencyManager
-    ):
+    def __init__(self, settingsManager: SettingsManager, dependencyManager: DependencyManager):
         self.settingsManager = settingsManager
         self.dependencyManager = dependencyManager
 
@@ -59,6 +60,30 @@ class CommandGenerator:
             )
             yaml.safe_dump(mambaSettings, f)
 
+    def getPlatformCommonName(self) -> str:
+        """Gets common platform name (mac/linux/windows)."""
+        return "mac" if platform.system() == "Darwin" else platform.system().lower()
+
+    def toCommandsDict(self, commands: Commands) -> CommandsDict:
+        return {"all": commands} if isinstance(commands, list) else commands
+
+    def getCommandsForCurrentPlatform(self, additionalCommands: Commands = {}) -> list[str]:
+        """Selects platform-specific commands from a dictionary.
+
+        Args:
+                additionalCommands: Dictionary mapping platforms to command lists (e.g. dict(all=[], linux=['wget "http://something.cool"']) ).
+
+        Returns:
+                Merged list of commands for 'all' and current platform.
+        """
+        commands = []
+        if additionalCommands is None:
+            return commands
+        additionalCommandsDict = self.toCommandsDict(additionalCommands)
+        for name in ["all", self.getPlatformCommonName()]:
+            commands += additionalCommandsDict.get(name, [])
+        return commands
+
     def getInstallCondaCommands(self) -> list[str]:
         """Generates commands to install micromamba if missing.
 
@@ -89,11 +114,7 @@ class CommandGenerator:
                         "$proxyCredentials = New-Object System.Management.Automation.PSCredential($proxyUsername, $securePassword)",
                     ]
                     proxyCredentials = f"-ProxyCredential $proxyCredentials"
-            proxyArgs = (
-                f"-Proxy {proxyString} {proxyCredentials}"
-                if proxyString is not None
-                else ""
-            )
+            proxyArgs = f"-Proxy {proxyString} {proxyCredentials}" if proxyString is not None else ""
             commands += [
                 f'Set-Location -Path "{condaPath}"',
                 f'echo "Installing Visual C++ Redistributable if necessary..."',
@@ -120,41 +141,19 @@ class CommandGenerator:
         return commands + self.getShellHookCommands()
 
     def getActivateEnvironmentCommands(
-        self, environment: str, additionalActivateCommands: Command = {}
-    ):
+        self, environment: str | None, additionalActivateCommands: Commands = {}
+    ) -> list[str]:
         """Generates commands to activate the given environment
 
         Args:
-                environment: Environment name to launch.
+                environment: Environment name to launch. If none, the resulting command list will be empty.
                 additionalActivateCommands: Platform-specific activation commands.
 
         Returns:
                 List of commands to activate the environment
         """
-        commands = self.getActivateCondaCommands() + [
-            f"{self.settingsManager.condaBin} activate {environment}"
-        ]
+        if environment is None:
+            return []
+        commands = self.getActivateCondaCommands()
+        commands += [f"{self.settingsManager.condaBin} activate {environment}"]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
-
-    def getPlatformCommonName(self) -> str:
-        """Gets common platform name (mac/linux/windows)."""
-        return "mac" if platform.system() == "Darwin" else platform.system().lower()
-
-    def getCommandsForCurrentPlatform(
-        self, additionalCommands: Command = {}
-    ) -> list[str]:
-        """Selects platform-specific commands from a dictionary.
-
-        Args:
-                additionalCommands: Dictionary mapping platforms to command lists (e.g. dict(all=[], linux=['wget "http://something.cool"']) ).
-
-        Returns:
-                Merged list of commands for 'all' and current platform.
-        """
-        commands = []
-        if additionalCommands is None:
-            return commands
-        for name in ["all", self.getPlatformCommonName()]:
-            if name in additionalCommands:
-                commands += additionalCommands[name]
-        return commands

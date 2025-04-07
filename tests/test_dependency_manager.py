@@ -1,4 +1,5 @@
 import pytest
+import re
 import platform
 from unittest.mock import MagicMock
 from cema.exceptions import IncompatibilityException
@@ -47,20 +48,16 @@ def test_format_dependencies(mock_settings_manager):
     platform_mock.return_value = "linux-64"
     dependency_manager._platformCondaFormat = platform_mock
 
-    deps, deps_no_deps, has_deps = dependency_manager.formatDependencies(
-        "conda", dependencies
-    )
+    deps, deps_no_deps, has_deps = dependency_manager.formatDependencies("conda", dependencies)
 
     assert '"numpy"' in deps
     assert '"tensorflow"' in deps  # tensorflow should be included as platform matches
-    assert (
-        '"pandas"' not in deps
-    )  # pandas should be excluded as platform does not match
+    assert '"pandas"' not in deps  # pandas should be excluded as platform does not match
     assert has_deps is True
     assert len(deps_no_deps) == 0
 
     # Test case where platform is incompatible and non-optional
-    dependencies["conda"][2]["optional"] = False # type: ignore
+    dependencies["conda"][2]["optional"] = False  # type: ignore
     with pytest.raises(IncompatibilityException):
         dependency_manager.formatDependencies("conda", dependencies)
 
@@ -69,20 +66,20 @@ def test_get_install_dependencies_commands(mock_settings_manager):
     dependency_manager = DependencyManager(mock_settings_manager)
     dependencies: Dependencies = {
         "python": "3.9",
-        "conda": ["numpy"],
-        "pip": ["requests"],
+        "conda": ["numpy", {"name": "stardist==0.9.1", "dependencies": False}],
+        "pip": ["requests", {"name": "cellpose==3.1.0", "dependencies": False}],
     }
 
     platform_mock = MagicMock()
     platform_mock.return_value = "linux-64"
     dependency_manager._platformCondaFormat = platform_mock
 
-    commands = dependency_manager.getInstallDependenciesCommands(
-        "envName", dependencies
-    )
+    commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
 
+    assert any(re.match(rf'{mock_settings_manager.condaBinConfig} install "numpy" -y', cmd) for cmd in commands)
     assert any(
-        f'{mock_settings_manager.condaBinConfig} install "numpy" -y' in cmd
+        re.match(rf'{mock_settings_manager.condaBinConfig} install --no-deps "stardist==0.9.1" -y', cmd)
         for cmd in commands
     )
-    assert any('pip install  "requests"' in cmd for cmd in commands)
+    assert any(re.match(r'pip\s+install\s+"requests"', cmd) for cmd in commands)
+    assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)

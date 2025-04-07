@@ -1,6 +1,7 @@
 import platform
 import subprocess
 import tempfile
+from typing import Any
 import psutil
 from cema import logger
 
@@ -88,27 +89,21 @@ class CommandExecutor:
                     line = line.strip()
                 if log:
                     logger.info(line)
-                if (
-                    "CondaSystemExit" in line
-                ):  # Sometime conda exists with a CondaSystemExit and a return code 0
+                if "CondaSystemExit" in line:  # Sometime conda exists with a CondaSystemExit and a return code 0
                     # we want to stop our script when this happens (and not run the later commands)
                     self.killProcess(process)
-                    raise Exception(
-                        f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.'
-                    )
+                    raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
                 outputs.append(line)
         process.wait()
         if process.returncode != 0:
-            raise Exception(
-                f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.'
-            )
+            raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
         return outputs
 
     def executeCommands(
         self,
         commands: list[str],
         exitIfCommandError: bool = True,
-        popenKwargs: dict[str, any] = {},
+        popenKwargs: dict[str, Any] = {},
     ) -> subprocess.Popen:
         """Executes shell commands in a subprocess.
 
@@ -121,9 +116,7 @@ class CommandExecutor:
                 Subprocess handle for the executed commands.
         """
         logger.debug(f"Execute commands: {commands}")
-        with tempfile.NamedTemporaryFile(
-            suffix=".ps1" if self._isWindows() else ".sh", mode="w", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".ps1" if self._isWindows() else ".sh", mode="w", delete=False) as tmp:
             if exitIfCommandError:
                 commands = self._insertCommandErrorChecks(commands)
             tmp.write("\n".join(commands))
@@ -146,17 +139,15 @@ class CommandExecutor:
             if not self._isWindows():
                 subprocess.run(["chmod", "u+x", tmp.name])
             logger.debug(f"Script file: {tmp.name}")
-            defaultPopenKwargs = dict(
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr and stdout to handle all them with a single loop
-                stdin=subprocess.DEVNULL,  # Prevent the command to wait for input: instead we want to stop if this happens
-                encoding="utf-8",
-                errors="replace",  # Determines how encoding and decoding errors should be handled: replaces invalid characters with a placeholder (e.g., ? in ASCII).
-                bufsize=1,  # 1 means line buffered
-            )
-            process = subprocess.Popen(
-                executeFile, **(defaultPopenKwargs | popenKwargs)
-            )
+            defaultPopenKwargs = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,  # Merge stderr and stdout to handle all them with a single loop
+                "stdin": subprocess.DEVNULL,  # Prevent the command to wait for input: instead we want to stop if this happens
+                "encoding": "utf-8",
+                "errors": "replace",  # Determines how encoding and decoding errors should be handled: replaces invalid characters with a placeholder (e.g., ? in ASCII).
+                "bufsize": 1,  # 1 means line buffered
+            }
+            process = subprocess.Popen(executeFile, **(defaultPopenKwargs | popenKwargs))
             return process
 
     def executeCommandAndGetOutput(
@@ -164,7 +155,7 @@ class CommandExecutor:
         commands: list[str],
         exitIfCommandError: bool = True,
         log: bool = True,
-        popenKwargs: dict[str, any] = {},
+        popenKwargs: dict[str, Any] = {},
     ) -> list[str]:
         """Executes commands and captures their output. See :meth:`CommandExecutor.executeCommands` for more details on the arguments.
 

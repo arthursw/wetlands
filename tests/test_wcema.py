@@ -1,7 +1,9 @@
+from multiprocessing.connection import Client
+from typing import cast
 import pytest
+from cema.dependency_manager import Dependencies
 from cema.environment_manager import EnvironmentManager, InternalEnvironment
 from cema.exceptions import IncompatibilityException
-import subprocess
 import os
 import platform
 from pathlib import Path
@@ -14,6 +16,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+
 @pytest.fixture(scope="module")
 def env_manager(tmp_path_factory):
     # Setup temporary conda root
@@ -22,23 +25,21 @@ def env_manager(tmp_path_factory):
     # Basic environment configuration
     manager = EnvironmentManager(temp_root)
     yield manager
-    
-    for env_name, env in manager.environments.items():
+
+    for env_name, env in manager.environments.copy().items():
         logger.info(f"Exiting environment {env_name}")
         env.exit()
 
     # Clean temp directory handled by pytest
-    print(f'Removing {temp_root}')
+    print(f"Removing {temp_root}")
 
-def test_dependency_installation(env_manager):
-    """Test that EnvironmentManager.create() correctly installs dependencies."""
+
+def test_environment_creation(env_manager):
+    """Test that EnvironmentManager.create() correctly create an environment and installs dependencies."""
     env_name = "test_env_deps"
     logger.info(f"Testing dependency installation: {env_name}")
-    dependencies = {"conda": ["requests"]}
+    dependencies = Dependencies({"conda": ["requests"]})
     env = env_manager.create(env_name, dependencies)
-
-    # Get the micromamba path used by the env_manager
-    micromamba_path = env_manager.settingsManager.condaPath
 
     # Verify that 'requests' is installed
 
@@ -53,6 +54,28 @@ def test_dependency_installation(env_manager):
     env.exit()
 
 
+def test_dependency_installation(env_manager):
+    """Test that EnvironmentManager.install() correctly installs dependencies."""
+    env_name = "test_env_deps"
+    logger.info(f"Testing dependency installation: {env_name}")
+    env = cast(ExternalEnvironment, env_manager.create(env_name))
+    dependencies = Dependencies({"pip": ["numpy==2.2.0"], "conda": ["bioimageit::noise2self==1.0"]})
+    env.install(dependencies)
+
+    # Verify that 'numpy' and 'noise2self' is installed
+    commands = env_manager.commandGenerator.getActivateCondaCommands() + [
+        f"{env_manager.settingsManager.condaBin} activate {env_name}",
+        f"{env_manager.settingsManager.condaBin} list -y",
+        f"pip freeze --all",
+    ]
+    installedCondaPackages = env_manager.commandExecutor.executeCommandAndGetOutput(commands, log=False)
+
+    assert any("noise2self" in icp for icp in installedCondaPackages)
+    assert any("numpy" in icp for icp in installedCondaPackages)
+
+    env.exit()
+
+
 def test_internal_external_environment(env_manager):
     """Test that EnvironmentManager.create() correctly creates internal/external environments."""
 
@@ -60,6 +83,7 @@ def test_internal_external_environment(env_manager):
     # No dependencies: InternalEnvironment
     env_internal = env_manager.create("test_env_internal", {})
     assert isinstance(env_internal, InternalEnvironment)
+    assert env_internal == env_manager.mainEnvironment
 
     # With dependencies: ExternalEnvironment
     env_external = env_manager.create("test_env_external", {"conda": ["requests"]})
@@ -109,7 +133,7 @@ def test_mambarc_modification(env_manager, tmp_path):
         content = f.read()
         assert "http: http://proxy.example.com" in content
         assert "https: https://proxy.example.com" in content
-    
+
     env_manager.setProxies({})
 
     with open(mambarc_path, "r") as f:
@@ -130,16 +154,32 @@ def test_code_execution(env_manager, tmp_path):
     with open(module_path, "w") as f:
         f.write(
             """
-import numpy as np
-def my_function(x):
-    return np.sum(x)
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    pass
+
+def sum(x):
+    return int(np.sum(x))
+
+def prod(x=[], y=1):
+    return int(np.prod(x)) * y
 """
         )
     env = env_manager.create(env_name, dependencies)
     env.launch()
     # Execute the function within the environment
-    result = env.execute(str(module_path), "my_function", [[1, 2, 3]])
+    result = env.execute(str(module_path), "sum", [[1, 2, 3]])
     assert result == 6
+    result = env.execute(str(module_path), "prod", [[1, 2, 3]], {"y": 2})
+    assert result == 12
+
+    # Test with importModule
+    module = env.importModule(str(module_path))
+    result = module.sum([1, 2, 3])
+    assert result == 6
+    result = module.prod([1, 2, 3], y=3)
+    assert result == 18
 
     env.exit()
 
@@ -154,7 +194,7 @@ def test_non_existent_function(env_manager, tmp_path):
     with open(module_path, "w") as f:
         f.write(
             """
-def my_function(x):
+def double(x):
     return x * 2
 """
         )
@@ -164,6 +204,12 @@ def my_function(x):
     with pytest.raises(Exception) as excinfo:
         env.execute(str(module_path), "non_existent_function", [1])
     assert "has no function" in str(excinfo.value)
+
+    module = env.importModule(str(module_path))
+    with pytest.raises(Exception) as excinfo:
+        module.non_existent_function(1)
+
+    assert "has no attribute" in str(excinfo.value)
 
     env.exit()
 
@@ -177,4 +223,53 @@ def test_non_existent_module(env_manager):
     with pytest.raises(ModuleNotFoundError):
         env.execute("non_existent_module.py", "my_function", [1])
 
+    with pytest.raises(ModuleNotFoundError):
+        env.importModule("non_existent_module.py")
+
     env.exit()
+
+
+def test_advanced_execution(env_manager, tmp_path):
+    env = env_manager.create("advanced_test", Dependencies(conda=["numpy"]))
+
+    module_path = tmp_path / "test_module.py"
+    with open(module_path, "w") as f:
+        f.write("""from multiprocessing.connection import Listener
+import sys
+import numpy as np
+
+with Listener(("localhost", 0)) as listener:
+    print(f"Listening port {listener.address[1]}")
+    with listener.accept() as connection:
+        while message := connection.recv():
+            if message["action"] == "execute_prod":
+                connection.send(int(np.prod(message["args"])))
+            if message["action"] == "execute_sum":
+                connection.send(int(np.sum(message["args"])))
+            if message["action"] == "exit":
+                connection.send(dict(action="exited"))
+                sys.exit()
+    """)
+
+    process = env.executeCommands([f"python -u {(tmp_path / 'test_module.py').resolve()}"])
+
+    port = 0
+    if process.stdout is not None:
+        for line in process.stdout:
+            if line.strip().startswith("Listening port "):
+                port = int(line.strip().replace("Listening port ", ""))
+                break
+
+    connection = Client(("localhost", port))
+
+    connection.send(dict(action="execute_sum", args=[1, 2, 3, 4]))
+    result = connection.recv()
+    assert result == 10
+
+    connection.send(dict(action="execute_prod", args=[1, 2, 3, 4]))
+    result = connection.recv()
+    assert result == 24
+
+    connection.send(dict(action="exit"))
+    result = connection.recv()
+    assert result["action"] == "exited"
