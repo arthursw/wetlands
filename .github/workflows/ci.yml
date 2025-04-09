@@ -30,6 +30,6 @@ jobs:
         run: pip install uv
 
       - name: Install docs dependencies
-        run: uv pip install ".[docs]"
+        run: uv pip install ".[docs]" --system
 
       - run: mkdocs gh-deploy --force
