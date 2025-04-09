@@ -4,11 +4,11 @@ from multiprocessing.connection import Client, Connection
 import threading
 from typing import Any, TYPE_CHECKING
 
-from cema import logger
-from cema.command_generator import Commands
+from cema.logger import logger
+from cema._internal.command_generator import Commands
 from cema.environment import Environment
-from cema.exceptions import ExecutionException
-from cema.command_executor import CommandExecutor
+from cema._internal.exceptions import ExecutionException
+from cema._internal.command_executor import CommandExecutor
 
 if TYPE_CHECKING:
     from cema.environment_manager import EnvironmentManager
@@ -44,7 +44,7 @@ class ExternalEnvironment(Environment):
                 logOutputInThread: Logs the process output in a separate thread.
         """
 
-        moduleExecutorPath = Path(__file__).parent.resolve() / "module_executor.py"
+        moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / "module_executor.py"
 
         commands = self.environmentManager.commandGenerator.getActivateEnvironmentCommands(
             self.name, additionalActivateCommands

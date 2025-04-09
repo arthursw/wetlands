@@ -7,8 +7,8 @@ from typing import Any, TYPE_CHECKING
 from types import ModuleType
 import inspect
 
-from cema.command_generator import Commands
-from cema.dependency_manager import Dependencies
+from cema._internal.command_generator import Commands
+from cema._internal.dependency_manager import Dependencies
 
 if TYPE_CHECKING:
     from cema.environment_manager import EnvironmentManager

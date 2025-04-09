@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 from typing import Any
 import psutil
-from cema import logger
+from cema.logger import logger
 
 
 class CommandExecutor:
@@ -115,7 +115,7 @@ class CommandExecutor:
         Returns:
                 Subprocess handle for the executed commands.
         """
-        logger.debug(f"Execute commands: {commands}")
+        logger.debug(f"Execute commands:\n\n\t\t{'\n\t\t'.join(commands)}\n")
         with tempfile.NamedTemporaryFile(suffix=".ps1" if self._isWindows() else ".sh", mode="w", delete=False) as tmp:
             if exitIfCommandError:
                 commands = self._insertCommandErrorChecks(commands)

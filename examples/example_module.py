@@ -21,9 +21,9 @@ def segment(
 
     print(f"[[1/4]] Load libraries and model {model_type}")
     print("Loading libraries...")
-    import cellpose.models
-    import cellpose.io
-    import numpy as np
+    import cellpose.models  # type: ignore
+    import cellpose.io  # type: ignore
+    import numpy as np  # type: ignore
 
     if model is None or model.cp.model_type != model_type:
         print("Loading model...")

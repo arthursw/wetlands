@@ -1,14 +1,13 @@
-from cema.dependency_manager import Dependencies
 from cema.environment_manager import EnvironmentManager
-import logging
-import cema
 import requests
 
-cema.setLogLevel(logging.DEBUG)
+# Initialize the environment manager
+# Cema will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
+# otherwise it will automatically download and install Micromamba in a self-contained manner.
+environmentManager = EnvironmentManager("micromamba/")
 
-environmentManager = EnvironmentManager("micromamba")  # if existing conda: use it, otherwise download micromamba
-
-env = environmentManager.create("cellpose", Dependencies(conda=["cellpose==3.1.0"]))
+# Create and launch an isolated Conda environment named "cellpose"
+env = environmentManager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
 env.launch()
 
 # Download example image from cellpose
@@ -19,15 +18,16 @@ with open(imagePath, "wb") as handler:
 
 segmentationPath = imagePath.replace(".png", "_segmentation.png")
 
-# Import example_module and execute example_module.segment()
+# Import example_module in the environment
 example_module = env.importModule("example_module.py")
-# example_module is a fake module with the functions of example_module.py,
-# when called, those function will run the env.execute(module_name, function_name, args)
-example_module.segment(imagePath, segmentationPath)
+# example_module is a proxy to example_module.py in the environment,
+# calling example_module.function_name(args) will run env.execute(module_name, function_name, args)
+diameters = example_module.segment(imagePath, segmentationPath)
 
-# Or use env.execute() to call example_module.segment()
-diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
+# Or use env.execute() directly
+# diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
 
 print(f"Found diameters of {diameters} pixels.")
 
+# Clean up and exit the environment
 env.exit()

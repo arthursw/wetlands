@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from cema.exceptions import ExecutionException
+from cema._internal.exceptions import ExecutionException
 from cema.external_environment import ExternalEnvironment
 
 
@@ -73,7 +73,7 @@ def test_execute_error(mock_client):
         env.execute("module.py", "func", (1, 2, 3))
 
 
-@patch("cema.command_executor.CommandExecutor.killProcess")
+@patch("cema._internal.command_executor.CommandExecutor.killProcess")
 def test_exit(mock_kill):
     env = ExternalEnvironment("test_env", MagicMock())
     env.connection = MagicMock()

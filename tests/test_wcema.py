@@ -1,16 +1,17 @@
 from multiprocessing.connection import Client
 from typing import cast
-import pytest
-from cema.dependency_manager import Dependencies
-from cema.environment_manager import EnvironmentManager, InternalEnvironment
-from cema.exceptions import IncompatibilityException
 import os
 import platform
 from pathlib import Path
+import logging
+import pytest
 
+from cema._internal.dependency_manager import Dependencies
+from cema.internal_environment import InternalEnvironment
+from cema._internal.exceptions import IncompatibilityException
+from cema.environment_manager import EnvironmentManager
 from cema.external_environment import ExternalEnvironment
 
-import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

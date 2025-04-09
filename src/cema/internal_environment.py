@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from cema.command_generator import Commands
+from cema._internal.command_generator import Commands
 from cema.environment import Environment
 
 if TYPE_CHECKING:

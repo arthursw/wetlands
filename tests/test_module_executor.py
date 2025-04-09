@@ -1,7 +1,7 @@
 import threading
 from unittest.mock import MagicMock, patch
 
-from cema import module_executor
+from cema._internal import module_executor
 
 
 def test_functionExecutor():
@@ -10,7 +10,7 @@ def test_functionExecutor():
     mock_module = MagicMock()
     mock_module.test_func.return_value = "success"
 
-    with patch("sys.path", []), patch("cema.module_executor.import_module", return_value=mock_module):
+    with patch("sys.path", []), patch("cema._internal.module_executor.import_module", return_value=mock_module):
         message = {"modulePath": "test_module.py", "function": "test_func", "args": []}
         module_executor.functionExecutor(lock, mock_connection, message)
 
@@ -27,7 +27,7 @@ def test_functionExecutor_invalid_function():
 
     del mock_module.non_existent_func  # This ensures the attribute does not exist
 
-    with patch("sys.path", []), patch("cema.module_executor.import_module", return_value=mock_module):
+    with patch("sys.path", []), patch("cema._internal.module_executor.import_module", return_value=mock_module):
         message = {"modulePath": "test_module.py", "function": "non_existent_func", "args": []}
         module_executor.functionExecutor(lock, mock_connection, message)
 
@@ -39,8 +39,8 @@ def test_functionExecutor_invalid_function():
 
 def test_launchListener():
     with (
-        patch("cema.module_executor.Listener") as MockListener,
-        patch("cema.module_executor.getMessage", side_effect=[{"action": "exit"}]),
+        patch("cema._internal.module_executor.Listener") as MockListener,
+        patch("cema._internal.module_executor.getMessage", side_effect=[{"action": "exit"}]),
     ):
         mock_listener = MockListener.return_value.__enter__.return_value
         mock_connection = mock_listener.accept.return_value.__enter__.return_value

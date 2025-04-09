@@ -1,7 +1,7 @@
 import re
 from unittest.mock import patch
 import pytest
-from cema.command_generator import CommandGenerator
+from cema._internal.command_generator import CommandGenerator
 
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 

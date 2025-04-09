@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 import pytest
-from cema.settings_manager import SettingsManager
-from cema.dependency_manager import DependencyManager
+from cema._internal.settings_manager import SettingsManager
+from cema._internal.dependency_manager import DependencyManager
 
 
 @pytest.fixture

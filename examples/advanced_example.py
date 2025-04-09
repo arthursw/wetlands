@@ -1,12 +1,15 @@
 from multiprocessing.connection import Client
+import subprocess
 import sys
 import threading
-from cema.dependency_manager import Dependencies
-from cema.environment_manager import EnvironmentManager
 import logging
-import cema
 
-cema.setLogLevel(logging.DEBUG)
+from cema._internal.dependency_manager import Dependencies
+from cema.environment_manager import EnvironmentManager
+from cema import logger
+
+
+logger.setLogLevel(logging.DEBUG)
 
 environmentManager = EnvironmentManager("micromamba")
 
@@ -25,18 +28,23 @@ for line in process.stdout:
 connection = Client(("localhost", port))
 
 
-def logOutput() -> None:
+def logOutput(process: subprocess.Popen) -> None:
     for line in iter(process.stdout.readline, ""):  # type: ignore
         print(line.strip())
 
 
-threading.Thread(target=logOutput, args=[process]).start()
+thread = threading.Thread(target=logOutput, args=[process]).start()
 
 imagePath = "cellpose_img02.png"
+print(f"Download image {imagePath}")
 connection.send(dict(action="execute", function="downloadImage", args=[imagePath]))
 result = connection.recv()
-print(result)
+print(result["message"])
 
 segmentationPath = imagePath.replace(".png", "_segmentation.png")
+print(f"Segment image {imagePath}")
 connection.send(dict(action="execute", function="segmentImage", args=[imagePath, segmentationPath]))
-print(connection.recv())
+result = connection.recv()
+print(result["message"])
+
+connection.send(dict(action="exit"))

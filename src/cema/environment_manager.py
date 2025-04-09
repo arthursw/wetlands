@@ -7,13 +7,13 @@ import subprocess
 import sys
 from typing import Any, Literal
 
-from cema.environment import Environment
 from cema.internal_environment import InternalEnvironment
+from cema._internal.dependency_manager import Dependencies, DependencyManager
+from cema._internal.command_executor import CommandExecutor
+from cema._internal.command_generator import Commands, CommandGenerator
+from cema._internal.settings_manager import SettingsManager
+from cema.environment import Environment
 from cema.external_environment import ExternalEnvironment
-from cema.dependency_manager import Dependencies, DependencyManager
-from cema.command_executor import CommandExecutor
-from cema.command_generator import Commands, CommandGenerator
-from cema.settings_manager import SettingsManager
 
 
 class EnvironmentManager:
@@ -73,7 +73,8 @@ class EnvironmentManager:
         """Removes channel prefix from a Conda dependency string (e.g., "channel::package" -> "package")."""
         return condaDependency.split("::")[1] if "::" in condaDependency else condaDependency
 
-    def checkRequirement(self, dependency: str, packageManager: Literal["pip", "conda"]) -> bool:
+    def _checkRequirement(self, dependency: str, packageManager: Literal["pip", "conda"]) -> bool:
+        """Check if dependency is installed (exists in self.installedPackages[packageManager])"""
         if packageManager == "conda":
             dependency = self._removeChannel(dependency)
         nameVersion = dependency.split("==")
@@ -125,7 +126,7 @@ class EnvironmentManager:
                             self.installedPackages["conda"] = {}
                         self.installedPackages["conda"][name] = version
 
-            if not all([self.checkRequirement(d, "conda") for d in condaDependencies + condaDependenciesNoDeps]):
+            if not all([self._checkRequirement(d, "conda") for d in condaDependencies + condaDependenciesNoDeps]):
                 return False
         if not hasPipDependencies:
             return True
@@ -144,7 +145,7 @@ class EnvironmentManager:
                     dist.metadata["Name"]: dist.version for dist in metadata.distributions()
                 }
 
-        return all([self.checkRequirement(d, "pip") for d in pipDependencies + pipDependenciesNoDeps])
+        return all([self._checkRequirement(d, "pip") for d in pipDependencies + pipDependenciesNoDeps])
 
     def environmentExists(self, environment: str) -> bool:
         """Checks if a Conda environment exists.
@@ -163,7 +164,7 @@ class EnvironmentManager:
         environment: str,
         dependencies: Dependencies = {},
         additionalInstallCommands: Commands = {},
-        forceExternal=False,
+        forceExternal: bool = False,
     ) -> Environment:
         """Creates a new Conda environment with specified dependencie or the main environment if dependencies are met in the main environment and forceExternal is False (in which case additional install commands will not be called). Return the existing environment if it was already created.
 

@@ -9,8 +9,8 @@ import pytest
 from cema.environment_manager import EnvironmentManager
 from cema.internal_environment import InternalEnvironment
 from cema.external_environment import ExternalEnvironment
-from cema.dependency_manager import Dependencies
-from cema.command_generator import Commands
+from cema._internal.dependency_manager import Dependencies
+from cema._internal.command_generator import Commands
 
 # --- Fixtures ---
 
@@ -223,7 +223,7 @@ def test_dependencies_are_installed_conda_ok_pip_missing(environment_manager_fix
 
 def test_dependencies_are_installed_no_main_env_conda_fails(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment = None
+    manager.mainEnvironment.name = None
     manager.installedPackages = {}
     dependencies: Dependencies = {"conda": ["some_package"]}
 
@@ -235,7 +235,7 @@ def test_dependencies_are_installed_no_main_env_conda_fails(environment_manager_
 
 def test_dependencies_are_installed_no_main_env_pip_uses_metadata(environment_manager_fixture, monkeypatch):
     manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment = None
+    manager.mainEnvironment.name = None
     manager.installedPackages = {}
     dependencies: Dependencies = {"pip": ["pytest"]}  # Assume pytest is installed in test runner env
 

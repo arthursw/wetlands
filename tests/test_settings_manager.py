@@ -1,7 +1,7 @@
 from pathlib import Path
 import platform
 from unittest.mock import patch, mock_open
-from cema.settings_manager import SettingsManager
+from cema._internal.settings_manager import SettingsManager
 
 
 def test_initialization():
