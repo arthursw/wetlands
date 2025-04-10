@@ -20,11 +20,16 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+  features:
+    - navigation.expand
 extra:
   version:
     provider: mike
 
 nav:
+- Overview: index.md
+- Getting Started: getting_started.md
+- Advanced example: advanced_example.md
 - Code Reference: reference/  
 
 plugins:
@@ -41,6 +46,8 @@ plugins:
           show_symbol_type_heading: true
 
 markdown_extensions:
+  - admonition
+  - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -48,3 +55,4 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  

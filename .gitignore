@@ -2,9 +2,10 @@ __pycache__/
 .mypy_cache/
 .venv/
 .ruff_cache/
+.pytest_cache/
 .DS_Store
 uv.lock
 micromamba/
 *.log
 *.png
-.aider*
+reference.md

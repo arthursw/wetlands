@@ -4,7 +4,6 @@ import sys
 import threading
 import logging
 
-from cema._internal.dependency_manager import Dependencies
 from cema.environment_manager import EnvironmentManager
 from cema import logger
 
@@ -13,13 +12,16 @@ logger.setLogLevel(logging.DEBUG)
 
 environmentManager = EnvironmentManager("micromamba")
 
-env = environmentManager.create("advanced_cellpose", Dependencies(conda=["cellpose==3.1.0"]))
+env = environmentManager.create("advanced_cellpose", {"conda": ["cellpose==3.1.0"]})
 
 process = env.executeCommands(["python -u advanced_example_module.py"])
 
 port = 0
+
 if process.stdout is None:
-    sys.exit()
+    print("Process has no stdout stream.", file=sys.stderr)
+    sys.exit(1)
+
 for line in process.stdout:
     if line.strip().startswith("Listening port "):
         port = int(line.strip().replace("Listening port ", ""))
@@ -39,12 +41,18 @@ imagePath = "cellpose_img02.png"
 print(f"Download image {imagePath}")
 connection.send(dict(action="execute", function="downloadImage", args=[imagePath]))
 result = connection.recv()
-print(result["message"])
+print(f"Received response: {result}")
 
 segmentationPath = imagePath.replace(".png", "_segmentation.png")
 print(f"Segment image {imagePath}")
 connection.send(dict(action="execute", function="segmentImage", args=[imagePath, segmentationPath]))
 result = connection.recv()
-print(result["message"])
+print(f"Received response: {result}")
+if "diameters" in result:
+    print(f"Object diameters: {result['diameters']}")
 
 connection.send(dict(action="exit"))
+connection.close()
+process.wait(timeout=10)
+if process.returncode is None:
+    process.kill()

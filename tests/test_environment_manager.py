@@ -73,7 +73,7 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 
     # Don't create main_env_path directory, let the manager handle checks
 
-    manager = EnvironmentManager(condaPath=dummy_micromamba_path, mainEnvironment=main_env_path)
+    manager = EnvironmentManager(condaPath=dummy_micromamba_path, mainCondaEnvironmentPath=main_env_path)
 
     # Apply the mocks to the specific instance's commandExecutor
     monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])

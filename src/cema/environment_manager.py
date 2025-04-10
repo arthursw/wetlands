@@ -34,14 +34,16 @@ class EnvironmentManager:
     installedPackages: dict[str, dict[str, str]] = {}
     environments: dict[str, Environment] = {}
 
-    def __init__(self, condaPath: str | Path = Path("micromamba"), mainEnvironment: str | Path | None = None) -> None:
+    def __init__(
+        self, condaPath: str | Path = Path("micromamba"), mainCondaEnvironmentPath: str | Path | None = None
+    ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
         Args:
                 condaPath: Path to the micromamba binary. Defaults to "micromamba".
-                mainEnvironment: Path of the main conda environment in which cema is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
+                mainCondaEnvironmentPath: Path of the main conda environment in which cema is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
         """
-        self.mainEnvironment = InternalEnvironment(mainEnvironment, self)
+        self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath)
         self.dependencyManager = DependencyManager(self.settingsManager)
         self.commandGenerator = CommandGenerator(self.settingsManager, self.dependencyManager)

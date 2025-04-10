@@ -9,9 +9,9 @@ environmentManager = EnvironmentManager("micromamba/")
 env = environmentManager.create("numpy", {"pip": ["numpy==2.2.4"]})
 env.launch()
 
-# Import example_module in the environment, see example_module.py below
+# Import minimal_module in the environment, see minimal_module.py below
 minimal_module = env.importModule("minimal_module.py")
-# example_module is a proxy to example_module.py in the environment
+# minimal_module is a proxy to minimal_module.py in the environment
 array = [1, 2, 3]
 result = minimal_module.sum(array)
 

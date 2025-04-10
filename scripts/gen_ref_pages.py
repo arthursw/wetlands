@@ -24,7 +24,7 @@ for path in sorted(src.rglob("cema/*.py")):
     elif parts[-1] == "logger":
         continue
 
-    nav[parts] = doc_path.as_posix()
+    nav[parts[1:-1] + (parts[-1].replace("_", " ").capitalize(),)] = doc_path.as_posix()
 
     with mkdocs_gen_files.open(full_doc_path, "w") as fd:
         identifier = ".".join(parts)
