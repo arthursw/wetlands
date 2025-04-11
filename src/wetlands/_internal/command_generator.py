@@ -1,7 +1,13 @@
 from pathlib import Path
 import platform
 import re
-from typing import NotRequired, TypedDict
+
+try:
+    from typing import NotRequired, TypedDict  # type: ignore
+except ImportError:
+    from typing_extensions import NotRequired, TypedDict
+
+from typing import Union
 
 import yaml
 
@@ -16,7 +22,7 @@ class CommandsDict(TypedDict):
     windows: NotRequired[list[str]]
 
 
-type Commands = CommandsDict | list[str]
+Commands = Union[CommandsDict, list[str]]
 
 
 class CommandGenerator:
