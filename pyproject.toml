@@ -5,7 +5,7 @@ description = "Wetlands is a lightweight library to create conda environment and
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "psutil>=6.1.0",
     "pyyaml>=6.0.2",

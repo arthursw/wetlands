@@ -12,6 +12,7 @@ permissions:
 jobs:
 
   lint:
+    if: "!contains(github.event.head_commit.message, '[skip tests]')" # skip the job if the commit message contains "[skip tests]"
     name: Lint
     runs-on: ubuntu-latest
     steps:
@@ -27,6 +28,7 @@ jobs:
         run: uv run ruff check
 
   test:
+    if: "!contains(github.event.head_commit.message, '[skip tests]')" # skip the job if the commit message contains "[skip tests]"
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
@@ -45,6 +47,7 @@ jobs:
         run: uv run pytest test
 
   deploy:
+    if: always() # if: always() ensures the deploy job runs even if lint and test were skipped — but still requires them to finish successfully if they did run.
     name: Deploy
     needs: [lint, test]
     runs-on: ubuntu-latest
