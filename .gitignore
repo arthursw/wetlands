@@ -10,4 +10,5 @@ uv.lock
 micromamba/
 *.log
 *.png
+!Wetland.png
 reference.md

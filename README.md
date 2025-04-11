@@ -3,7 +3,7 @@
 ------
 
 ![Wetlands pypi](https://img.shields.io/pypi/v/wetlands.svg)
-![Python versions](https://img.shields.io/pypi/pyversions/pytest.svg)
+![Python versions](https://img.shields.io/pypi/pyversions/wetlands.svg)
 
 # Wetlands - Conda Environment Manager
 
