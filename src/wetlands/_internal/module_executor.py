@@ -42,7 +42,7 @@ else:
     logger = logging.getLogger("module_executor")
 
 
-def getMessage(connection: Connection)-> dict:
+def getMessage(connection: Connection) -> dict:
     """
     Waits for and receives a message from the given connection.
 
@@ -108,7 +108,7 @@ def functionExecutor(lock: threading.Lock, connection: Connection, message: dict
 
 def launchListener():
     """
-    Launches a listener on a random available port on localhost. 
+    Launches a listener on a random available port on localhost.
     Waits for client connections and handles incoming execution or exit messages.
 
     Workflow:

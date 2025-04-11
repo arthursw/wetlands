@@ -4,7 +4,7 @@
 
 **Wetlands** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
 
-The name **Wetlands** comes from the tropical *environnement* where Anacondas thrive.
+The name ***Wetlands*** comes from the tropical *environnements* where Anacondas thrive.
 
 ## ✨ Features
 

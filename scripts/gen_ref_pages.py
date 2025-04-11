@@ -10,8 +10,13 @@ root = Path(__file__).parent.parent
 src = root / "src"
 
 # files = sorted(src.rglob("wetlands/*.py"))
-file_names = ['environment_manager.py', 'environment.py', 'internal_environment.py', 'external_environment.py'] # define manually to force rendering order
-files = [src / 'wetlands' / f for f in file_names] + sorted(src.rglob("wetlands/_internal/*.py"))
+file_names = [
+    "environment_manager.py",
+    "environment.py",
+    "internal_environment.py",
+    "external_environment.py",
+]  # define manually to force rendering order
+files = [src / "wetlands" / f for f in file_names] + sorted(src.rglob("wetlands/_internal/*.py"))
 
 for path in files:
     module_path = path.relative_to(src).with_suffix("")
@@ -22,7 +27,7 @@ for path in files:
 
     if parts[-1] in ["__init__", "__main__", "logger"]:
         continue
-    
+
     display_name = parts[-1].replace("_", " ").capitalize()
     display_parts = parts[1:-1] + (display_name,)
     display_parts = tuple([dp.replace("_", "") for dp in display_parts])
