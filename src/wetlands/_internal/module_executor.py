@@ -30,7 +30,7 @@ logging.basicConfig(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        "Cema module executor",
+        "Wetlands module executor",
         "Module executor is executed in a conda environment. It listens to a port and waits for execution orders. "
         "When instructed, it can import a module and execute one of its functions.",
     )

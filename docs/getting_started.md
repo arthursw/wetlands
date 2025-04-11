@@ -1,9 +1,9 @@
 
-### Simplified Execution with [`env.importModule`][cema.environment.Environment.importModule]
+### Simplified Execution with [`env.importModule`][wetlands.environment.Environment.importModule]
 
-To demonstrates the most straightforward way to use Cema, we will create an environment, install `cellpose`, and run a segmentation function defined in a separate file ([`example_module.py`](https://github.com/arthursw/cema/blob/main/examples/example_module.py)) within that isolated environment.
+To demonstrates the most straightforward way to use Wetlands, we will create an environment, install `cellpose`, and run a segmentation function defined in a separate file ([`example_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/example_module.py)) within that isolated environment.
 
-Let's see the main script [`getting_started.py`](https://github.com/arthursw/cema/blob/main/examples/getting_started.py) step by step. 
+Let's see the main script [`getting_started.py`](https://github.com/arthursw/wetlands/blob/main/examples/getting_started.py) step by step. 
 
 We will segment the image `img02.png` (available [here](https://www.cellpose.org/static/images/img02.png)).
 
@@ -14,10 +14,10 @@ segmentationPath = "img02_segmentation.png"
 
 #### 1. Initialize the Environment Manager
 
-We start by initializing the [EnvironmentManager][cema.environment_manager.EnvironmentManager]. We provide a path (`"micromamba/"`) where Cema should look for an existing Micromamba installation or where it should download and set up a new one if it's not found.
+We start by initializing the [EnvironmentManager][wetlands.environment_manager.EnvironmentManager]. We provide a path (`"micromamba/"`) where Wetlands should look for an existing Micromamba installation or where it should download and set up a new one if it's not found.
 
 ```python
-from cema.environment_manager import EnvironmentManager
+from wetlands.environment_manager import EnvironmentManager
 import requests
 from pathlib import Path
 
@@ -26,11 +26,11 @@ environmentManager = EnvironmentManager("micromamba/")
 
 !!! note
     
-    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument, useful if Cema is used in a conda environment (e.g. `environmentManager = EnvironmentManager("micromamba/", "/path/to/project/environment/")`). Cema will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Cema communication server.
+    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument, useful if Wetlands is used in a conda environment (e.g. `environmentManager = EnvironmentManager("micromamba/", "/path/to/project/environment/")`). Wetlands will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Wetlands communication server.
 
 #### 2. Create (or get) an Environment and Install Dependencies
 
-Next, we define and create the Conda environment. We give it a name (`"cellpose_env"`) and specify its dependencies using a dictionary. Here, we require `cellpose` version 3.1.0, to be installed via Conda. If an environment with this name already exists, Cema will use it (and *ignore the dependencies*); otherwise, it will create it and install the specified dependencies. The `create` method returns an `Environment` object.
+Next, we define and create the Conda environment. We give it a name (`"cellpose_env"`) and specify its dependencies using a dictionary. Here, we require `cellpose` version 3.1.0, to be installed via Conda. If an environment with this name already exists, Wetlands will use it (and *ignore the dependencies*); otherwise, it will create it and install the specified dependencies. The `create` method returns an `Environment` object.
 
 ```python
 env = environmentManager.create(
@@ -41,11 +41,11 @@ env = environmentManager.create(
 
 !!! note
 
-    If a `mainCondaEnvironmentPath` was provided when instanciating the `EnvironmentManager`, Cema will check if `cellpose==3.1.0` is already installed in the main environment and return it if it is the case. If `mainCondaEnvironmentPath` is not provided but the required dependencies are only pip packages, Cema will check if the dependencies are installed in the current python environment and return it if it is the case.
+    If a `mainCondaEnvironmentPath` was provided when instanciating the `EnvironmentManager`, Wetlands will check if `cellpose==3.1.0` is already installed in the main environment and return it if it is the case. If `mainCondaEnvironmentPath` is not provided but the required dependencies are only pip packages, Wetlands will check if the dependencies are installed in the current python environment and return it if it is the case.
 
 #### 3. Launch the Environment's Communication Server
 
-For Cema to execute code within the isolated environment (using [`importModule`][cema.environment.Environment.importModule] or [`execute`][cema.environment.Environment.execute]), we need to launch its background communication server. This server runs as a separate process *inside* the `cellpose_env` and listens for commands from our main script.
+For Wetlands to execute code within the isolated environment (using [`importModule`][wetlands.environment.Environment.importModule] or [`execute`][wetlands.environment.Environment.execute]), we need to launch its background communication server. This server runs as a separate process *inside* the `cellpose_env` and listens for commands from our main script.
 
 ```python
 env.launch()
@@ -53,7 +53,7 @@ env.launch()
 
 #### 4. Import and Execute Code in the Environment via Proxy
 
-This is where the core Cema interaction happens. We use [`env.importModule("example_module.py")`][cema.environment.Environment.importModule] to gain access to the functions defined in `example_module.py`. Cema doesn't actually import the module into the main process; instead, it returns a *proxy object*. When we call a method on this proxy object (like `example_module.segment(...)`), Cema intercepts the call, sends the function name and arguments to the server running in the `cellpose_env`, executes the *real* function there, and returns the result back to the main script. File paths and other pickleable arguments are automatically transferred.
+This is where the core Wetlands interaction happens. We use [`env.importModule("example_module.py")`][wetlands.environment.Environment.importModule] to gain access to the functions defined in `example_module.py`. Wetlands doesn't actually import the module into the main process; instead, it returns a *proxy object*. When we call a method on this proxy object (like `example_module.segment(...)`), Wetlands intercepts the call, sends the function name and arguments to the server running in the `cellpose_env`, executes the *real* function there, and returns the result back to the main script. File paths and other pickleable arguments are automatically transferred.
 
 ```python
 print("Importing module in environment...")
@@ -66,7 +66,7 @@ print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 ```
 
 
-Alternatively, we could use [`env.execute()`][cema.environment.Environment.execute] directly:
+Alternatively, we could use [`env.execute()`][wetlands.environment.Environment.execute] directly:
 
 ```python
 print(f"Running segmentation on {imagePath}...")
@@ -78,7 +78,7 @@ print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 
 #### 5. Clean Up
 
-Finally, we tell Cema to shut down the communication server and clean up resources associated with the launched environment.
+Finally, we tell Wetlands to shut down the communication server and clean up resources associated with the launched environment.
 
 ```python
 print("Exiting environment...")
@@ -92,7 +92,7 @@ print("Done.")
 ??? note "`getting_started.py` source code"
 
     ```python
-    from cema.environment_manager import EnvironmentManager
+    from wetlands.environment_manager import EnvironmentManager
     import requests
 
     # Declare our input and output paths
@@ -100,7 +100,7 @@ print("Done.")
     segmentationPath = "img02_segmentation.png"
 
     # Initialize the environment manager
-    # Cema will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
+    # Wetlands will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
     # otherwise it will automatically download and install Micromamba in a self-contained manner.
     environmentManager = EnvironmentManager("micromamba/")
 
@@ -123,7 +123,7 @@ print("Done.")
     env.exit()
     ```
 
-Now, let's look at the [`example_module.py`](https://github.com/arthursw/cema/blob/main/examples/example_module.py) file. This code contains the actual segmentation logic and is executed *inside* the isolated `cellpose_env` when called via the proxy object.
+Now, let's look at the [`example_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/example_module.py) file. This code contains the actual segmentation logic and is executed *inside* the isolated `cellpose_env` when called via the proxy object.
 
 
 #### Define the Segmentation Function
@@ -157,7 +157,7 @@ def segment(
 
 #### Import Dependencies (Inside the Environment)
 
-Crucially, the necessary libraries (`cellpose`, `numpy`) are imported *within this function*, meaning they are resolved using the packages installed inside the isolated `cellpose_env`, not the main script's environment. This is important to enable the main script to import `example_module.py` without raising a `ModuleNotFoundError`. In this way, the main script can see the functions defined in `example_module.py`. This is only necessary when using the proxy object ([`env.importModule("example_module.py")`][cema.environment.Environment.importModule] then `example_module.function(args)`) but it is not required when using [`env.execute("example_module.py", "function", (args))`][cema.environment.Environment.execute] directly.
+Crucially, the necessary libraries (`cellpose`, `numpy`) are imported *within this function*, meaning they are resolved using the packages installed inside the isolated `cellpose_env`, not the main script's environment. This is important to enable the main script to import `example_module.py` without raising a `ModuleNotFoundError`. In this way, the main script can see the functions defined in `example_module.py`. This is only necessary when using the proxy object ([`env.importModule("example_module.py")`][wetlands.environment.Environment.importModule] then `example_module.function(args)`) but it is not required when using [`env.execute("example_module.py", "function", (args))`][wetlands.environment.Environment.execute] directly.
 
 ```python
     print(f"[[1/4]] Load libraries and model '{model_type}'")
@@ -200,7 +200,7 @@ The code proceeds to load the Cellpose model (if not already cached) and the inp
 
 #### Perform Segmentation
 
-The core segmentation task is performed using the loaded model and image. Any exceptions raised here will be captured by Cema and re-raised in the main script.
+The core segmentation task is performed using the loaded model and image. Any exceptions raised here will be captured by Wetlands and re-raised in the main script.
 
 ```python
     print(f"[[3/4]] Compute segmentation for image shape {image.shape}")
@@ -215,7 +215,7 @@ The core segmentation task is performed using the loaded model and image. Any ex
 
 #### Save Results and Return Value
 
-The segmentation results (masks) are saved to disk, potentially renaming the output file. The function then returns the calculated cell diameters (`diams`). This return value is serialized by Cema and sent back to the main script.
+The segmentation results (masks) are saved to disk, potentially renaming the output file. The function then returns the calculated cell diameters (`diams`). This return value is serialized by Wetlands and sent back to the main script.
 
 ```python
     segmentation_path = Path(segmentation)
@@ -299,4 +299,4 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 
 #### Summary of Example 1 Flow:
 
-The main script uses [`EnvironmentManager`][cema.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][cema.environment_manager.Environment.launch] starts a hidden server in that environment. [`env.importModule()`][cema.environment.Environment.importModule] provides a proxy, and calling functions on the proxy executes the code (like `example_module.segment`) within the isolated environment, handling data transfer automatically. [`env.exit()`][cema.environment.Environment.exit] cleans up the server process.
+The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment_manager.Environment.launch] starts a hidden server in that environment. [`env.importModule()`][wetlands.environment.Environment.importModule] provides a proxy, and calling functions on the proxy executes the code (like `example_module.segment`) within the isolated environment, handling data transfer automatically. [`env.exit()`][wetlands.environment.Environment.exit] cleans up the server process.

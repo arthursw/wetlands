@@ -1,13 +1,13 @@
 
-## Manual Communication with [`env.executeCommands`][cema.environment.Environment.executeCommands]
+## Manual Communication with [`env.executeCommands`][wetlands.environment.Environment.executeCommands]
 
-This example shows how to use Cema to run a specific script within the environment and manage the communication manually using Python's [`multiprocessing.connection`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection). This gives you full control over the interaction protocol but requires more setup.
+This example shows how to use Wetlands to run a specific script within the environment and manage the communication manually using Python's [`multiprocessing.connection`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection). This gives you full control over the interaction protocol but requires more setup.
 
-Let's see the main script [`advanced_example.py`](https://github.com/arthursw/cema/blob/main/examples/advanced_example.py) step by step. 
+Let's see the main script [`advanced_example.py`](https://github.com/arthursw/wetlands/blob/main/examples/advanced_example.py) step by step. 
 
-### Initialize Cema and Logging
+### Initialize Wetlands and Logging
 
-We import necessary modules, including [`Client`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Client) for manual connection and standard Python libraries like [`subprocess`](https://docs.python.org/3/library/subprocess.html#module-subprocess), [`threading`](https://docs.python.org/3/library/threading.html), and [`logging`](https://docs.python.org/3/library/logging.html). We also enable debug logging for Cema to see more internal details and initialize the [`EnvironmentManager`][cema.environment_manager.EnvironmentManager].
+We import necessary modules, including [`Client`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Client) for manual connection and standard Python libraries like [`subprocess`](https://docs.python.org/3/library/subprocess.html#module-subprocess), [`threading`](https://docs.python.org/3/library/threading.html), and [`logging`](https://docs.python.org/3/library/logging.html). We also enable debug logging for Wetlands to see more internal details and initialize the [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager].
 
 ```python
 # main_script_manual.py
@@ -19,8 +19,8 @@ import logging
 from pathlib import Path
 import time
 
-from cema.environment_manager import EnvironmentManager
-from cema import logger
+from wetlands.environment_manager import EnvironmentManager
+from wetlands import logger
 
 logger.setLogLevel(logging.DEBUG)
 environmentManager = EnvironmentManager("micromamba/")
@@ -37,7 +37,7 @@ env = environmentManager.create("advanced_cellpose_env", deps)
 
 ### Execute a Custom Script in the Environment
 
-Instead of [`env.launch()`][cema.environment.Environment.launch], we use [`env.executeCommands()`][cema.environment.Environment.executeCommands]. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script ([`advanced_example_module.py`](https://github.com/arthursw/cema/blob/main/examples/advanced_example_module.py)) using `python -u` (unbuffered output, important for reading stdout line-by-line immediately). We capture the `Popen` object for the launched process. We also redirect stderr to stdout for easier log capture.
+Instead of [`env.launch()`][wetlands.environment.Environment.launch], we use [`env.executeCommands()`][wetlands.environment.Environment.executeCommands]. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script ([`advanced_example_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/advanced_example_module.py)) using `python -u` (unbuffered output, important for reading stdout line-by-line immediately). We capture the `Popen` object for the launched process. We also redirect stderr to stdout for easier log capture.
 
 ```python
 print("Executing advanced_example_module.py in environment...")
@@ -46,7 +46,7 @@ process = env.executeCommands(["python -u advanced_example_module.py"])
 
 ### Establish Manual Connection
 
-The script we just launched (`advanced_example_module.py`) is designed to start a server and print the port it's listening on to its standard output. Our main script now needs to read the `stdout` of the `process` launched by Cema to discover this port number. We loop through the output lines until we find the line indicating the port.
+The script we just launched (`advanced_example_module.py`) is designed to start a server and print the port it's listening on to its standard output. Our main script now needs to read the `stdout` of the `process` launched by Wetlands to discover this port number. We loop through the output lines until we find the line indicating the port.
 
 ```python
 port = None
@@ -119,7 +119,7 @@ if process.returncode is None:
 
 ---
 
-Now, let's examine the `advanced_example_module.py` script, which is executed by Cema in the isolated environment via `executeCommands`.
+Now, let's examine the `advanced_example_module.py` script, which is executed by Wetlands in the isolated environment via `executeCommands`.
 
 **Define Callable Functions**
 
@@ -189,4 +189,4 @@ Once connected, the script enters a loop, waiting to receive messages (`connecti
 
 **Summary of Example 2 Flow:**
 
-The main script uses [`EnvironmentManager`][cema.environment_manager.EnvironmentManager] to create an environment. [`env.executeCommands()`][cema.environment.Environment.executeCommands] starts a *custom* server script (`advanced_example_module.py`) inside the environment. The main script reads the server's port from stdout and connects manually using `Client`. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by [`executeCommands`][cema.environment.Environment.executeCommands]. This approach offers more control but requires implementing the server logic and communication protocol.
+The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to create an environment. [`env.executeCommands()`][wetlands.environment.Environment.executeCommands] starts a *custom* server script (`advanced_example_module.py`) inside the environment. The main script reads the server's port from stdout and connects manually using `Client`. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by [`executeCommands`][wetlands.environment.Environment.executeCommands]. This approach offers more control but requires implementing the server logic and communication protocol.

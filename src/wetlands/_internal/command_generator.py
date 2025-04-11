@@ -5,8 +5,8 @@ from typing import NotRequired, TypedDict
 
 import yaml
 
-from cema._internal.settings_manager import SettingsManager
-from cema._internal.dependency_manager import DependencyManager
+from wetlands._internal.settings_manager import SettingsManager
+from wetlands._internal.dependency_manager import DependencyManager
 
 
 class CommandsDict(TypedDict):

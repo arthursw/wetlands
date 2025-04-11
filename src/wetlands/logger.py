@@ -4,14 +4,14 @@ from collections.abc import Callable
 logging.basicConfig(
     level=logging.INFO,
     handlers=[
-        logging.FileHandler("cema.log", mode="w", encoding="utf-8"),
+        logging.FileHandler("wetlands.log", mode="w", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
 
 
 def getLogger():
-    return logging.getLogger("cema")
+    return logging.getLogger("wetlands")
 
 
 def setLogLevel(level):

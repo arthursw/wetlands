@@ -1,8 +1,8 @@
-from cema.environment_manager import EnvironmentManager
+from wetlands.environment_manager import EnvironmentManager
 import requests
 
 # Initialize the environment manager
-# Cema will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
+# Wetlands will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
 # otherwise it will automatically download and install Micromamba in a self-contained manner.
 environmentManager = EnvironmentManager("micromamba/")
 

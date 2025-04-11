@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from types import ModuleType
-from cema.environment import Environment
+from wetlands.environment import Environment
 
 
 class DummyEnvironment(Environment):
@@ -23,7 +23,7 @@ def dummy_env(mock_environment_manager):
 
 
 @patch("sys.path", new=[])
-@patch("cema.environment.import_module")
+@patch("wetlands.environment.import_module")
 def test_importModule(mock_import_module, dummy_env):
     mock_mod = ModuleType("test_mod")
     mock_import_module.return_value = mock_mod
@@ -34,8 +34,8 @@ def test_importModule(mock_import_module, dummy_env):
     assert dummy_env.modules["test_mod"] == mock_mod
 
 
-@patch("cema.environment.Environment._importModule")
-@patch("cema.environment.Environment._listFunctions")
+@patch("wetlands.environment.Environment._importModule")
+@patch("wetlands.environment.Environment._listFunctions")
 def test_importModule_creates_fake_module(mock_listFunctions, mock_importModule, dummy_env):
     mock_mod = MagicMock()
     mock_importModule.return_value = mock_mod

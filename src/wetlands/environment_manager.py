@@ -7,20 +7,20 @@ import subprocess
 import sys
 from typing import Any, Literal
 
-from cema.internal_environment import InternalEnvironment
-from cema._internal.dependency_manager import Dependencies, DependencyManager
-from cema._internal.command_executor import CommandExecutor
-from cema._internal.command_generator import Commands, CommandGenerator
-from cema._internal.settings_manager import SettingsManager
-from cema.environment import Environment
-from cema.external_environment import ExternalEnvironment
+from wetlands.internal_environment import InternalEnvironment
+from wetlands._internal.dependency_manager import Dependencies, DependencyManager
+from wetlands._internal.command_executor import CommandExecutor
+from wetlands._internal.command_generator import Commands, CommandGenerator
+from wetlands._internal.settings_manager import SettingsManager
+from wetlands.environment import Environment
+from wetlands.external_environment import ExternalEnvironment
 
 
 class EnvironmentManager:
     """Manages Conda environments using micromamba for isolation and dependency management.
 
     Attributes:
-            mainEnvironment: The main conda environment in which cema is installed.
+            mainEnvironment: The main conda environment in which wetlands is installed.
             installedPackages: map of the installed packaged (e.g. {"pip": {"numpy":2.2.4"}, "conda":{"icu":"75.1"}})
             environments: map of the environments
 
@@ -41,7 +41,7 @@ class EnvironmentManager:
 
         Args:
                 condaPath: Path to the micromamba binary. Defaults to "micromamba".
-                mainCondaEnvironmentPath: Path of the main conda environment in which cema is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
+                mainCondaEnvironmentPath: Path of the main conda environment in which wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
         """
         self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath)
@@ -202,7 +202,7 @@ class EnvironmentManager:
         self, environmentName: str | None, dependencies: Dependencies, additionalInstallCommands: Commands = {}
     ) -> list[str]:
         """Installs dependencies.
-        See [`EnvironmentManager.create`][cema.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
+        See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
 
         Args:
                 environmentName: The environment to install dependencies.

@@ -1,7 +1,7 @@
 import platform
 from typing import TypedDict, NotRequired, Literal
-from cema._internal.exceptions import IncompatibilityException
-from cema._internal.settings_manager import SettingsManager
+from wetlands._internal.exceptions import IncompatibilityException
+from wetlands._internal.settings_manager import SettingsManager
 
 type Platform = Literal["osx-64", "osx-arm64", "win-64", "win-arm64", "linux-64", "linux-arm64"]
 

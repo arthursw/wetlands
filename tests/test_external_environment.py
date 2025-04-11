@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from cema._internal.exceptions import ExecutionException
-from cema.external_environment import ExternalEnvironment
+from wetlands._internal.exceptions import ExecutionException
+from wetlands.external_environment import ExternalEnvironment
 
 
 @patch("subprocess.Popen")
@@ -17,7 +17,7 @@ def test_launch(mock_popen):
     mock_process.poll.return_value = None
     mock_popen.return_value = mock_process
 
-    with patch("cema.external_environment.Client") as mock_client:
+    with patch("wetlands.external_environment.Client") as mock_client:
         env = ExternalEnvironment("test_env", MagicMock())
         env.executeCommands = MagicMock(return_value=mock_process)
         env.launch()
@@ -73,7 +73,7 @@ def test_execute_error(mock_client):
         env.execute("module.py", "func", (1, 2, 3))
 
 
-@patch("cema._internal.command_executor.CommandExecutor.killProcess")
+@patch("wetlands._internal.command_executor.CommandExecutor.killProcess")
 def test_exit(mock_kill):
     env = ExternalEnvironment("test_env", MagicMock())
     env.connection = MagicMock()

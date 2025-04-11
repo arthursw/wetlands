@@ -1,7 +1,7 @@
-site_name: Cema
-site_url: https://arthursw.github.io/cema/
-repo_url: https://github.com/arthursw/cema
-repo_name: arthursw/cema
+site_name: Wetlands
+site_url: https://arthursw.github.io/wetlands/
+repo_url: https://github.com/arthursw/wetlands
+repo_name: arthursw/wetlands
 theme:
   name: material
   palette:

@@ -6,11 +6,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cema.environment_manager import EnvironmentManager
-from cema.internal_environment import InternalEnvironment
-from cema.external_environment import ExternalEnvironment
-from cema._internal.dependency_manager import Dependencies
-from cema._internal.command_generator import Commands
+from wetlands.environment_manager import EnvironmentManager
+from wetlands.internal_environment import InternalEnvironment
+from wetlands.external_environment import ExternalEnvironment
+from wetlands._internal.dependency_manager import Dependencies
+from wetlands._internal.command_generator import Commands
 
 # --- Fixtures ---
 

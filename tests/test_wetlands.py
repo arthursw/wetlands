@@ -6,11 +6,11 @@ from pathlib import Path
 import logging
 import pytest
 
-from cema._internal.dependency_manager import Dependencies
-from cema.internal_environment import InternalEnvironment
-from cema._internal.exceptions import IncompatibilityException
-from cema.environment_manager import EnvironmentManager
-from cema.external_environment import ExternalEnvironment
+from wetlands._internal.dependency_manager import Dependencies
+from wetlands.internal_environment import InternalEnvironment
+from wetlands._internal.exceptions import IncompatibilityException
+from wetlands.environment_manager import EnvironmentManager
+from wetlands.external_environment import ExternalEnvironment
 
 
 # Configure logging

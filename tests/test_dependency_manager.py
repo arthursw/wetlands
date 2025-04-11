@@ -2,8 +2,8 @@ import pytest
 import re
 import platform
 from unittest.mock import MagicMock
-from cema._internal.exceptions import IncompatibilityException
-from cema._internal.dependency_manager import DependencyManager, Dependencies
+from wetlands._internal.exceptions import IncompatibilityException
+from wetlands._internal.dependency_manager import DependencyManager, Dependencies
 
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 

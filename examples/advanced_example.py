@@ -4,8 +4,8 @@ import sys
 import threading
 import logging
 
-from cema.environment_manager import EnvironmentManager
-from cema import logger
+from wetlands.environment_manager import EnvironmentManager
+from wetlands import logger
 
 
 logger.setLogLevel(logging.DEBUG)

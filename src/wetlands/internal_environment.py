@@ -1,11 +1,11 @@
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from cema._internal.command_generator import Commands
-from cema.environment import Environment
+from wetlands._internal.command_generator import Commands
+from wetlands.environment import Environment
 
 if TYPE_CHECKING:
-    from cema.environment_manager import EnvironmentManager
+    from wetlands.environment_manager import EnvironmentManager
 
 
 class InternalEnvironment(Environment):
@@ -19,7 +19,7 @@ class InternalEnvironment(Environment):
         return str(Path(path) / "_")[:-1]
 
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
-        """Raise an exception. See [`Environment.launch`][cema.environment.Environment.launch] and [`ExternalEnvironment.launch`][cema.external_environment.ExternalEnvironment.launch]"""
+        """Raise an exception. See [`Environment.launch`][wetlands.environment.Environment.launch] and [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
         raise Exception("Cannot launch the main environment.")
 
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:

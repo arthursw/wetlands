@@ -4,14 +4,14 @@ from multiprocessing.connection import Client, Connection
 import threading
 from typing import Any, TYPE_CHECKING
 
-from cema.logger import logger
-from cema._internal.command_generator import Commands
-from cema.environment import Environment
-from cema._internal.exceptions import ExecutionException
-from cema._internal.command_executor import CommandExecutor
+from wetlands.logger import logger
+from wetlands._internal.command_generator import Commands
+from wetlands.environment import Environment
+from wetlands._internal.exceptions import ExecutionException
+from wetlands._internal.command_executor import CommandExecutor
 
 if TYPE_CHECKING:
-    from cema.environment_manager import EnvironmentManager
+    from wetlands.environment_manager import EnvironmentManager
 
 
 class ExternalEnvironment(Environment):

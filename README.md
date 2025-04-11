@@ -1,37 +1,38 @@
-# Cema - Conda Environment Manager
+# Wetlands - Conda Environment Manager
 
-**Cema** (Conda Environment MAnager) is a lightweight Python library for managing **Conda** environments.
+**Wetlands** is a lightweight Python library for managing **Conda** environments.
 
-**Cema** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
+**Wetlands** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
 
+The name **Wetlands** comes from the tropical *environnement* where Anacondas thrive.
 
 ## ✨ Features
 
 - **Automatic Environment Management**: Create and configure environments on demand.
 - **Dependency Isolation**: Install dependencies without conflicts.
 - **Embedded Execution**: Run Python functions inside isolated environments.
-- **Micromamba**: Cema uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
+- **Micromamba**: Wetlands uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
 
 ---
 
 ## 📦 Installation
 
-To install **Cema**, simply use `pip`:
+To install **Wetlands**, simply use `pip`:
 
 ```sh
-pip install cema
+pip install wetlands
 ```
 
 ## 🚀 Usage Example
 
-If the user doesn't have micromamba installed, Cema will download and set it up automatically.
+If the user doesn't have micromamba installed, Wetlands will download and set it up automatically.
 
 ```python
 
-from cema.environment_manager import EnvironmentManager
+from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager
-# Cema will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
+# Wetlands will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
 # otherwise it will automatically download and install Micromamba in a self-contained manner.
 environmentManager = EnvironmentManager("micromamba/")
 
@@ -77,12 +78,12 @@ Check for code errors with `uv run ruff check` and format the code with `uv run 
 
 ### Tests
 
-Test cema with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
+Test wetlands with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
 
 ### Generate documentation
 
 
-The Cema documentation is generated with [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/), [`mkdocstrings`](https://mkdocstrings.github.io/), [`mike`](https://github.com/jimporter/mike) and others.
+The Wetlands documentation is generated with [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/), [`mkdocstrings`](https://mkdocstrings.github.io/), [`mike`](https://github.com/jimporter/mike) and others.
 
 Install the doc tools with `uv pip install  ".[docs]"`.
 

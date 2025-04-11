@@ -7,11 +7,11 @@ from typing import Any, TYPE_CHECKING
 from types import ModuleType
 import inspect
 
-from cema._internal.command_generator import Commands
-from cema._internal.dependency_manager import Dependencies
+from wetlands._internal.command_generator import Commands
+from wetlands._internal.dependency_manager import Dependencies
 
 if TYPE_CHECKING:
-    from cema.environment_manager import EnvironmentManager
+    from wetlands.environment_manager import EnvironmentManager
 
 
 class Environment:
@@ -48,15 +48,15 @@ class Environment:
 
         for f in self._listFunctions(module):
 
-            def fakeFunction(*args, _cema_imported_function=f, **kwargs):
-                return self.execute(modulePath, _cema_imported_function, args, kwargs)
+            def fakeFunction(*args, _wetlands_imported_function=f, **kwargs):
+                return self.execute(modulePath, _wetlands_imported_function, args, kwargs)
 
             setattr(FakeModule, f, fakeFunction)
         return FakeModule
 
     def install(self, dependencies: Dependencies, additionalInstallCommands: Commands = {}) -> list[str]:
         """Installs dependencies.
-        See [`EnvironmentManager.create`][cema.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
+        See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
 
         Args:
                 dependencies: Dependencies to install.
@@ -68,7 +68,7 @@ class Environment:
 
     @abstractmethod
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
-        """Launch the environment, only available in [ExternalEnvironment][cema.external_environment.ExternalEnvironment]. Raises an exception in [InternalEnvironment][cema.internal_environment.InternalEnvironment]. See [`InternalEnvironment.launch`][cema.internal_environment.InternalEnvironment.launch] and [`ExternalEnvironment.launch`][cema.external_environment.ExternalEnvironment.launch]"""
+        """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Raises an exception in [InternalEnvironment][wetlands.internal_environment.InternalEnvironment]. See [`InternalEnvironment.launch`][wetlands.internal_environment.InternalEnvironment.launch] and [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
         pass
 
     def executeCommands(
@@ -79,7 +79,7 @@ class Environment:
         Args:
                 commands: The commands to execute in the environment.
                 additionalActivateCommands: Platform-specific activation commands.
-                popenKwargs: Keyword arguments for subprocess.Popen(). See [`EnvironmentManager.executeCommands`][cema.environment_manager.EnvironmentManager.executeCommands].
+                popenKwargs: Keyword arguments for subprocess.Popen(). See [`EnvironmentManager.executeCommands`][wetlands.environment_manager.EnvironmentManager.executeCommands].
 
         Returns:
                 The launched process.
@@ -88,7 +88,7 @@ class Environment:
 
     @abstractmethod
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
-        """Execute the given function in the given module. See [`ExternalEnvironment.execute`][cema.external_environment.ExternalEnvironment.execute] and [`InternalEnvironment.execute`][cema.internal_environment.InternalEnvironment.execute]"""
+        """Execute the given function in the given module. See [`ExternalEnvironment.execute`][wetlands.external_environment.ExternalEnvironment.execute] and [`InternalEnvironment.execute`][wetlands.internal_environment.InternalEnvironment.execute]"""
         pass
 
     def _exit(self) -> None:

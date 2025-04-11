@@ -1,5 +1,5 @@
 import pytest
-from cema._internal.command_executor import CommandExecutor
+from wetlands._internal.command_executor import CommandExecutor
 
 
 @pytest.fixture

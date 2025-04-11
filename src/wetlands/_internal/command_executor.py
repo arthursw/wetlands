@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 from typing import Any
 import psutil
-from cema.logger import logger
+from wetlands.logger import logger
 
 
 class CommandExecutor:
@@ -157,7 +157,7 @@ class CommandExecutor:
         log: bool = True,
         popenKwargs: dict[str, Any] = {},
     ) -> list[str]:
-        """Executes commands and captures their output. See [`CommandExecutor.executeCommands`][cema._internal.command_executor.CommandExecutor.executeCommands] for more details on the arguments.
+        """Executes commands and captures their output. See [`CommandExecutor.executeCommands`][wetlands._internal.command_executor.CommandExecutor.executeCommands] for more details on the arguments.
 
         Args:
                 commands: Shell commands to execute.

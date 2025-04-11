@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from cema.environment_manager import EnvironmentManager
-from cema.internal_environment import InternalEnvironment
+from wetlands.environment_manager import EnvironmentManager
+from wetlands.internal_environment import InternalEnvironment
 
 
 def test_execute_function_success():
