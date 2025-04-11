@@ -1,13 +1,13 @@
 
-## Manual Communication with `env.executeCommands`
+## Manual Communication with [`env.executeCommands`][cema.environment.Environment.executeCommands]
 
-This example shows how to use Cema to run a specific script within the environment and manage the communication manually using Python's `multiprocessing.connection`. This gives you full control over the interaction protocol but requires more setup.
+This example shows how to use Cema to run a specific script within the environment and manage the communication manually using Python's [`multiprocessing.connection`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection). This gives you full control over the interaction protocol but requires more setup.
 
-Let's see the main script `advanced_example.py` step by step. 
+Let's see the main script [`advanced_example.py`](https://github.com/arthursw/cema/blob/main/examples/advanced_example.py) step by step. 
 
 ### Initialize Cema and Logging
 
-We import necessary modules, including `Client` for manual connection and standard Python libraries like `subprocess`, `threading`, and `logging`. We also enable debug logging for Cema to see more internal details and initialize the `EnvironmentManager`.
+We import necessary modules, including [`Client`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Client) for manual connection and standard Python libraries like [`subprocess`](https://docs.python.org/3/library/subprocess.html#module-subprocess), [`threading`](https://docs.python.org/3/library/threading.html), and [`logging`](https://docs.python.org/3/library/logging.html). We also enable debug logging for Cema to see more internal details and initialize the [`EnvironmentManager`][cema.environment_manager.EnvironmentManager].
 
 ```python
 # main_script_manual.py
@@ -37,7 +37,7 @@ env = environmentManager.create("advanced_cellpose_env", deps)
 
 ### Execute a Custom Script in the Environment
 
-Instead of `env.launch()`, we use `env.executeCommands()`. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script (`advanced_example_module.py`) using `python -u` (unbuffered output, important for reading stdout line-by-line immediately). We capture the `Popen` object for the launched process. We also redirect stderr to stdout for easier log capture.
+Instead of [`env.launch()`][cema.environment.Environment.launch], we use [`env.executeCommands()`][cema.environment.Environment.executeCommands]. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script ([`advanced_example_module.py`](https://github.com/arthursw/cema/blob/main/examples/advanced_example_module.py)) using `python -u` (unbuffered output, important for reading stdout line-by-line immediately). We capture the `Popen` object for the launched process. We also redirect stderr to stdout for easier log capture.
 
 ```python
 print("Executing advanced_example_module.py in environment...")
@@ -79,7 +79,7 @@ output_thread.start()
 
 ### Send Commands and Receive Results Manually
 
-Now that we have a direct `connection` object (from `multiprocessing.connection.Client`), we can implement our own communication protocol. We send dictionaries containing an `action`, `function` name, and `args`. We then wait (`connection.recv()`) for a response dictionary from the server script running in the environment.
+Now that we have a direct `connection` object (from [`multiprocessing.connection.Client`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Client)), we can implement our own communication protocol. We send dictionaries containing an `action`, `function` name, and `args`. We then wait (`connection.recv()`) for a response dictionary from the server script running in the environment.
 
 ```python
 imagePath = "cellpose_img02.png"
@@ -163,7 +163,7 @@ def segmentImage(imagePath_str, segmentationPath_str, connection):
 
 **Set Up the Server**
 
-The main part of the script uses `multiprocessing.connection.Listener` to create a server socket listening on `localhost` and an OS-assigned port (`0`). **Crucially, it prints the chosen port number to standard output**, which is how the main script discovers where to connect. It then waits for the main script to connect (`listener.accept()`).
+The main part of the script uses [`multiprocessing.connection.Listener`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Listener) to create a server socket listening on `localhost` and an OS-assigned port (`0`). **Crucially, it prints the chosen port number to standard output**, which is how the main script discovers where to connect. It then waits for the main script to connect (`listener.accept()`).
 
 ```python
 
@@ -189,4 +189,4 @@ Once connected, the script enters a loop, waiting to receive messages (`connecti
 
 **Summary of Example 2 Flow:**
 
-The main script uses `EnvironmentManager` to create an environment. `env.executeCommands()` starts a *custom* server script (`advanced_example_module.py`) inside the environment. The main script reads the server's port from stdout and connects manually using `Client`. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by `executeCommands`. This approach offers more control but requires implementing the server logic and communication protocol.
+The main script uses [`EnvironmentManager`][cema.environment_manager.EnvironmentManager] to create an environment. [`env.executeCommands()`][cema.environment.Environment.executeCommands] starts a *custom* server script (`advanced_example_module.py`) inside the environment. The main script reads the server's port from stdout and connects manually using `Client`. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by [`executeCommands`][cema.environment.Environment.executeCommands]. This approach offers more control but requires implementing the server logic and communication protocol.

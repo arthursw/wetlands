@@ -1,5 +1,7 @@
 site_name: Cema
-site_url: https://mydomain.org/mysite
+site_url: https://arthursw.github.io/cema/
+repo_url: https://github.com/arthursw/cema
+repo_name: arthursw/cema
 theme:
   name: material
   palette:
@@ -8,9 +10,7 @@ theme:
       primary: teal
       accent: green
       toggle:
-        icon: material/brightness-7 
-
-
+        icon: material/brightness-7
         name: Switch to dark mode
 
     # Palette toggle for dark mode
@@ -20,30 +20,36 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-  features:
-    - navigation.expand
+  # features:
+  #   - navigation.expand
 extra:
   version:
     provider: mike
 
 nav:
-- Overview: index.md
-- Getting Started: getting_started.md
-- Advanced example: advanced_example.md
-- Code Reference: reference/  
+  - Overview: index.md
+  - Getting started: getting_started.md
+  - Advanced example: advanced_example.md
+  - Code Reference: reference/
 
 plugins:
-- search
-- gen-files:
-    scripts:
-    - scripts/gen_ref_pages.py
-- literate-nav:
-    nav_file: SUMMARY.md
-- mkdocstrings:
-    handlers:
-      python:
-        options:
-          show_symbol_type_heading: true
+  - search
+  - gen-files:
+      scripts:
+        - scripts/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_symbol_type_heading: true
+            members_order: source
+            summary:
+              attributes: false
+              functions: true
+  - mike:
+      alias_type: symlink
 
 markdown_extensions:
   - admonition
@@ -55,4 +61,3 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
-  

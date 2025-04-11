@@ -64,8 +64,8 @@ def sum(x):
 
 Cema allows you to interact with isolated Conda environments in two main ways:
 
-1.  **Simplified Execution (`env.importModule` / `env.execute`):** Cema manages the communication details, providing a proxy object to call functions within the environment seamlessly. See the [Getting Started](getting_started.md).
-2.  **Manual Control (`env.executeCommands`):** You run specific commands (like starting a Python script that listens for connections) and manage the inter-process communication yourself. See the [advanced example](advanced_example.md).
+1.  **Simplified Execution ([`env.importModule`][cema.environment.Environment.importModule] / [`env.execute`][cema.environment.Environment.execute]):** Cema manages the communication details, providing a proxy object to call functions within the environment seamlessly. See [Getting started](getting_started.md).
+2.  **Manual Control ([`env.executeCommands`][cema.environment.Environment.executeCommands]):** You run specific commands (like starting a Python script that listens for connections) and manage the inter-process communication yourself. See [Advanced example](advanced_example.md).
 
 You can run those examples form the [`examples/` folder](https://github.com/arthursw/cema/tree/main/examples) in the repository.
 
@@ -90,6 +90,7 @@ Cema leverages **Micromamba**, a fast, native reimplementation of the Conda pack
 
 
 ## ⚙️ Under the Hood
+
 
 Cema uses the `EnvironmentManager.executeCommands()` for different operations (to create environments, install dependencies, etc). 
 Behind the scenes, this method creates and executes a temporary script (a bash script on Linux and Mac, and a PowerShell script on Windows) which looks like the following:
@@ -120,6 +121,3 @@ micromamba --rc-file "/path/to/examples/micromamba/.mambarc" install "cellpose==
 # Execute optional custom commands
 python -u example_module.py
 ```
-
-
----

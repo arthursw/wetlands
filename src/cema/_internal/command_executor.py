@@ -110,7 +110,7 @@ class CommandExecutor:
         Args:
                 commands: List of shell commands to execute.
                 exitIfCommandError: Whether to insert error checking after each command to make sure the whole command chain stops if an error occurs (otherwise the script will be executed entirely even when one command fails at the beginning).
-                popenKwargs: Keyword arguments for subprocess.Popen() (see https://docs.python.org/3/library/subprocess.html#popen-constructor). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+                popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
 
         Returns:
                 Subprocess handle for the executed commands.
@@ -157,7 +157,7 @@ class CommandExecutor:
         log: bool = True,
         popenKwargs: dict[str, Any] = {},
     ) -> list[str]:
-        """Executes commands and captures their output. See :meth:`CommandExecutor.executeCommands` for more details on the arguments.
+        """Executes commands and captures their output. See [`CommandExecutor.executeCommands`][cema._internal.command_executor.CommandExecutor.executeCommands] for more details on the arguments.
 
         Args:
                 commands: Shell commands to execute.

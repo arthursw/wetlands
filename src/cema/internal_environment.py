@@ -19,7 +19,7 @@ class InternalEnvironment(Environment):
         return str(Path(path) / "_")[:-1]
 
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
-        """Raise an exception. See :meth:`Environment.launch` and :meth:`ExternalEnvironment.launch`"""
+        """Raise an exception. See [`Environment.launch`][cema.environment.Environment.launch] and [`ExternalEnvironment.launch`][cema.external_environment.ExternalEnvironment.launch]"""
         raise Exception("Cannot launch the main environment.")
 
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:

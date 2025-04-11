@@ -32,4 +32,7 @@ jobs:
       - name: Install docs dependencies
         run: uv pip install ".[docs]" --system
 
-      - run: mkdocs gh-deploy --force
+      - name: Get gh-pages branch
+        run: git fetch origin gh-pages --depth=1
+
+      - run: mike deploy 1.0

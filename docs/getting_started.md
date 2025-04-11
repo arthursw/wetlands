@@ -1,9 +1,9 @@
 
-### Simplified Execution with `env.importModule`
+### Simplified Execution with [`env.importModule`][cema.environment.Environment.importModule]
 
-To demonstrates the most straightforward way to use Cema, we will create an environment, install `cellpose`, and run a segmentation function defined in a separate file (`example_module.py`) within that isolated environment.
+To demonstrates the most straightforward way to use Cema, we will create an environment, install `cellpose`, and run a segmentation function defined in a separate file ([`example_module.py`](https://github.com/arthursw/cema/blob/main/examples/example_module.py)) within that isolated environment.
 
-Let's see the main script `getting_started.py` step by step. 
+Let's see the main script [`getting_started.py`](https://github.com/arthursw/cema/blob/main/examples/getting_started.py) step by step. 
 
 We will segment the image `img02.png` (available [here](https://www.cellpose.org/static/images/img02.png)).
 
@@ -14,7 +14,7 @@ segmentationPath = "img02_segmentation.png"
 
 #### 1. Initialize the Environment Manager
 
-We start by initializing the `EnvironmentManager`. We provide a path (`"micromamba/"`) where Cema should look for an existing Micromamba installation or where it should download and set up a new one if it's not found.
+We start by initializing the [EnvironmentManager][cema.environment_manager.EnvironmentManager]. We provide a path (`"micromamba/"`) where Cema should look for an existing Micromamba installation or where it should download and set up a new one if it's not found.
 
 ```python
 from cema.environment_manager import EnvironmentManager
@@ -45,7 +45,7 @@ env = environmentManager.create(
 
 #### 3. Launch the Environment's Communication Server
 
-For Cema to execute code within the isolated environment (using `importModule` or `execute`), we need to launch its background communication server. This server runs as a separate process *inside* the `cellpose_env` and listens for commands from our main script.
+For Cema to execute code within the isolated environment (using [`importModule`][cema.environment.Environment.importModule] or [`execute`][cema.environment.Environment.execute]), we need to launch its background communication server. This server runs as a separate process *inside* the `cellpose_env` and listens for commands from our main script.
 
 ```python
 env.launch()
@@ -53,7 +53,7 @@ env.launch()
 
 #### 4. Import and Execute Code in the Environment via Proxy
 
-This is where the core Cema interaction happens. We use `env.importModule("example_module.py")` to gain access to the functions defined in `example_module.py`. Cema doesn't actually import the module into the main process; instead, it returns a *proxy object*. When we call a method on this proxy object (like `example_module.segment(...)`), Cema intercepts the call, sends the function name and arguments to the server running in the `cellpose_env`, executes the *real* function there, and returns the result back to the main script. File paths and other pickleable arguments are automatically transferred.
+This is where the core Cema interaction happens. We use [`env.importModule("example_module.py")`][cema.environment.Environment.importModule] to gain access to the functions defined in `example_module.py`. Cema doesn't actually import the module into the main process; instead, it returns a *proxy object*. When we call a method on this proxy object (like `example_module.segment(...)`), Cema intercepts the call, sends the function name and arguments to the server running in the `cellpose_env`, executes the *real* function there, and returns the result back to the main script. File paths and other pickleable arguments are automatically transferred.
 
 ```python
 print("Importing module in environment...")
@@ -66,7 +66,7 @@ print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 ```
 
 
-Alternatively, we could use `env.execute()` directly:
+Alternatively, we could use [`env.execute()`][cema.environment.Environment.execute] directly:
 
 ```python
 print(f"Running segmentation on {imagePath}...")
@@ -123,7 +123,7 @@ print("Done.")
     env.exit()
     ```
 
-Now, let's look at the `example_module.py` file. This code contains the actual segmentation logic and is executed *inside* the isolated `cellpose_env` when called via the proxy object.
+Now, let's look at the [`example_module.py`](https://github.com/arthursw/cema/blob/main/examples/example_module.py) file. This code contains the actual segmentation logic and is executed *inside* the isolated `cellpose_env` when called via the proxy object.
 
 
 #### Define the Segmentation Function
@@ -157,7 +157,7 @@ def segment(
 
 #### Import Dependencies (Inside the Environment)
 
-Crucially, the necessary libraries (`cellpose`, `numpy`) are imported *within this function*, meaning they are resolved using the packages installed inside the isolated `cellpose_env`, not the main script's environment. This is important to enable the main script to import `example_module.py` without raising a `ModuleNotFoundError`. In this way, the main script can see the functions defined in `example_module.py`. This is only necessary when using the proxy object (`env.importModule("example_module.py")` then `example_module.function(args)`) but it is not required when using `env.execute("example_module.py", "function", (args))` directly.
+Crucially, the necessary libraries (`cellpose`, `numpy`) are imported *within this function*, meaning they are resolved using the packages installed inside the isolated `cellpose_env`, not the main script's environment. This is important to enable the main script to import `example_module.py` without raising a `ModuleNotFoundError`. In this way, the main script can see the functions defined in `example_module.py`. This is only necessary when using the proxy object ([`env.importModule("example_module.py")`][cema.environment.Environment.importModule] then `example_module.function(args)`) but it is not required when using [`env.execute("example_module.py", "function", (args))`][cema.environment.Environment.execute] directly.
 
 ```python
     print(f"[[1/4]] Load libraries and model '{model_type}'")
@@ -299,4 +299,4 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 
 #### Summary of Example 1 Flow:
 
-The main script uses `EnvironmentManager` to prepare an isolated environment. `env.launch()` starts a hidden server in that environment. `env.importModule()` provides a proxy, and calling functions on the proxy executes the code (like `example_module.segment`) within the isolated environment, handling data transfer automatically. `env.exit()` cleans up the server process.
+The main script uses [`EnvironmentManager`][cema.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][cema.environment_manager.Environment.launch] starts a hidden server in that environment. [`env.importModule()`][cema.environment.Environment.importModule] provides a proxy, and calling functions on the proxy executes the code (like `example_module.segment`) within the isolated environment, handling data transfer automatically. [`env.exit()`][cema.environment.Environment.exit] cleans up the server process.

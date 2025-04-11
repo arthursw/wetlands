@@ -202,7 +202,7 @@ class EnvironmentManager:
         self, environmentName: str | None, dependencies: Dependencies, additionalInstallCommands: Commands = {}
     ) -> list[str]:
         """Installs dependencies.
-        See :meth:`EnvironmentManager.create` for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
+        See [`EnvironmentManager.create`][cema.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
 
         Args:
                 environmentName: The environment to install dependencies.
@@ -230,7 +230,7 @@ class EnvironmentManager:
                 environmentName: The environment in which to execute commands.
                 commands: The commands to execute in the environment.
                 additionalActivateCommands: Platform-specific activation commands.
-                popenKwargs: Keyword arguments for subprocess.Popen(). See :meth:`CommandExecutor.executeCommands`.
+                popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
 
         Returns:
                 The launched process.

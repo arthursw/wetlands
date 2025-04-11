@@ -9,22 +9,24 @@ nav = mkdocs_gen_files.Nav()  # type: ignore
 root = Path(__file__).parent.parent
 src = root / "src"
 
-for path in sorted(src.rglob("cema/*.py")):
+# files = sorted(src.rglob("cema/*.py"))
+file_names = ['environment_manager.py', 'environment.py', 'internal_environment.py', 'external_environment.py'] # define manually to force rendering order
+files = [src / 'cema' / f for f in file_names] + sorted(src.rglob("cema/_internal/*.py"))
+
+for path in files:
     module_path = path.relative_to(src).with_suffix("")
     doc_path = path.relative_to(src).with_suffix(".md")
     full_doc_path = Path("reference", doc_path)
 
     parts = tuple(module_path.parts)
 
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
+    if parts[-1] in ["__init__", "__main__", "logger"]:
         continue
-    elif parts[-1] == "__main__":
-        continue
-    elif parts[-1] == "logger":
-        continue
-
-    nav[parts[1:-1] + (parts[-1].replace("_", " ").capitalize(),)] = doc_path.as_posix()
+    
+    display_name = parts[-1].replace("_", " ").capitalize()
+    display_parts = parts[1:-1] + (display_name,)
+    display_parts = tuple([dp.replace("_", "") for dp in display_parts])
+    nav[display_parts] = doc_path.as_posix()
 
     with mkdocs_gen_files.open(full_doc_path, "w") as fd:
         identifier = ".".join(parts)
