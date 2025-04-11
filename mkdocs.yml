@@ -4,6 +4,10 @@ repo_url: https://github.com/arthursw/wetlands
 repo_name: arthursw/wetlands
 theme:
   name: material
+  logo: WetlandInverted.svg
+  features:
+    - navigation.instant
+  #   - navigation.expand
   palette:
     # Palette toggle for light mode
     - scheme: default
@@ -20,8 +24,7 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-  # features:
-  #   - navigation.expand
+
 extra:
   version:
     provider: mike

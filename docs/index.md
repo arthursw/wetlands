@@ -1,10 +1,12 @@
 # Wetlands - Conda Environment Manager
 
+![Wetland](Wetland.svg)
+
 **Wetlands** is a lightweight Python library for managing **Conda** environments.
 
 **Wetlands** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
 
-The name ***Wetlands*** comes from the tropical *environnements* where Anacondas thrive.
+The name ***Wetlands*** comes from the tropical *environments* where Anacondas thrive.
 
 ## ✨ Features
 
@@ -72,3 +74,9 @@ Wetlands allows you to interact with isolated Conda environments in two main way
 You can run those examples form the [`examples/` folder](https://github.com/arthursw/wetlands/tree/main/examples) in the repository.
 
 Explore the inner workings on the [How it Works](how_it_works.md) page.
+
+## 📜 License
+
+This project was made at Inria in Rennes (Centre Inria de l'Université de Rennes) and is licensed under the MIT License.
+
+The logo Wetland was made by Dan Hetteix from Noun Project (CC BY 3.0).
