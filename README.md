@@ -2,11 +2,8 @@
 
 ------
 
-.. image:: https://img.shields.io/pypi/v/wetlands.svg
-    :target: https://pypi.org/project/wetlands/
-
-.. image:: https://img.shields.io/pypi/pyversions/pytest.svg
-    :target: https://pypi.org/project/pytest/
+![Wetlands pypi](https://img.shields.io/pypi/v/wetlands.svg)
+![Python versions](https://img.shields.io/pypi/pyversions/pytest.svg)
 
 # Wetlands - Conda Environment Manager
 
