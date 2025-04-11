@@ -115,7 +115,8 @@ class CommandExecutor:
         Returns:
                 Subprocess handle for the executed commands.
         """
-        logger.debug(f"Execute commands:\n\n\t\t{'\n\t\t'.join(commands)}\n")
+        commandsString = "\n\t\t".join(commands)
+        logger.debug(f"Execute commands:\n\n\t\t{commandsString}\n")
         with tempfile.NamedTemporaryFile(suffix=".ps1" if self._isWindows() else ".sh", mode="w", delete=False) as tmp:
             if exitIfCommandError:
                 commands = self._insertCommandErrorChecks(commands)
