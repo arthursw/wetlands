@@ -128,7 +128,7 @@ This script defines the functions (`downloadImage`, `segmentImage`) that the mai
 ```python
 # advanced_example_module.py
 import sys
-import requests
+import urllib.request
 from multiprocessing.connection import Listener
 from pathlib import Path
 import example_module # Reuse logic from the simple example module
@@ -136,9 +136,11 @@ import example_module # Reuse logic from the simple example module
 def downloadImage(imagePath_str, connection):
     """Downloads the image *inside* the environment."""
     imagePath = Path(imagePath_str)
+    imageUrl = "https://www.cellpose.org/static/images/img02.png"
     print(f"[Inside Env] Downloading image to {imagePath}...")
     try:
-        imageData = requests.get("https://www.cellpose.org/static/images/img02.png").content
+        with urllib.request.urlopen(imageUrl) as response:
+            imageData = response.read()
         with open(imagePath, "wb") as handler:
             handler.write(imageData)
         print("[Inside Env] Image downloaded.")

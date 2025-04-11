@@ -79,4 +79,4 @@ Explore the inner workings on the [How it Works](how_it_works.md) page.
 
 This project was made at Inria in Rennes (Centre Inria de l'Université de Rennes) and is licensed under the MIT License.
 
-The logo Wetland was made by Dan Hetteix from Noun Project (CC BY 3.0).
+The logo Wetland was made by [Dan Hetteix](https://thenounproject.com/creator/DHETTEIX/) from Noun Project (CC BY 3.0).

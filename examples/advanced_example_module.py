@@ -1,12 +1,13 @@
 import sys
-import requests
+import urllib.request
 from multiprocessing.connection import Listener
 import example_module
 
-
 def downloadImage(imagePath, connection):
     # Download example image from cellpose
-    imageData = requests.get("https://www.cellpose.org/static/images/img02.png").content
+    imageUrl = "https://www.cellpose.org/static/images/img02.png"
+    with urllib.request.urlopen(imageUrl) as response:
+        imageData = response.read()
     with open(imagePath, "wb") as handler:
         handler.write(imageData)
     connection.send(dict(message="Image downloaded."))

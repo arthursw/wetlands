@@ -1,6 +1,15 @@
+![Wetland](Wetland.png)
+
+------
+
+.. image:: https://img.shields.io/pypi/v/wetlands.svg
+    :target: https://pypi.org/project/wetlands/
+
+.. image:: https://img.shields.io/pypi/pyversions/pytest.svg
+    :target: https://pypi.org/project/pytest/
+
 # Wetlands - Conda Environment Manager
 
-![Wetland](Wetland.png)
 
 **Wetlands** is a lightweight Python library for managing **Conda** environments.
 
@@ -105,4 +114,4 @@ The script `scripts/gen_ref_pages.py` generates the API reference automatically 
 
 This project was made at Inria in Rennes (Centre Inria de l'Université de Rennes) and is licensed under the MIT License.
 
-The logo Wetland was made by Dan Hetteix from Noun Project (CC BY 3.0).
+The logo Wetland was made by [Dan Hetteix](https://thenounproject.com/creator/DHETTEIX/) from Noun Project (CC BY 3.0).

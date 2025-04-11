@@ -18,7 +18,6 @@ We start by initializing the [EnvironmentManager][wetlands.environment_manager.E
 
 ```python
 from wetlands.environment_manager import EnvironmentManager
-import requests
 from pathlib import Path
 
 environmentManager = EnvironmentManager("micromamba/")
@@ -93,7 +92,6 @@ print("Done.")
 
     ```python
     from wetlands.environment_manager import EnvironmentManager
-    import requests
 
     # Declare our input and output paths
     imagePath = "img02.png"

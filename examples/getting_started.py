@@ -1,5 +1,5 @@
 from wetlands.environment_manager import EnvironmentManager
-import requests
+import urllib.request
 
 # Initialize the environment manager
 # Wetlands will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
@@ -12,7 +12,11 @@ env.launch()
 
 # Download example image from cellpose
 imagePath = "cellpose_img02.png"
-imageData = requests.get("https://www.cellpose.org/static/images/img02.png").content
+imageUrl = "https://www.cellpose.org/static/images/img02.png"
+
+with urllib.request.urlopen(imageUrl) as response:
+    imageData = response.read()
+
 with open(imagePath, "wb") as handler:
     handler.write(imageData)
 
