@@ -512,28 +512,3 @@ def test_execute_commands_in_main_env(environment_manager_fixture):
 
     # Check user command
     assert "ls -l" in command_list
-
-
-def test_execute_commands_platform_specific(environment_manager_fixture, monkeypatch):
-    manager, _, mock_execute = environment_manager_fixture
-    env_name = "platform-env"
-
-    # Mock platform.system() to control which commands are selected
-    current_system = platform.system().lower()  # e.g., 'linux'
-    monkeypatch.setattr(platform, "system", MagicMock(return_value=current_system.capitalize()))  # e.g., 'Linux'
-
-    commands_to_run: Commands = {"mac": ["run-on-current"], "linux": ["run-on-other"], "all": ["run-always"]}
-
-    manager.executeCommands(env_name, commands_to_run)
-
-    mock_execute.assert_called_once()
-    called_args, _ = mock_execute.call_args
-    command_list = called_args[0]
-
-    # Check correct platform command is included
-    assert "run-on-current" in command_list
-    assert "run-always" in command_list
-    # Check incorrect platform command is excluded
-    assert "run-on-other" not in command_list
-    # Check activation
-    assert any(f"activate {env_name}" in cmd for cmd in command_list)

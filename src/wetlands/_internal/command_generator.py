@@ -3,9 +3,9 @@ import platform
 import re
 
 try:
-    from typing import NotRequired, TypedDict  # type: ignore
+    from typing import NotRequired, TypedDict               # type: ignore
 except ImportError:
-    from typing_extensions import NotRequired, TypedDict
+    from typing_extensions import NotRequired, TypedDict    # type: ignore
 
 from typing import Union
 
