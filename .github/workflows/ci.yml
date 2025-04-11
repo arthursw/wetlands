@@ -35,4 +35,4 @@ jobs:
       - name: Get gh-pages branch
         run: git fetch origin gh-pages --depth=1
 
-      - run: mike deploy 1.0 latest --push
+      - run: mike deploy --push --update-aliases 1.0 latest
