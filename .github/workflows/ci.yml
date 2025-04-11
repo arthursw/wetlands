@@ -1,28 +1,72 @@
-name: ci 
+name: ci
+
 on:
   push:
     branches:
-      - master 
+      - master
       - main
+
 permissions:
   contents: write
+
 jobs:
-  deploy:
+
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv pip install ".[docs]" --system
+      - name: Run lint checks
+        run: uv run ruff check
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11, 3.12]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv pip install ".[docs]" --system
+      - name: Run tests
+        run: uv run pytest test
+
+  deploy:
+    name: Deploy
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Configure Git Credentials
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
-      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV 
+
+      - name: Set up cache
+        run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
+
       - uses: actions/cache@v4
         with:
           key: mkdocs-material-${{ env.cache_id }}
-          path: .cache 
+          path: .cache
           restore-keys: |
             mkdocs-material-
 
@@ -37,6 +81,6 @@ jobs:
 
       - name: Set version default
         run: mike set-default --push latest
-      
+
       - name: Deploy version with mike (update gh-pages branch and push it)
         run: mike deploy --push --update-aliases 1.0 latest
