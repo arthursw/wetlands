@@ -1,9 +1,8 @@
-![Wetland](Wetland.png)
+![](Wetland.png)
 
 ------
 
-![Wetlands pypi](https://img.shields.io/pypi/v/wetlands.svg)
-![Python versions](https://img.shields.io/pypi/pyversions/wetlands.svg)
+[![Wetlands pypi](https://img.shields.io/pypi/v/wetlands.svg)](https://pypi.org/project/wetlands/)
 
 # Wetlands - Conda Environment Manager
 
