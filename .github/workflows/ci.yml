@@ -35,4 +35,8 @@ jobs:
       - name: Get gh-pages branch
         run: git fetch origin gh-pages --depth=1
 
-      - run: mike deploy --push --update-aliases 1.0 latest
+      - name: Set version default
+        run: uv run mike set-default 1.0
+      
+      - name: Deploy version with mike (update gh-pages branch and push it)
+        run: mike deploy --push --update-aliases 1.0 latest
