@@ -110,6 +110,7 @@ The script `scripts/gen_ref_pages.py` generates the API reference automatically 
 ## 📋 Todo
 
 - Handle general [dependency specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#dependency-specifiers) (handle version specifiers like '>=', '~=' etc.).
+- Use [Pixi](https://pixi.sh/) to manage pip and conda dependencies instead of micromamba?
 
 ## 📜 License
 

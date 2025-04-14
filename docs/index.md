@@ -1,4 +1,4 @@
-![](Wetland.png)
+![Wetland](Wetland.svg)
 
 # Wetlands
 
@@ -10,9 +10,9 @@ The name ***Wetlands*** comes from the tropical *environments* where anacondas t
 
 ---
 
-**Documentation:** https://arthursw.github.io/wetlands/latest/
+**Documentation:** [https://arthursw.github.io/wetlands/latest/](https://arthursw.github.io/wetlands/latest/)
 
-**Source Code:** https://github.com/arthursw/wetlands/
+**Source Code:** [https://github.com/arthursw/wetlands/](https://github.com/arthursw/wetlands/)
 
 ---
 
