@@ -1,17 +1,24 @@
 ![](Wetland.png)
 
-------
+# Wetlands
 
-[![Wetlands pypi](https://img.shields.io/pypi/v/wetlands.svg)](https://pypi.org/project/wetlands/)
-
-# Wetlands - Conda Environment Manager
-
+[![Wetlands tests](https://github.com/arthursw/wetlands/actions/workflows/ci.yml/badge.svg?event=push&branch=main)](https://github.com/arthursw/wetlands/actions/)
+[![Wetlands pypi](https://img.shields.io/pypi/v/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
+[![Wetlands python versions](https://img.shields.io/pypi/pyversions/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
 
 **Wetlands** is a lightweight Python library for managing **Conda** environments.
 
 **Wetlands** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
 
-The name ***Wetlands*** comes from the tropical *environments* where Anacondas thrive.
+The name ***Wetlands*** comes from the tropical *environments* where anacondas thrive.
+
+---
+
+**Documentation:** https://arthursw.github.io/wetlands/latest/
+
+**Source Code:** https://github.com/arthursw/wetlands/
+
+---
 
 ## ✨ Features
 
@@ -19,8 +26,6 @@ The name ***Wetlands*** comes from the tropical *environments* where Anacondas t
 - **Dependency Isolation**: Install dependencies without conflicts.
 - **Embedded Execution**: Run Python functions inside isolated environments.
 - **Micromamba**: Wetlands uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
-
----
 
 ## 📦 Installation
 
