@@ -42,6 +42,11 @@ env = environmentManager.create(
 
     If a `mainCondaEnvironmentPath` was provided when instanciating the `EnvironmentManager`, Wetlands will check if `cellpose==3.1.0` is already installed in the main environment and return it if it is the case. If `mainCondaEnvironmentPath` is not provided but the required dependencies are only pip packages, Wetlands will check if the dependencies are installed in the current python environment and return it if it is the case.
 
+!!! note "Specifying dependencies"
+
+    See the [dependencies page](dependencies.md) to learn more on specifying dependencies.
+
+
 #### 3. Launch the Environment's Communication Server
 
 For Wetlands to execute code within the isolated environment (using [`importModule`][wetlands.environment.Environment.importModule] or [`execute`][wetlands.environment.Environment.execute]), we need to launch its background communication server. This server runs as a separate process *inside* the `cellpose_env` and listens for commands from our main script.

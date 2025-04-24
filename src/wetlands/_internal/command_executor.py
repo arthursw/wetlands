@@ -27,6 +27,8 @@ class CommandExecutor:
 
     def _insertCommandErrorChecks(self, commands: list[str]) -> list[str]:
         """Inserts error checking commands after each shell command.
+        Note: could also use [`set -e`](https://stackoverflow.com/questions/3474526/stop-on-first-error),
+        and [`$ErrorActionPreference = "Stop"`](https://stackoverflow.com/questions/9948517/how-to-stop-a-powershell-script-on-the-first-error).
 
         Args:
                 commands: List of original shell commands.

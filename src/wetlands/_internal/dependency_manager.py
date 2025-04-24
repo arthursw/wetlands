@@ -1,9 +1,9 @@
 import platform
 
 try:
-    from typing import NotRequired, TypedDict, Literal              # type: ignore
+    from typing import NotRequired, TypedDict, Literal  # type: ignore
 except ImportError:
-    from typing_extensions import NotRequired, TypedDict, Literal   # type: ignore
+    from typing_extensions import NotRequired, TypedDict, Literal  # type: ignore
 
 from wetlands._internal.exceptions import IncompatibilityException
 from wetlands._internal.settings_manager import SettingsManager
