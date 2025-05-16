@@ -73,7 +73,7 @@ class SettingsManager:
         return [
             f'export {name.lower()}_proxy="{value}"'
             if platform.system() != "Windows"
-            else f'$Env:{name.lower()}_proxy="{value}"'
+            else f'$Env:{name.upper()}_PROXY="{value}"'
             for name, value in self.proxies.items()
         ]
 
