@@ -1,5 +1,7 @@
 import platform
 
+from wetlands._internal.command_generator import CommandGenerator
+
 try:
     from typing import NotRequired, TypedDict, Literal  # type: ignore
 except ImportError:
@@ -27,9 +29,10 @@ class Dependencies(TypedDict):
 class DependencyManager:
     """Manage pip and conda dependencies."""
 
-    def __init__(self, settingsManager: SettingsManager):
+    def __init__(self, commandGenerator: CommandGenerator):
         self.installedPackages: dict[str, dict[str, str]] = {}
-        self.settingsManager = settingsManager
+        self.settingsManager = commandGenerator.settingsManager
+        self.commandGenerator = commandGenerator
 
     def _platformCondaFormat(self) -> str:
         """Get conda-compatible platform string (e.g., 'linux-64', 'osx-arm64', 'win-64')."""
@@ -119,46 +122,38 @@ class DependencyManager:
                 f'One pip dependency has a channel specifier "::". Is it a conda dependency?\n\n({dependencies.get("pip")})'
             )
         installDepsCommands = self.settingsManager.getProxyEnvironmentVariablesCommands()
-        installDepsCommands += (
-            [
-                f'echo "Activating environment {environment}..."',
-                f"{self.settingsManager.condaBin} activate {environment}",
-            ]
-            if environment and (hasCondaDependencies or hasPipDependencies)
-            else []
-        )
-        installDepsCommands += (
-            [
-                f'echo "Installing conda dependencies..."',
-                f"{self.settingsManager.condaBinConfig} install {' '.join(condaDependencies)} -y",
-            ]
-            if len(condaDependencies) > 0
-            else []
-        )
-        installDepsCommands += (
-            [
-                f'echo "Installing conda dependencies without their dependencies..."',
-                f"{self.settingsManager.condaBinConfig} install --no-deps {' '.join(condaDependenciesNoDeps)} -y",
-            ]
-            if len(condaDependenciesNoDeps) > 0
-            else []
-        )
         proxyString = self.settingsManager.getProxyString()
         proxyArgs = f"--proxy {proxyString}" if proxyString is not None else ""
-        installDepsCommands += (
-            [
-                f'echo "Installing pip dependencies..."',
-                f"pip install {proxyArgs} {' '.join(pipDependencies)}",
-            ]
-            if len(pipDependencies) > 0
-            else []
-        )
-        installDepsCommands += (
-            [
-                f'echo "Installing pip dependencies without their dependencies..."',
-                f"pip install {proxyArgs} --no-deps {' '.join(pipDependenciesNoDeps)}",
-            ]
-            if len(pipDependenciesNoDeps) > 0
-            else []
-        )
+        if self.settingsManager.usePixi:
+            if environment is None:
+                raise Exception('Use micromamba if you want to install a pip dependency without specifying a conda environment.')
+            manifestPath = self.settingsManager.getManifestPath(environment)
+            if hasPipDependencies:
+                installDepsCommands += [f'echo "Installing pip dependencies..."',
+                                        f'{self.settingsManager.condaBin} --manifest-path {manifestPath} add --pypi {pipDependencies}']
+            if hasCondaDependencies:
+                installDepsCommands += [f'echo "Installing conda dependencies..."',
+                                        f'{self.settingsManager.condaBin} --manifest-path {manifestPath} add {condaDependencies}']
+            if len(condaDependenciesNoDeps) > 0:
+                raise Exception(f'Use micromamba to be able to install conda packages without their dependencies.')
+            if len(pipDependenciesNoDeps) > 0:
+                installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(environment)
+                installDepsCommands += [f'echo "Installing pip dependencies without their dependencies..."', 
+                                        f"pip install {proxyArgs} --no-deps {' '.join(pipDependenciesNoDeps)}"]
+            return installDepsCommands
+        if environment and (hasCondaDependencies or hasPipDependencies):
+            installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(environment)
+        if len(condaDependencies) > 0:
+            installDepsCommands += [f'echo "Installing conda dependencies..."',
+                                    f"{self.settingsManager.condaBinConfig} install {' '.join(condaDependencies)} -y"]
+        if len(condaDependenciesNoDeps) > 0:
+            installDepsCommands += [f'echo "Installing conda dependencies without their dependencies..."',
+                                    f"{self.settingsManager.condaBinConfig} install --no-deps {' '.join(condaDependenciesNoDeps)} -y"]
+
+        if len(pipDependencies) > 0:
+            installDepsCommands += [f'echo "Installing pip dependencies..."', 
+                                    f"pip install {proxyArgs} {' '.join(pipDependencies)}"]
+        if len(pipDependenciesNoDeps) > 0:
+            installDepsCommands += [f'echo "Installing pip dependencies without their dependencies..."', 
+                                    f"pip install {proxyArgs} --no-deps {' '.join(pipDependenciesNoDeps)}"]
         return installDepsCommands

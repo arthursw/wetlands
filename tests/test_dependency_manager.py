@@ -8,8 +8,8 @@ from wetlands._internal.dependency_manager import DependencyManager, Dependencie
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 
 
-def test_platform_conda_format(mock_settings_manager):
-    dependency_manager = DependencyManager(mock_settings_manager)
+def test_platform_conda_format(mock_settings_manager, mock_command_generator_micromamba):
+    dependency_manager = DependencyManager(mock_command_generator_micromamba)
     expected_platform = {
         "Darwin": "osx",
         "Windows": "win",
@@ -22,8 +22,8 @@ def test_platform_conda_format(mock_settings_manager):
     assert dependency_manager._platformCondaFormat() == expected
 
 
-def test_format_dependencies(mock_settings_manager):
-    dependency_manager = DependencyManager(mock_settings_manager)
+def test_format_dependencies(mock_settings_manager, mock_command_generator_micromamba):
+    dependency_manager = DependencyManager(mock_command_generator_micromamba)
     dependencies: Dependencies = {
         "python": "3.9",
         "conda": [
@@ -62,8 +62,8 @@ def test_format_dependencies(mock_settings_manager):
         dependency_manager.formatDependencies("conda", dependencies)
 
 
-def test_get_install_dependencies_commands(mock_settings_manager):
-    dependency_manager = DependencyManager(mock_settings_manager)
+def test_get_install_dependencies_commands_micromamba(mock_command_generator_micromamba):
+    dependency_manager = DependencyManager(mock_command_generator_micromamba)
     dependencies: Dependencies = {
         "python": "3.9",
         "conda": ["numpy", {"name": "stardist==0.9.1", "dependencies": False}],
@@ -76,10 +76,29 @@ def test_get_install_dependencies_commands(mock_settings_manager):
 
     commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
 
-    assert any(re.match(rf'{mock_settings_manager.condaBinConfig} install "numpy" -y', cmd) for cmd in commands)
+    assert any(re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install "numpy" -y', cmd) for cmd in commands)
     assert any(
-        re.match(rf'{mock_settings_manager.condaBinConfig} install --no-deps "stardist==0.9.1" -y', cmd)
+        re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install --no-deps "stardist==0.9.1" -y', cmd)
         for cmd in commands
     )
     assert any(re.match(r'pip\s+install\s+"requests"', cmd) for cmd in commands)
+    assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)
+
+def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
+    dependency_manager = DependencyManager(mock_command_generator_pixi)
+    dependencies: Dependencies = {
+        "python": "3.9",
+        "conda": ["numpy"],
+        "pip": ["requests", {"name": "cellpose==3.1.0", "dependencies": False}],
+    }
+
+    platform_mock = MagicMock()
+    platform_mock.return_value = "linux-64"
+    dependency_manager._platformCondaFormat = platform_mock
+
+    commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
+
+    condaBin = dependency_manager.settingsManager.condaBin
+    assert any(re.match(rf'{condaBin} add "numpy"', cmd) for cmd in commands)
+    assert any(re.match(rf'{condaBin} add --pypi "request"', cmd) for cmd in commands)
     assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)

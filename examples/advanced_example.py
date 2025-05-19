@@ -10,7 +10,7 @@ from wetlands import logger
 
 logger.setLogLevel(logging.DEBUG)
 
-environmentManager = EnvironmentManager("micromamba")
+environmentManager = EnvironmentManager("pixi")
 
 env = environmentManager.create("advanced_cellpose", {"conda": ["cellpose==3.1.0"]})
 

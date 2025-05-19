@@ -2,9 +2,9 @@ from wetlands.environment_manager import EnvironmentManager
 import urllib.request
 
 # Initialize the environment manager
-# Wetlands will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
-# otherwise it will automatically download and install Micromamba in a self-contained manner.
-environmentManager = EnvironmentManager("micromamba/")
+# Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
+# otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
+environmentManager = EnvironmentManager("pixi/")
 
 # Create and launch an isolated Conda environment named "cellpose"
 env = environmentManager.create("cellpose", {"conda": ["cellpose==3.1.0"]})

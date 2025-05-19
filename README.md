@@ -37,16 +37,16 @@ pip install wetlands
 
 ## 🚀 Usage Example
 
-If the user doesn't have micromamba installed, Wetlands will download and set it up automatically.
+If the user doesn't have pixi or micromamba installed, Wetlands will download and set it up automatically.
 
 ```python
 
 from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager
-# Wetlands will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
-# otherwise it will automatically download and install Micromamba in a self-contained manner.
-environmentManager = EnvironmentManager("micromamba/")
+# Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
+# otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
+environmentManager = EnvironmentManager("pixi/")
 
 # Create and launch an isolated Conda environment named "numpy"
 env = environmentManager.create("numpy", {"pip":["numpy==2.2.4"]})
@@ -78,6 +78,7 @@ See the `examples/` folder for more detailed examples.
 ## 🔗 Related Projects
 
 - [Conda](https://anaconda.org/)
+- [Pixi](https://pixi.sh/)
 - [Micromamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html)
 
 ## 🤖 Development
@@ -110,7 +111,6 @@ The script `scripts/gen_ref_pages.py` generates the API reference automatically 
 ## 📋 Todo
 
 - Handle general [dependency specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#dependency-specifiers) (handle version specifiers like '>=', '~=' etc.).
-- Use [Pixi](https://pixi.sh/) to manage pip and conda dependencies instead of micromamba?
 
 ## 📜 License
 

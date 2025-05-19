@@ -23,7 +23,8 @@ from wetlands.environment_manager import EnvironmentManager
 from wetlands import logger
 
 logger.setLogLevel(logging.DEBUG)
-environmentManager = EnvironmentManager("micromamba/")
+
+environmentManager = EnvironmentManager("micromamba/", False)
 ```
 
 ### Create the Environment

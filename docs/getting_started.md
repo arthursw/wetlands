@@ -14,18 +14,18 @@ segmentationPath = "img02_segmentation.png"
 
 #### 1. Initialize the Environment Manager
 
-We start by initializing the [EnvironmentManager][wetlands.environment_manager.EnvironmentManager]. We provide a path (`"micromamba/"`) where Wetlands should look for an existing Micromamba installation or where it should download and set up a new one if it's not found.
+We start by initializing the [EnvironmentManager][wetlands.environment_manager.EnvironmentManager]. We provide a path (`"pixi/"`, but it could be `"micromamba/"`) where Wetlands should look for an existing Pixi (or Micromamba) installation or where it should download and set up a new one if it's not found.
 
 ```python
 from wetlands.environment_manager import EnvironmentManager
 from pathlib import Path
 
-environmentManager = EnvironmentManager("micromamba/")
+environmentManager = EnvironmentManager("pixi/")
 ```
 
 !!! note
     
-    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument, useful if Wetlands is used in a conda environment (e.g. `environmentManager = EnvironmentManager("micromamba/", "/path/to/project/environment/")`). Wetlands will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Wetlands communication server.
+    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument (only usable with micromamba for now), useful if Wetlands is used in a conda environment (e.g. `environmentManager = EnvironmentManager("micromamba/", False, "/path/to/project/environment/")`). Wetlands will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Wetlands communication server.
 
 #### 2. Create (or get) an Environment and Install Dependencies
 
@@ -103,9 +103,9 @@ print("Done.")
     segmentationPath = "img02_segmentation.png"
 
     # Initialize the environment manager
-    # Wetlands will use the existing Micromamba installation at the specified path (e.g., "micromamba/") if available;
-    # otherwise it will automatically download and install Micromamba in a self-contained manner.
-    environmentManager = EnvironmentManager("micromamba/")
+# Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
+# otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
+    environmentManager = EnvironmentManager("pixi/")
 
     # Create and launch an isolated Conda environment named "cellpose"
     env = environmentManager.create("cellpose", {"conda": ["cellpose==3.1.0"]})

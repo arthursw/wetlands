@@ -25,8 +25,8 @@ class EnvironmentManager:
             environments: map of the environments
 
             settingsManager: SettingsManager(condaPath)
-            dependencyManager: DependencyManager(settingsManager)
-            commandGenerator: CommandGenerator(settingsManager, dependencyManager)
+            commandGenerator: CommandGenerator(settingsManager)
+            dependencyManager: DependencyManager(commandGenerator)
             commandExecutor: CommandExecutor()
     """
 
@@ -35,7 +35,7 @@ class EnvironmentManager:
     environments: dict[str, Environment] = {}
 
     def __init__(
-        self, condaPath: str | Path = Path("micromamba"), mainCondaEnvironmentPath: str | Path | None = None
+        self, condaPath: str | Path = Path("pixi"), usePixi = True, mainCondaEnvironmentPath: str | Path | None = None
     ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
@@ -43,22 +43,25 @@ class EnvironmentManager:
                 condaPath: Path to the micromamba binary. Defaults to "micromamba".
                 mainCondaEnvironmentPath: Path of the main conda environment in which wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment).
         """
+        if usePixi and mainCondaEnvironmentPath is not None:
+            raise Exception('Main environment can only be used with micromamba for now.')
         self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
-        self.settingsManager = SettingsManager(condaPath)
-        self.dependencyManager = DependencyManager(self.settingsManager)
-        self.commandGenerator = CommandGenerator(self.settingsManager, self.dependencyManager)
+        self.settingsManager = SettingsManager(condaPath, usePixi)
+        self.commandGenerator = CommandGenerator(self.settingsManager)
+        self.dependencyManager = DependencyManager(self.commandGenerator)
         self.commandExecutor = CommandExecutor()
 
-    def setCondaPath(self, condaPath: str | Path) -> None:
+    def setCondaPath(self, condaPath: str | Path, usePixi = True) -> None:
         """Updates the micromamba path and loads proxy settings if exists.
 
         Args:
                 condaPath: New path to micromamba binary.
+                usePixi: Whether to use Pixi or Micromamba
 
         Side Effects:
                 Updates self.settingsManager.condaBinConfig, and self.settingsManager.proxies from the .mambarc file.
         """
-        self.settingsManager.setCondaPath(condaPath)
+        self.settingsManager.setCondaPath(condaPath, usePixi)
 
     def setProxies(self, proxies: dict[str, str]) -> None:
         """Configures proxy settings for Conda operations.
@@ -111,8 +114,7 @@ class EnvironmentManager:
             if self.mainEnvironment.name is None:
                 return False
             elif "conda" not in self.installedPackages:
-                commands = self.commandGenerator.getActivateCondaCommands() + [
-                    f"{self.settingsManager.condaBin} activate {self.mainEnvironment.name}",
+                commands = self.commandGenerator.getActivateEnvironmentCommands(self.mainEnvironment.name) + [
                     f"{self.settingsManager.condaBin} list --json",
                 ]
                 condaList = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
@@ -135,8 +137,7 @@ class EnvironmentManager:
 
         if "pip" not in self.installedPackages:
             if self.mainEnvironment.name is not None:
-                commands = self.commandGenerator.getActivateCondaCommands() + [
-                    f"{self.settingsManager.condaBin} activate {self.mainEnvironment.name}",
+                commands = self.commandGenerator.getActivateEnvironmentCommands(self.mainEnvironment.name) + [
                     f"pip freeze --all",
                 ]
                 output = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
@@ -191,7 +192,12 @@ class EnvironmentManager:
             raise Exception("Python version must be greater than 3.8")
         pythonRequirement = " python=" + (pythonVersion if len(pythonVersion) > 0 else platform.python_version())
         createEnvCommands = self.commandGenerator.getActivateCondaCommands()
-        createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"]
+        if self.settingsManager.usePixi:
+            workspacePath = self.settingsManager.getWorkspacePath(environment)
+            createEnvCommands += [f"{self.settingsManager.condaBin} init --no-progress {workspacePath}"]
+            createEnvCommands += [f"{self.settingsManager.condaBin} add --no-progress {pythonRequirement}"]
+        else:
+            createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"]
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         self.commandExecutor.executeCommandAndGetOutput(createEnvCommands)

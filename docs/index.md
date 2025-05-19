@@ -45,7 +45,7 @@ Here is a minimal example usage:
 from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager
-environmentManager = EnvironmentManager("micromamba/")
+environmentManager = EnvironmentManager("pixi/")
 
 # Create and launch a Conda environment named "numpy_env"
 env = environmentManager.create("numpy_env", {"pip": ["numpy==2.2.4"]})

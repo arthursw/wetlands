@@ -12,7 +12,6 @@ from typing import Union
 import yaml
 
 from wetlands._internal.settings_manager import SettingsManager
-from wetlands._internal.dependency_manager import DependencyManager
 
 
 class CommandsDict(TypedDict):
@@ -28,36 +27,32 @@ Commands = Union[CommandsDict, list[str]]
 class CommandGenerator:
     """Generate Conda commands."""
 
-    def __init__(self, settingsManager: SettingsManager, dependencyManager: DependencyManager):
+    def __init__(self, settingsManager: SettingsManager):
         self.settingsManager = settingsManager
-        self.dependencyManager = dependencyManager
 
     def getShellHookCommands(self) -> list[str]:
-        """Generates shell commands for Conda initialization.
+        """Generates shell commands for Conda initialization. Only relevant when using micromamba.
 
         Returns:
                 OS-specific commands to activate Conda shell hooks.
         """
-        currentPath = Path.cwd().resolve()
+        if self.settingsManager.usePixi: return []
         condaPath, condaBinPath = self.settingsManager.getCondaPaths()
         if platform.system() == "Windows":
             return [
-                f'Set-Location -Path "{condaPath}"',
                 f'$Env:MAMBA_ROOT_PREFIX="{condaPath}"',
                 f".\\{condaBinPath} shell hook -s powershell | Out-String | Invoke-Expression",
-                f'Set-Location -Path "{currentPath}"',
             ]
         else:
             return [
-                f'cd "{condaPath}"',
                 f'export MAMBA_ROOT_PREFIX="{condaPath}"',
                 f'eval "$({condaBinPath} shell hook -s posix)"',
-                f'cd "{currentPath}"',
             ]
+    
 
     def createMambaConfigFile(self, condaPath):
         """Create Mamba config file .mambarc in condaPath, with nodefaults and conda-forge channels."""
-        condaPath.mkdir(exist_ok=True, parents=True)
+        if self.settingsManager.usePixi: return
         with open(condaPath / ".mambarc", "w") as f:
             mambaSettings = dict(
                 channel_priority="flexible",
@@ -102,6 +97,7 @@ class CommandGenerator:
         if platform.system() not in ["Windows", "Linux", "Darwin"]:
             raise Exception(f"Platform {platform.system()} is not supported.")
 
+        condaPath.mkdir(exist_ok=True, parents=True)
         self.createMambaConfigFile(condaPath)
 
         commands = self.settingsManager.getProxyEnvironmentVariablesCommands()
@@ -121,24 +117,42 @@ class CommandGenerator:
                     ]
                     proxyCredentials = f"-ProxyCredential $proxyCredentials"
             proxyArgs = f"-Proxy {proxyString} {proxyCredentials}" if proxyString is not None else ""
-            commands += [
-                f'Set-Location -Path "{condaPath}"',
-                f'echo "Installing Visual C++ Redistributable if necessary..."',
-                f'Invoke-WebRequest {proxyArgs} -URI "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$env:Temp\\vc_redist.x64.exe"; Start-Process "$env:Temp\\vc_redist.x64.exe" -ArgumentList "/quiet /norestart" -Wait; Remove-Item "$env:Temp\\vc_redist.x64.exe"',
-                f'echo "Installing micromamba..."',
-                f"Invoke-Webrequest {proxyArgs} -URI https://github.com/mamba-org/micromamba-releases/releases/download/2.0.4-0/micromamba-win-64 -OutFile micromamba.exe",
-            ]
+            if self.settingsManager.usePixi:
+                commands += [
+                    'echo "Installing pixi..."',
+                    '$tempFile = "$env:TEMP\\pixi-install.ps1"',
+                    'try {',
+                        f'Invoke-Webrequest {proxyArgs} -UseBasicParsing -Uri https://pixi.sh/install.ps1',
+                        f'& $tempFile -PixiHome {condaPath} -NoPathUpdate',
+                    '} finally {',
+                        'Remove-Item $tempFile -ErrorAction SilentlyContinue',
+                    '}',
+                ]
+            else:
+                commands += [
+                    f'Set-Location -Path "{condaPath}"',
+                    f'echo "Installing Visual C++ Redistributable if necessary..."',
+                    f'Invoke-WebRequest {proxyArgs} -URI "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$env:Temp\\vc_redist.x64.exe"; Start-Process "$env:Temp\\vc_redist.x64.exe" -ArgumentList "/quiet /norestart" -Wait; Remove-Item "$env:Temp\\vc_redist.x64.exe"',
+                    f'echo "Installing micromamba..."',
+                    f"Invoke-Webrequest {proxyArgs} -URI https://github.com/mamba-org/micromamba-releases/releases/download/2.0.4-0/micromamba-win-64 -OutFile micromamba.exe",
+                ]
         else:
             system = "osx" if platform.system() == "Darwin" else "linux"
             machine = platform.machine()
             machine = "64" if machine == "x86_64" else machine
             proxyArgs = f'--proxy "{proxyString}"' if proxyString is not None else ""
-            commands += [
-                f'cd "{condaPath}"',
-                f'echo "Installing micromamba..."',
-                f"curl {proxyArgs} -Ls https://micro.mamba.pm/api/micromamba/{system}-{machine}/latest | tar -xvj bin/micromamba",
-            ]
-        commands += self.getShellHookCommands()
+            if self.settingsManager.usePixi:
+                commands += [
+                    f'cd "{condaPath}"',
+                    f'echo "Installing pixi..."',
+                    f'curl {proxyArgs} -fsSL https://pixi.sh/install.sh | PIXI_HOME={condaPath} PIXI_NO_PATH_UPDATE=1 bash'
+                ]
+            else:
+                commands += [
+                    f'cd "{condaPath}"',
+                    f'echo "Installing micromamba..."',
+                    f'curl {proxyArgs} -fsSL https://micro.mamba.pm/api/micromamba/{system}-{machine}/latest | tar -xvj bin/micromamba',
+                ]
         return commands
 
     def getActivateCondaCommands(self) -> list[str]:
@@ -147,19 +161,27 @@ class CommandGenerator:
         return commands + self.getShellHookCommands()
 
     def getActivateEnvironmentCommands(
-        self, environment: str | None, additionalActivateCommands: Commands = {}
+        self, environment: str | None, additionalActivateCommands: Commands = {}, activateConda = True
     ) -> list[str]:
         """Generates commands to activate the given environment
 
         Args:
                 environment: Environment name to launch. If none, the resulting command list will be empty.
                 additionalActivateCommands: Platform-specific activation commands.
+                activateConda: Whether to activate conda (micromamba) or not.
 
         Returns:
                 List of commands to activate the environment
         """
         if environment is None:
             return []
-        commands = self.getActivateCondaCommands()
-        commands += [f"{self.settingsManager.condaBin} activate {environment}"]
+        commands = self.getActivateCondaCommands() if activateConda else []
+        if self.settingsManager.usePixi:
+            manifestPath = self.settingsManager.getManifestPath(environment)
+            if platform.system() != "Windows":
+                commands += [f'eval "$({self.settingsManager.condaBin} shell-hook --manifest-path {manifestPath})"']
+            else:
+                commands += [f".\\{self.settingsManager.condaBin} shell-hook --manifest-path {manifestPath} | Out-String | Invoke-Expression",]
+        else:
+            commands += [f"{self.settingsManager.condaBin} activate {environment}"]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)

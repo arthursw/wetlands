@@ -68,12 +68,31 @@ def mock_command_executor(monkeypatch):
 @pytest.fixture
 def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeypatch):
     """Provides an EnvironmentManager instance with mocked CommandExecutor."""
-    dummy_micromamba_path = tmp_path_factory.mktemp("micromamba root")
-    main_env_path = tmp_path_factory.mktemp("micromamba root") / "envs" / "main_test_env"
+    dummy_micromamba_path = tmp_path_factory.mktemp("conda root")
+    main_env_path = tmp_path_factory.mktemp("conda root") / "envs" / "main_test_env"
 
     # Don't create main_env_path directory, let the manager handle checks
 
-    manager = EnvironmentManager(condaPath=dummy_micromamba_path, mainCondaEnvironmentPath=main_env_path)
+    manager = EnvironmentManager(condaPath=dummy_micromamba_path, usePixi=False, mainCondaEnvironmentPath=main_env_path)
+
+    # Apply the mocks to the specific instance's commandExecutor
+    monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])
+    monkeypatch.setattr(
+        manager.commandExecutor, "executeCommandAndGetOutput", mock_command_executor["executeCommandAndGetOutput"]
+    )
+
+    # Mock environmentExists to simplify create tests
+    # We can override this in specific tests if needed
+    monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+
+    return manager, mock_command_executor["executeCommandAndGetOutput"], mock_command_executor["executeCommands"]
+
+@pytest.fixture
+def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, monkeypatch):
+    """Provides an EnvironmentManager instance with mocked CommandExecutor."""
+    dummy_pixi_path = tmp_path_factory.mktemp("pixi root")
+
+    manager = EnvironmentManager(condaPath=dummy_pixi_path, usePixi=True)
 
     # Apply the mocks to the specific instance's commandExecutor
     monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])
@@ -512,3 +531,44 @@ def test_execute_commands_in_main_env(environment_manager_fixture):
 
     # Check user command
     assert "ls -l" in command_list
+
+
+# Test with Pixi Environment Manager
+
+
+def test_create_with_python_version(environment_manager_pixi_fixture, monkeypatch):
+    manager, mock_execute_output, _ = environment_manager_pixi_fixture
+    env_name = "py-versioned-env"
+    py_version = "3.10.5"
+    dependencies: Dependencies = {"python": f"={py_version}", "pip": ["toolz"]}  # Use exact match format
+
+    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+    monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+
+    env = manager.create(env_name, dependencies=dependencies)
+
+    assert isinstance(env, ExternalEnvironment)
+    mock_execute_output.assert_called()
+    called_args, _ = mock_execute_output.call_args
+    command_list = called_args[0]
+    assert any(f"pixi init" in cmd for cmd in command_list)
+    # Check python version is in create command
+    assert any(f"pixi add python={py_version}" in cmd for cmd in command_list)
+    # Check install command for toolz
+    assert any("toolz" in cmd for cmd in command_list if "pixi add" in cmd)
+
+# ---- install Tests ----
+
+def test_install_in_existing_env(environment_manager_pixi_fixture):
+    manager, mock_execute_output, _ = environment_manager_pixi_fixture
+    env_name = "target-env"
+    dependencies: Dependencies = {"conda": ["new_dep==1.0"]}
+
+    manager.install(env_name, dependencies)
+
+    mock_execute_output.assert_called_once()
+    called_args, _ = mock_execute_output.call_args
+    command_list = called_args[0]
+
+    # Check for install commands targeting the environment
+    assert any("new_dep==1.0" in cmd for cmd in command_list if "pixi add" in cmd)
