@@ -1,4 +1,5 @@
 import platform
+import json
 import subprocess
 import tempfile
 from typing import Any
@@ -158,7 +159,7 @@ class CommandExecutor:
         commands: list[str],
         exitIfCommandError: bool = True,
         log: bool = True,
-        popenKwargs: dict[str, Any] = {},
+        popenKwargs: dict[str, Any] = {}
     ) -> list[str]:
         """Executes commands and captures their output. See [`CommandExecutor.executeCommands`][wetlands._internal.command_executor.CommandExecutor.executeCommands] for more details on the arguments.
 
@@ -174,5 +175,20 @@ class CommandExecutor:
         rawCommands = commands.copy()
         process = self.executeCommands(commands, exitIfCommandError, popenKwargs)
         with process:
-            return self.getOutput(process, rawCommands, log=log)
-        return
+            output = self.getOutput(process, rawCommands, log=log)
+            return output
+
+    def executeCommandAndGetJsonOutput(
+        self,
+        commands: list[str],
+        exitIfCommandError: bool = True,
+        log: bool = True,
+        popenKwargs: dict[str, Any] = {}
+    ) -> list[dict[str,str]]:
+        """Execute [`CommandExecutor.executeCommandAndGetOutput`][wetlands._internal.command_executor.CommandExecutor.executeCommandAndGetOutput] and parse the json output.
+
+        Returns:
+                Output json.
+        """
+        output = self.executeCommandAndGetOutput(commands, exitIfCommandError, log, popenKwargs)
+        return json.loads(''.join(output))
