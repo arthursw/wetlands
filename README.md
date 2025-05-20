@@ -67,7 +67,7 @@ env.exit()
 
 with `example_module.py` as follow:
 
-```
+```python
 def sum(x):
     import numpy as np
     return int(np.sum(x))
@@ -92,6 +92,7 @@ Check for code errors with `uv run ruff check` and format the code with `uv run 
 ### Tests
 
 Test wetlands with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
+Use `--last-failed` to only re-run the failures: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb --last-failed tests`
 
 ### Generate documentation
 

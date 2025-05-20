@@ -1,18 +1,18 @@
 import re
 from unittest.mock import patch
 import pytest
-from tests.conftest import mock_settings_manager_micromamba, mock_settings_manager_pixi
+
 from wetlands._internal.command_generator import CommandGenerator
 
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 
 @pytest.fixture
-def command_generator_pixi():
+def command_generator_pixi(mock_settings_manager_pixi):
     return CommandGenerator(mock_settings_manager_pixi)
 
 
 @pytest.fixture
-def command_generator_micromamba():
+def command_generator_micromamba(mock_settings_manager_micromamba):
     return CommandGenerator(mock_settings_manager_micromamba)
 
 
@@ -25,13 +25,13 @@ def test_get_install_conda_commands_exists(mock_exists, command_generator_pixi):
 def test_get_install_conda_commands_windows_pixi(mock_platform, command_generator_pixi):
     commands = command_generator_pixi.getInstallCondaCommands()
     condaPath, condaBinPath = command_generator_pixi.settingsManager.getCondaPaths()
-    assert any(re.match(r"Invoke-Webrequest.*-URI.*pixi", cmd) for cmd in commands)
+    assert any(re.match(r" *Invoke-Webrequest.*-URI.*pixi", cmd) for cmd in commands)
 
 @patch("platform.system", return_value="Windows")
 def test_get_install_conda_commands_windows_micromamba(mock_platform, command_generator_micromamba):
     commands = command_generator_micromamba.getInstallCondaCommands()
     condaPath, condaBinPath = command_generator_micromamba.settingsManager.getCondaPaths()
-    assert any(re.match(r"Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands)
+    assert any(re.match(r" *Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands)
 
 @patch("platform.system", return_value="Linux")
 def test_get_install_conda_commands_linux_pixi(mock_platform, command_generator_pixi):

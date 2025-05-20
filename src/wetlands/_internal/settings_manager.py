@@ -1,8 +1,6 @@
 from pathlib import Path
 import platform
 
-from sympy import use
-
 
 class SettingsManager:
     usePixi = True
@@ -23,7 +21,9 @@ class SettingsManager:
                 Updates condaBinConfig and proxies from the .mambarc file.
         """
         self.usePixi = usePixi
+        self.condaBin = "pixi" if usePixi else "micromamba"
         self.condaPath = Path(condaPath).resolve()
+        # condaBinConfig is only used with micromamba but let's initialize it for pixi as well
         condaConfigPath = self.condaPath / "pixi.toml" if self.usePixi else self.condaPath / ".mambarc"
         self.condaBinConfig = f'{self.condaBin} --manifest-path "{condaConfigPath}"' if self.usePixi else f'{self.condaBin} --rc-file "{condaConfigPath}"'
 

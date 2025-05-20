@@ -1,4 +1,3 @@
-import json
 import re
 import platform
 from importlib import metadata
@@ -21,8 +20,6 @@ class EnvironmentManager:
 
     Attributes:
             mainEnvironment: The main conda environment in which wetlands is installed.
-            installedPackages: map of the installed packages (e.g. {"pip": {"numpy":2.2.4"}, "conda":{"icu":"75.1"}})
-            installedPackages: list of the installed packages (e.g. [{"kind":"pypi", "name": "numpy", "version", "2.2.4"}, {"kind":"conda", "name": "icu", "version", "75.1"}, ...])
             environments: map of the environments
 
             settingsManager: SettingsManager(condaPath)
@@ -32,8 +29,6 @@ class EnvironmentManager:
     """
 
     mainEnvironment: InternalEnvironment
-    # installedPackages: dict[str, dict[str, str]] = {}
-    installedPackages: list[dict[str, str]] = []
     environments: dict[str, Environment] = {}
 
     def __init__(
@@ -80,20 +75,7 @@ class EnvironmentManager:
         """Removes channel prefix from a Conda dependency string (e.g., "channel::package" -> "package")."""
         return condaDependency.split("::")[1] if "::" in condaDependency else condaDependency
 
-    def _checkRequirement(self, dependency: str, packageManager: Literal["pip", "conda"]) -> bool:
-        """Check if dependency is installed (exists in self.installedPackages)"""
-        if packageManager == "conda":
-            dependency = self._removeChannel(dependency)
-        nameVersion = dependency.split("==")
-        packageManagerName = "conda" if packageManager == "conda" else "pypi"
-        return any(
-            [
-                nameVersion[0] == package["name"] and (len(nameVersion) == 1 or package["version"].startswith(nameVersion[1])) and packageManagerName == package["kind"]
-                for package in self.installedPackages
-            ]
-        )
-
-    def _getInstalledPackages(self, environment: str) -> list[dict[str, str]]:
+    def getInstalledPackages(self, environment: str) -> list[dict[str, str]]:
         """Get the list of the packages installed in the environment
         
         Args:
@@ -104,7 +86,7 @@ class EnvironmentManager:
         """
         if self.settingsManager.usePixi:
             manifestPath = self.settingsManager.getManifestPath(environment)
-            commands = [f"{self.settingsManager.condaBin} list --json {environment} --manifest-path {manifestPath}"]
+            commands = [f'{self.settingsManager.condaBin} list --json --manifest-path "{manifestPath}"']
             return self.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
         else:
             commands = self.commandGenerator.getActivateEnvironmentCommands(environment) + [
@@ -122,6 +104,18 @@ class EnvironmentManager:
             packages += [ {"name": name, "version": version, "kind": "pypi"} for name, version in parsedOutput ]
             return packages
 
+    def _checkRequirement(self, dependency: str, packageManager: Literal["pip", "conda"], installedPackages: list[dict[str,str]]) -> bool:
+        """Check if dependency is installed (exists in installedPackages)"""
+        if packageManager == "conda":
+            dependency = self._removeChannel(dependency)
+        nameVersion = dependency.split("==")
+        packageManagerName = "conda" if packageManager == "conda" else "pypi"
+        return any(
+            [
+                nameVersion[0] == package["name"] and (len(nameVersion) == 1 or package["version"].startswith(nameVersion[1])) and packageManagerName == package["kind"]
+                for package in installedPackages
+            ]
+        )
 
     def _dependenciesAreInstalled(self, dependencies: Dependencies) -> bool:
         """Verifies if all specified dependencies are installed in the main environment.
@@ -142,17 +136,19 @@ class EnvironmentManager:
         pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.dependencyManager.formatDependencies(
             "pip", dependencies, False, False
         )
-
+        if not hasPipDependencies and not hasCondaDependencies:
+            return True
         if hasCondaDependencies and self.mainEnvironment.name is None:
             return False
+        installedPackages = []
         if hasPipDependencies and self.mainEnvironment.name is None:
-            self.installedPackages = [ {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi" } for dist in metadata.distributions() ]
+            installedPackages = [ {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi" } for dist in metadata.distributions() ]
         
         if self.mainEnvironment.name is not None:
-            self.installedPackages = self._getInstalledPackages(self.mainEnvironment.name)
+            installedPackages = self.getInstalledPackages(self.mainEnvironment.name)
 
-        condaSatisfied = all([self._checkRequirement(d, "conda") for d in condaDependencies + condaDependenciesNoDeps])
-        pipSatisfied = all([self._checkRequirement(d, "pip") for d in pipDependencies + pipDependenciesNoDeps])
+        condaSatisfied = all([self._checkRequirement(d, "conda", installedPackages) for d in condaDependencies + condaDependenciesNoDeps])
+        pipSatisfied = all([self._checkRequirement(d, "pip", installedPackages) for d in pipDependencies + pipDependenciesNoDeps])
 
         return condaSatisfied and pipSatisfied
 
@@ -166,7 +162,10 @@ class EnvironmentManager:
                 True if environment exists, False otherwise.
         """
         condaMeta = Path(self.settingsManager.condaPath) / "envs" / environment / "conda-meta"
-        return condaMeta.is_dir()
+        if self.settingsManager.usePixi:
+            return condaMeta.is_dir() and self.settingsManager.getManifestPath(environment).exists()
+        else:
+            return condaMeta.is_dir()
 
     def create(
         self,
@@ -200,8 +199,9 @@ class EnvironmentManager:
         createEnvCommands = self.commandGenerator.getActivateCondaCommands()
         if self.settingsManager.usePixi:
             workspacePath = self.settingsManager.getWorkspacePath(environment)
-            createEnvCommands += [f"{self.settingsManager.condaBin} init --no-progress {workspacePath}"]
-            createEnvCommands += [f"{self.settingsManager.condaBin} add --no-progress {pythonRequirement}"]
+            manifestPath = self.settingsManager.getManifestPath(environment)
+            createEnvCommands += [f'{self.settingsManager.condaBin} init --no-progress "{workspacePath}"']
+            createEnvCommands += [f'{self.settingsManager.condaBin} add --no-progress --manifest-path "{manifestPath}" {pythonRequirement}']
         else:
             createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"]
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
@@ -224,8 +224,7 @@ class EnvironmentManager:
         Returns:
                 Output lines of the installation commands.
         """
-        installCommands = self.commandGenerator.getActivateCondaCommands()
-        installCommands += self.dependencyManager.getInstallDependenciesCommands(environmentName, dependencies)
+        installCommands = self.dependencyManager.getInstallDependenciesCommands(environmentName, dependencies)
         installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         return self.commandExecutor.executeCommandAndGetOutput(installCommands)
 

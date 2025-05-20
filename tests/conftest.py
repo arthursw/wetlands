@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 import pytest
 from wetlands._internal.settings_manager import SettingsManager
+from wetlands._internal.command_generator import CommandGenerator
 from wetlands._internal.dependency_manager import DependencyManager
 
 
@@ -32,3 +33,11 @@ def mock_settings_manager_pixi(tmp_path_factory):
 @pytest.fixture
 def mock_dependency_manager():
     return MagicMock(spec=DependencyManager)
+
+@pytest.fixture
+def mock_command_generator_micromamba(mock_settings_manager_micromamba):
+    return CommandGenerator(mock_settings_manager_micromamba)
+
+@pytest.fixture
+def mock_command_generator_pixi(mock_settings_manager_pixi):
+    return CommandGenerator(mock_settings_manager_pixi)

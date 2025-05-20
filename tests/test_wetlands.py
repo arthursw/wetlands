@@ -1,7 +1,6 @@
 from multiprocessing.connection import Client
 from typing import cast
 import os
-import json
 import platform
 from pathlib import Path
 import logging
@@ -15,17 +14,17 @@ from wetlands.external_environment import ExternalEnvironment
 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="module", params=["micromamba root/", "pixi root/"])
-def env_manager(conda_root, tmp_path_factory):
+def env_manager(request, tmp_path_factory):
     # Setup temporary conda root
-    temp_root = tmp_path_factory.mktemp(conda_root)
+    temp_root = tmp_path_factory.mktemp(request.param)
     logger.info(f"Creating test directory {temp_root}")
     # Basic environment configuration
-    manager = EnvironmentManager(temp_root, usePixi="pixi" in conda_root)
+    manager = EnvironmentManager(temp_root, usePixi="pixi" in request.param)
     yield manager
 
     for env_name, env in manager.environments.copy().items():
@@ -44,20 +43,9 @@ def test_environment_creation(env_manager):
     env = env_manager.create(env_name, dependencies)
 
     # Verify that 'requests' is installed
-    if env_manager.settingsManager.usePixi:
-        manifestPath = env_manager.settingsManager.getManifestPath(env_name)
-        commands = [f"{env_manager.settingsManager.condaBin} list --json {env_name} --manifest-path {manifestPath}"]
-        installedPackages = env_manager.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
-        assert any(icp["name"] == "requests" for icp in installedPackages)
-    else:
-        commands = env_manager.commandGenerator.getActivateCondaCommands() + [
-            f"{env_manager.settingsManager.condaBin} activate {env_name}",
-            f"{env_manager.settingsManager.condaBin} list -y",
-        ]
-        installedCondaPackages = env_manager.commandExecutor.executeCommandAndGetOutput(commands, log=False)
-
-        assert any("requests" in icp for icp in installedCondaPackages)
-
+    installedPackages = env_manager.getInstalledPackages(env_name)
+    assert any(icp["name"] == "requests" for icp in installedPackages)
+    
     env.exit()
 
 
@@ -65,28 +53,16 @@ def test_dependency_installation(env_manager):
     """Test that EnvironmentManager.install() correctly installs dependencies."""
     env_name = "test_env_deps"
     logger.info(f"Testing dependency installation: {env_name}")
-    env = cast(ExternalEnvironment, env_manager.create(env_name))
+    env = cast(ExternalEnvironment, env_manager.create(env_name, forceExternal=True))
     dependencies = Dependencies({"pip": ["numpy==2.2.0"], "conda": ["bioimageit::noise2self==1.0"]})
+
     env.install(dependencies)
 
     # Verify that 'numpy' and 'noise2self' is installed
-    if env_manager.settingsManager.usePixi:
-        manifestPath = env_manager.settingsManager.getManifestPath(env_name)
-        commands = [f"{env_manager.settingsManager.condaBin} list --json {env_name} --manifest-path {manifestPath}"]
-        installedPackages = env_manager.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
-        assert any(icp["name"] == "noise2self" and icp["version"].startswith("1.0") and icp["kind"] == "conda" for icp in installedPackages)
-        assert any(icp["name"] == "numpy" and icp["version"].startswith("2.2.0") and icp["kind"] == "pypi" for icp in installedPackages)
-    else:
-        commands = env_manager.commandGenerator.getActivateCondaCommands() + [
-            f"{env_manager.settingsManager.condaBin} activate {env_name}",
-            f"{env_manager.settingsManager.condaBin} list -y",
-            f"pip freeze --all",
-        ]
-        installedCondaPackages = env_manager.commandExecutor.executeCommandAndGetOutput(commands, log=False)
-
-        assert any("noise2self" in icp for icp in installedCondaPackages)
-        assert any("numpy" in icp for icp in installedCondaPackages)
-
+    installedPackages = env_manager.getInstalledPackages(env_name)
+    assert any(icp["name"] == "noise2self" and icp["version"].startswith("1.0") and icp["kind"] == "conda" for icp in installedPackages)
+    assert any(icp["name"] == "numpy" and icp["version"].startswith("2.2.0") and icp["kind"] == "pypi" for icp in installedPackages)
+    
     env.exit()
 
 
@@ -140,6 +116,9 @@ def test_mambarc_modification(env_manager, tmp_path):
     logger.info("Testing .mambarc modification")
     proxies = {"http": "http://proxy.example.com", "https": "https://proxy.example.com"}
     env_manager.setProxies(proxies)
+    if env_manager.settingsManager.usePixi:
+        assert env_manager.settingsManager.proxies == proxies
+        return
     mambarc_path = Path(env_manager.settingsManager.condaPath) / ".mambarc"
     assert os.path.exists(mambarc_path)
 

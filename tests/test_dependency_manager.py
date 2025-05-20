@@ -8,7 +8,7 @@ from wetlands._internal.dependency_manager import DependencyManager, Dependencie
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 
 
-def test_platform_conda_format(mock_settings_manager, mock_command_generator_micromamba):
+def test_platform_conda_format(mock_command_generator_micromamba):
     dependency_manager = DependencyManager(mock_command_generator_micromamba)
     expected_platform = {
         "Darwin": "osx",
@@ -22,7 +22,7 @@ def test_platform_conda_format(mock_settings_manager, mock_command_generator_mic
     assert dependency_manager._platformCondaFormat() == expected
 
 
-def test_format_dependencies(mock_settings_manager, mock_command_generator_micromamba):
+def test_format_dependencies(mock_command_generator_micromamba):
     dependency_manager = DependencyManager(mock_command_generator_micromamba)
     dependencies: Dependencies = {
         "python": "3.9",
@@ -99,6 +99,6 @@ def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
     commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
 
     condaBin = dependency_manager.settingsManager.condaBin
-    assert any(re.match(rf'{condaBin} add "numpy"', cmd) for cmd in commands)
-    assert any(re.match(rf'{condaBin} add --pypi "request"', cmd) for cmd in commands)
+    assert any("pixi add" in cmd and '"numpy"' in cmd for cmd in commands)
+    assert any("pixi add" in cmd and '--pypi "requests"' in cmd for cmd in commands)
     assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)

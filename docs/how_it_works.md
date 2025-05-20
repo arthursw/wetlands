@@ -1,10 +1,10 @@
 ## 🎓 Step by Step
 
-Wetlands leverages **Micromamba**, a fast, native reimplementation of the Conda package manager.
+Wetlands leverages **Pixi**, a package management tool for developers, or **Micromamba**, a fast, native reimplementation of the Conda package manager.
 
-1.  **Micromamba Setup:** When `EnvironmentManager` is initialized, it checks for a `micromamba` executable at the specified path (e.g., `"micromamba/"`). If not found, it downloads a self-contained Micromamba binary suitable for the current operating system and architecture into that directory. This means Wetlands doesn't require a pre-existing Conda/Mamba installation.
-2.  **Environment Creation:** `create(name, dependencies)` uses Micromamba commands (`micromamba create -n name -c channel package ...`) to build a new, isolated Conda environment within the Micromamba prefix (e.g., `micromamba/envs/name`). Note that the main environemnt is returned if it already satisfies the required dependencies.
-3.  **Dependency Installation:** Dependencies (Conda packages, Pip packages) are installed into the target environment using `micromamba install ...` and `pip install ...` (executed within the activated environment).
+1.  **Pixi or Micromamba Setup:** When `EnvironmentManager` is initialized, it checks for a `pixi` or `micromamba` executable at the specified path (e.g., `"micromamba/"`). If not found, it downloads a self-contained Pixi or Micromamba binary suitable for the current operating system and architecture into that directory. This means Wetlands doesn't require a pre-existing Conda/Mamba installation.
+2.  **Environment Creation:** `create(envName, dependencies)` uses Pixi or Micromamba commands (`pixi init /path/to/envName` or  `micromamba create -n envName -c channel package ...`) to build a new, isolated Conda environment within the Pixi or Micromamba prefix (e.g., `pixi/envs/envName` or `micromamba/envs/envName`). When using Pixi, Wetlands also creates a workspace for the environment (e.g. `pixi/workspace/envName`). Note that the main environemnt is returned if it already satisfies the required dependencies.
+3.  **Dependency Installation:** Dependencies (Conda packages, Pip packages) are installed into the target environment using `pixi add ...` or `micromamba install ...` and `pip install ...` (executed within the activated environment).
 4.  **Execution (`launch`/`execute`/`importModule`):**
     *   `launch()` starts a helper Python script (`wetlands._internal.executor_server`) *within* the activated target environment using `subprocess.Popen`.
     *   This server listens on a local socket using `multiprocessing.connection.Listener`.

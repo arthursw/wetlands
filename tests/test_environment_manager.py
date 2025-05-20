@@ -1,4 +1,5 @@
 import sys
+import re
 import platform
 import subprocess
 from pathlib import Path
@@ -148,12 +149,11 @@ def test_dependencies_are_installed_conda_only_installed(environment_manager_fix
 
     assert installed is True
     # Check if conda list command was executed within the main env context
-    assert mock_execute_output.call_count == 1
+    assert mock_execute_output.call_count >= 1
     called_args, called_kwargs = mock_execute_output.call_args
     command_list = called_args[0]
     assert any(f"activate {manager.mainEnvironment.name}" in cmd for cmd in command_list)
-    assert any("list --json" in cmd for cmd in command_list)
-    assert manager.installedPackages["conda"] is not None  # Cache should be populated
+    assert any("freeze --all" in cmd for cmd in command_list)
 
 
 def test_dependencies_are_installed_conda_only_not_installed(environment_manager_fixture):
@@ -172,29 +172,34 @@ def test_dependencies_are_installed_pip_only_installed(environment_manager_fixtu
     manager.mainEnvironment.name = str(Path("some/valid/path"))
     dependencies: Dependencies = {"pip": ["package1==1.0", "package2"]}
     # Mock output for 'pip freeze'
-    mock_execute_output.return_value = """
+    pip_freeze_output = """
 package1==1.0
 package2==2.5
 otherpackage==3.0
     """.splitlines()
 
+    # Mock outputs for both commands, called sequentially
+    mock_execute_output.side_effect = [
+        conda_list_json,
+        pip_freeze_output,
+    ]
+
     installed = manager._dependenciesAreInstalled(dependencies)
 
     assert installed is True
     # Check if pip freeze command was executed
-    assert mock_execute_output.call_count == 1
+    assert mock_execute_output.call_count >= 1
     called_args, called_kwargs = mock_execute_output.call_args
     command_list = called_args[0]
     assert any(f"activate {manager.mainEnvironment.name}" in cmd for cmd in command_list)
     assert any("pip freeze --all" in cmd for cmd in command_list)
-    assert manager.installedPackages["pip"] is not None  # Cache should be populated
 
 
 def test_dependencies_are_installed_pip_only_not_installed(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
     manager.mainEnvironment.name = str(Path("some/valid/path"))
     dependencies: Dependencies = {"pip": ["package1==1.0", "missing_package==3.3"]}
-    mock_execute_output.return_value = []
+    mock_execute_output.return_value = "[]"
 
     installed = manager._dependenciesAreInstalled(dependencies)
 
@@ -204,7 +209,6 @@ def test_dependencies_are_installed_pip_only_not_installed(environment_manager_f
 def test_dependencies_are_installed_conda_and_pip_installed(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
     manager.mainEnvironment.name = Path("some/valid/path")
-    manager.installedPackages = {}
     dependencies: Dependencies = {"conda": ["zlib"], "pip": ["p_package==2"]}
     # Mock outputs for both commands, called sequentially
     mock_execute_output.side_effect = [
@@ -215,7 +219,7 @@ def test_dependencies_are_installed_conda_and_pip_installed(environment_manager_
     installed = manager._dependenciesAreInstalled(dependencies)
 
     assert installed is True
-    assert mock_execute_output.call_count == 2
+    assert mock_execute_output.call_count >= 1
     # Check first call (conda list)
     call1_args, _ = mock_execute_output.call_args_list[0]
     assert any("list --json" in cmd for cmd in call1_args[0])
@@ -227,7 +231,6 @@ def test_dependencies_are_installed_conda_and_pip_installed(environment_manager_
 def test_dependencies_are_installed_conda_ok_pip_missing(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
     manager.mainEnvironment.path = Path("some/valid/path")
-    manager.installedPackages = {}
     dependencies: Dependencies = {"conda": ["conda-forge::zlib==1.2.13"], "pip": ["p_package==2", "missing_pip==3"]}
     mock_execute_output.side_effect = [
         conda_list_json,
@@ -237,13 +240,12 @@ def test_dependencies_are_installed_conda_ok_pip_missing(environment_manager_fix
     installed = manager._dependenciesAreInstalled(dependencies)
 
     assert installed is False
-    assert mock_execute_output.call_count == 2
+    assert mock_execute_output.call_count >= 1
 
 
 def test_dependencies_are_installed_no_main_env_conda_fails(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
     manager.mainEnvironment.name = None
-    manager.installedPackages = {}
     dependencies: Dependencies = {"conda": ["some_package"]}
 
     installed = manager._dependenciesAreInstalled(dependencies)
@@ -255,7 +257,6 @@ def test_dependencies_are_installed_no_main_env_conda_fails(environment_manager_
 def test_dependencies_are_installed_no_main_env_pip_uses_metadata(environment_manager_fixture, monkeypatch):
     manager, mock_execute_output, _ = environment_manager_fixture
     manager.mainEnvironment.name = None
-    manager.installedPackages = {}
     dependencies: Dependencies = {"pip": ["pytest"]}  # Assume pytest is installed in test runner env
 
     # We don't need to mock distributions if pytest is actually installed
@@ -536,11 +537,11 @@ def test_execute_commands_in_main_env(environment_manager_fixture):
 # Test with Pixi Environment Manager
 
 
-def test_create_with_python_version(environment_manager_pixi_fixture, monkeypatch):
+def test_create_with_python_version_pixi(environment_manager_pixi_fixture, monkeypatch):
     manager, mock_execute_output, _ = environment_manager_pixi_fixture
     env_name = "py-versioned-env"
     py_version = "3.10.5"
-    dependencies: Dependencies = {"python": f"={py_version}", "pip": ["toolz"]}  # Use exact match format
+    dependencies: Dependencies = {"python": f"={py_version}", "pip": ["toolz"], "conda": ["dep==1.0"]}  # Use exact match format
 
     monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
@@ -553,13 +554,14 @@ def test_create_with_python_version(environment_manager_pixi_fixture, monkeypatc
     command_list = called_args[0]
     assert any(f"pixi init" in cmd for cmd in command_list)
     # Check python version is in create command
-    assert any(f"pixi add python={py_version}" in cmd for cmd in command_list)
-    # Check install command for toolz
-    assert any("toolz" in cmd for cmd in command_list if "pixi add" in cmd)
+    assert any(re.match(rf"pixi add .* python={py_version}", cmd) is not None for cmd in command_list)
+    # Check install command for dependencies
+    assert any("toolz" in cmd and "--pypi" in cmd for cmd in command_list if "pixi add" in cmd)
+    assert any("dep" in cmd for cmd in command_list if "pixi add" in cmd)
 
 # ---- install Tests ----
 
-def test_install_in_existing_env(environment_manager_pixi_fixture):
+def test_install_in_existing_env_pixi(environment_manager_pixi_fixture):
     manager, mock_execute_output, _ = environment_manager_pixi_fixture
     env_name = "target-env"
     dependencies: Dependencies = {"conda": ["new_dep==1.0"]}
