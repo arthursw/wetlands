@@ -1,4 +1,3 @@
-import pathlib
 import re
 import platform
 from importlib import metadata
@@ -33,7 +32,7 @@ class EnvironmentManager:
     environments: dict[str, Environment] = {}
 
     def __init__(
-        self, condaPath: str | Path = Path("pixi"), usePixi = True, mainCondaEnvironmentPath: Path | None = None
+        self, condaPath: str | Path = Path("pixi"), usePixi=True, mainCondaEnvironmentPath: Path | None = None
     ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
@@ -47,7 +46,7 @@ class EnvironmentManager:
         self.dependencyManager = DependencyManager(self.commandGenerator)
         self.commandExecutor = CommandExecutor()
 
-    def setCondaPath(self, condaPath: str | Path, usePixi = True) -> None:
+    def setCondaPath(self, condaPath: str | Path, usePixi: bool = True) -> None:
         """Updates the micromamba path and loads proxy settings if exists.
 
         Args:
@@ -76,10 +75,10 @@ class EnvironmentManager:
 
     def getInstalledPackages(self, environment: str | Path) -> list[dict[str, str]]:
         """Get the list of the packages installed in the environment
-        
+
         Args:
                 environment: The environment name.
-        
+
         Returns:
                 A list of dict containing the installed packages [{"kind":"conda|pypi", "name": "numpy", "version", "2.1.3"}, ...].
         """
@@ -100,10 +99,12 @@ class EnvironmentManager:
             ]
             output = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
             parsedOutput = [o.split("==") for o in output if "==" in o]
-            packages += [ {"name": name, "version": version, "kind": "pypi"} for name, version in parsedOutput ]
+            packages += [{"name": name, "version": version, "kind": "pypi"} for name, version in parsedOutput]
             return packages
 
-    def _checkRequirement(self, dependency: str, packageManager: Literal["pip", "conda"], installedPackages: list[dict[str,str]]) -> bool:
+    def _checkRequirement(
+        self, dependency: str, packageManager: Literal["pip", "conda"], installedPackages: list[dict[str, str]]
+    ) -> bool:
         """Check if dependency is installed (exists in installedPackages)"""
         if packageManager == "conda":
             dependency = self._removeChannel(dependency)
@@ -111,7 +112,9 @@ class EnvironmentManager:
         packageManagerName = "conda" if packageManager == "conda" else "pypi"
         return any(
             [
-                nameVersion[0] == package["name"] and (len(nameVersion) == 1 or package["version"].startswith(nameVersion[1])) and packageManagerName == package["kind"]
+                nameVersion[0] == package["name"]
+                and (len(nameVersion) == 1 or package["version"].startswith(nameVersion[1]))
+                and packageManagerName == package["kind"]
                 for package in installedPackages
             ]
         )
@@ -141,13 +144,20 @@ class EnvironmentManager:
             return False
         installedPackages = []
         if hasPipDependencies and self.mainEnvironment.name is None:
-            installedPackages = [ {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi" } for dist in metadata.distributions() ]
-        
+            installedPackages = [
+                {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi"}
+                for dist in metadata.distributions()
+            ]
+
         if self.mainEnvironment.name is not None:
             installedPackages = self.getInstalledPackages(Path(self.mainEnvironment.name))
 
-        condaSatisfied = all([self._checkRequirement(d, "conda", installedPackages) for d in condaDependencies + condaDependenciesNoDeps])
-        pipSatisfied = all([self._checkRequirement(d, "pip", installedPackages) for d in pipDependencies + pipDependenciesNoDeps])
+        condaSatisfied = all(
+            [self._checkRequirement(d, "conda", installedPackages) for d in condaDependencies + condaDependenciesNoDeps]
+        )
+        pipSatisfied = all(
+            [self._checkRequirement(d, "pip", installedPackages) for d in pipDependencies + pipDependenciesNoDeps]
+        )
 
         return condaSatisfied and pipSatisfied
 
@@ -195,7 +205,7 @@ class EnvironmentManager:
                 self.environments[environment] = ExternalEnvironment(environment, self)
             return self.environments[environment]
         if isinstance(environment, Path):
-            raise Exception(f'The environment {environment.resolve()} was not found.')
+            raise Exception(f"The environment {environment.resolve()} was not found.")
         if not forceExternal and self._dependenciesAreInstalled(dependencies):
             return self.mainEnvironment
         pythonVersion = dependencies.get("python", "").replace("=", "")
@@ -208,9 +218,13 @@ class EnvironmentManager:
             manifestPath = self.settingsManager.getManifestPath(environment)
             if not manifestPath.exists():
                 createEnvCommands += [f'{self.settingsManager.condaBin} init --no-progress "{manifestPath.parent}"']
-            createEnvCommands += [f'{self.settingsManager.condaBin} add --no-progress --manifest-path "{manifestPath}" {pythonRequirement}']
+            createEnvCommands += [
+                f'{self.settingsManager.condaBin} add --no-progress --manifest-path "{manifestPath}" {pythonRequirement}'
+            ]
         else:
-            createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"]
+            createEnvCommands += [
+                f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"
+            ]
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         self.commandExecutor.executeCommandAndGetOutput(createEnvCommands)

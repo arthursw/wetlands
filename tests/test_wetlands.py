@@ -45,7 +45,7 @@ def test_environment_creation(env_manager):
     # Verify that 'requests' is installed
     installedPackages = env_manager.getInstalledPackages(env_name)
     assert any(icp["name"] == "requests" for icp in installedPackages)
-    
+
     # Verify that recreating the same env returns it
     same_env = env_manager.create(env_name, dependencies)
     assert env == same_env
@@ -66,9 +66,15 @@ def test_dependency_installation(env_manager):
 
     # Verify that 'numpy' and 'noise2self' is installed
     installedPackages = env_manager.getInstalledPackages(env_name)
-    assert any(icp["name"] == "noise2self" and icp["version"].startswith("1.0") and icp["kind"] == "conda" for icp in installedPackages)
-    assert any(icp["name"] == "munch" and icp["version"].startswith("4.0.0") and icp["kind"] == "pypi" for icp in installedPackages)
-    
+    assert any(
+        icp["name"] == "noise2self" and icp["version"].startswith("1.0") and icp["kind"] == "conda"
+        for icp in installedPackages
+    )
+    assert any(
+        icp["name"] == "munch" and icp["version"].startswith("4.0.0") and icp["kind"] == "pypi"
+        for icp in installedPackages
+    )
+
     env.exit()
 
 

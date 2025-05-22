@@ -6,6 +6,7 @@ from wetlands._internal.command_generator import CommandGenerator
 
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 
+
 @pytest.fixture
 def command_generator_pixi(mock_settings_manager_pixi):
     return CommandGenerator(mock_settings_manager_pixi)
@@ -27,11 +28,13 @@ def test_get_install_conda_commands_windows_pixi(mock_platform, command_generato
     condaPath, condaBinPath = command_generator_pixi.settingsManager.getCondaPaths()
     assert any(re.match(r" *Invoke-Webrequest.*-URI.*pixi", cmd) for cmd in commands)
 
+
 @patch("platform.system", return_value="Windows")
 def test_get_install_conda_commands_windows_micromamba(mock_platform, command_generator_micromamba):
     commands = command_generator_micromamba.getInstallCondaCommands()
     condaPath, condaBinPath = command_generator_micromamba.settingsManager.getCondaPaths()
     assert any(re.match(r" *Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands)
+
 
 @patch("platform.system", return_value="Linux")
 def test_get_install_conda_commands_linux_pixi(mock_platform, command_generator_pixi):
@@ -39,9 +42,10 @@ def test_get_install_conda_commands_linux_pixi(mock_platform, command_generator_
     condaPath, condaBinPath = command_generator_pixi.settingsManager.getCondaPaths()
     assert any(re.match(r"curl.*pixi", cmd) for cmd in commands)
 
+
 @patch("platform.system", return_value="Linux")
 def test_get_install_conda_commands_linux_micromamba(mock_platform, command_generator_micromamba):
-    command_generator_micromamba.settingsManager.setCondaPath('micromamba', False)
+    command_generator_micromamba.settingsManager.setCondaPath("micromamba", False)
     commands = command_generator_micromamba.getInstallCondaCommands()
     condaPath, condaBinPath = command_generator_micromamba.settingsManager.getCondaPaths()
     assert any(re.match(r"curl.*micromamba", cmd) for cmd in commands)

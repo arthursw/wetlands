@@ -17,6 +17,7 @@ def mock_settings_manager_micromamba(tmp_path_factory):
     mock.condaBinConfig = "micromamba --rc-file ~/.mambarc"
     return mock
 
+
 @pytest.fixture
 def mock_settings_manager_pixi(tmp_path_factory):
     temp_dir = tmp_path_factory.mktemp("conda_env")  # Creates a unique temp directory
@@ -34,9 +35,11 @@ def mock_settings_manager_pixi(tmp_path_factory):
 def mock_dependency_manager():
     return MagicMock(spec=DependencyManager)
 
+
 @pytest.fixture
 def mock_command_generator_micromamba(mock_settings_manager_micromamba):
     return CommandGenerator(mock_settings_manager_micromamba)
+
 
 @pytest.fixture
 def mock_command_generator_pixi(mock_settings_manager_pixi):

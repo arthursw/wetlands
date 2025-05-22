@@ -155,11 +155,7 @@ class CommandExecutor:
             return process
 
     def executeCommandAndGetOutput(
-        self,
-        commands: list[str],
-        exitIfCommandError: bool = True,
-        log: bool = True,
-        popenKwargs: dict[str, Any] = {}
+        self, commands: list[str], exitIfCommandError: bool = True, log: bool = True, popenKwargs: dict[str, Any] = {}
     ) -> list[str]:
         """Executes commands and captures their output. See [`CommandExecutor.executeCommands`][wetlands._internal.command_executor.CommandExecutor.executeCommands] for more details on the arguments.
 
@@ -179,16 +175,12 @@ class CommandExecutor:
             return output
 
     def executeCommandAndGetJsonOutput(
-        self,
-        commands: list[str],
-        exitIfCommandError: bool = True,
-        log: bool = True,
-        popenKwargs: dict[str, Any] = {}
-    ) -> list[dict[str,str]]:
+        self, commands: list[str], exitIfCommandError: bool = True, log: bool = True, popenKwargs: dict[str, Any] = {}
+    ) -> list[dict[str, str]]:
         """Execute [`CommandExecutor.executeCommandAndGetOutput`][wetlands._internal.command_executor.CommandExecutor.executeCommandAndGetOutput] and parse the json output.
 
         Returns:
                 Output json.
         """
         output = self.executeCommandAndGetOutput(commands, exitIfCommandError, log, popenKwargs)
-        return json.loads(''.join(output))
+        return json.loads("".join(output))

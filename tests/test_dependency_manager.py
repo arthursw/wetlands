@@ -76,13 +76,16 @@ def test_get_install_dependencies_commands_micromamba(mock_command_generator_mic
 
     commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
 
-    assert any(re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install "numpy" -y', cmd) for cmd in commands)
+    assert any(
+        re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install "numpy" -y', cmd) for cmd in commands
+    )
     assert any(
         re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install --no-deps "stardist==0.9.1" -y', cmd)
         for cmd in commands
     )
     assert any(re.match(r'pip\s+install\s+"requests"', cmd) for cmd in commands)
     assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)
+
 
 def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
     dependency_manager = DependencyManager(mock_command_generator_pixi)
@@ -98,7 +101,6 @@ def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
 
     commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
 
-    condaBin = dependency_manager.settingsManager.condaBin
     assert any("pixi add" in cmd and '"numpy"' in cmd for cmd in commands)
     assert any("pixi add" in cmd and '--pypi "requests"' in cmd for cmd in commands)
     assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)

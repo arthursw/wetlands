@@ -2,6 +2,7 @@ from pathlib import Path
 from wetlands.environment_manager import EnvironmentManager
 import urllib.request
 
+
 def initialize():
     # Initialize the environment manager
     # Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
@@ -25,7 +26,8 @@ def initialize():
     segmentationPath = imagePath.parent / f"{imagePath.stem}_segmentation.png"
     return imagePath, segmentationPath, env
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Initialize: create the environment manager, the Cellpose conda environment, and download the image to segment
     imagePath, segmentationPath, env = initialize()
 

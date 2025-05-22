@@ -88,6 +88,7 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 
     return manager, mock_command_executor["executeCommandAndGetOutput"], mock_command_executor["executeCommands"]
 
+
 @pytest.fixture
 def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, monkeypatch):
     """Provides an EnvironmentManager instance with mocked CommandExecutor."""
@@ -541,7 +542,11 @@ def test_create_with_python_version_pixi(environment_manager_pixi_fixture, monke
     manager, mock_execute_output, _ = environment_manager_pixi_fixture
     env_name = "py-versioned-env"
     py_version = "3.10.5"
-    dependencies: Dependencies = {"python": f"={py_version}", "pip": ["toolz"], "conda": ["dep==1.0"]}  # Use exact match format
+    dependencies: Dependencies = {
+        "python": f"={py_version}",
+        "pip": ["toolz"],
+        "conda": ["dep==1.0"],
+    }  # Use exact match format
 
     monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
@@ -559,7 +564,9 @@ def test_create_with_python_version_pixi(environment_manager_pixi_fixture, monke
     assert any("toolz" in cmd and "--pypi" in cmd for cmd in command_list if "pixi add" in cmd)
     assert any("dep" in cmd for cmd in command_list if "pixi add" in cmd)
 
+
 # ---- install Tests ----
+
 
 def test_install_in_existing_env_pixi(environment_manager_pixi_fixture):
     manager, mock_execute_output, _ = environment_manager_pixi_fixture

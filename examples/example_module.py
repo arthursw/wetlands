@@ -6,13 +6,13 @@ model = None
 
 def segment(
     inputImage: Path | str,
-    segmentation: Path | str | None=None,
+    segmentation: Path | str | None = None,
     modelType="cyto",
     useGPU=False,
     channels=[0, 0],
     autoDiameter=True,
     diameter=30,
-)-> Any:
+) -> Any:
     global model
 
     inputImage = Path(inputImage)
@@ -44,7 +44,7 @@ def segment(
     # If segmentation is None: return all results
     if segmentation is None:
         return masks, flows, styles, diams
-    
+
     segmentation = Path(segmentation)
     print(f"[[4/4]] Save segmentation {segmentation}")
     # save results as png
@@ -57,5 +57,5 @@ def segment(
         print(f"Saved out: {segmentation}")
     else:
         print("Segmentation was not generated because no masks were found.")
-    
+
     return diams

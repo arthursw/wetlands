@@ -4,14 +4,14 @@ import platform
 
 class SettingsManager:
     usePixi = True
-    condaBin = "pixi" # "micromamba"
-    condaBinConfig = "pixi --manifest-path .pixi/project.toml" # "micromamba --rc-file ~/.mambarc"
+    condaBin = "pixi"  # "micromamba"
+    condaBinConfig = "pixi --manifest-path .pixi/project.toml"  # "micromamba --rc-file ~/.mambarc"
     proxies: dict[str, str] | None = None
 
-    def __init__(self, condaPath: str | Path = Path("pixi"), usePixi = True) -> None:
+    def __init__(self, condaPath: str | Path = Path("pixi"), usePixi=True) -> None:
         self.setCondaPath(condaPath, usePixi)
 
-    def setCondaPath(self, condaPath: str | Path, usePixi = True) -> None:
+    def setCondaPath(self, condaPath: str | Path, usePixi=True) -> None:
         """Updates the micromamba path and loads proxy settings if exists.
 
         Args:
@@ -25,10 +25,16 @@ class SettingsManager:
         self.condaPath = Path(condaPath).resolve()
         # condaBinConfig is only used with micromamba but let's initialize it for pixi as well
         condaConfigPath = self.condaPath / "pixi.toml" if self.usePixi else self.condaPath / ".mambarc"
-        self.condaBinConfig = f'{self.condaBin} --manifest-path "{condaConfigPath}"' if self.usePixi else f'{self.condaBin} --rc-file "{condaConfigPath}"'
+        self.condaBinConfig = (
+            f'{self.condaBin} --manifest-path "{condaConfigPath}"'
+            if self.usePixi
+            else f'{self.condaBin} --rc-file "{condaConfigPath}"'
+        )
 
-        if self.usePixi: return
+        if self.usePixi:
+            return
         import yaml
+
         if condaConfigPath.exists():
             with open(condaConfigPath, "r") as f:
                 condaConfig = yaml.safe_load(f)
@@ -45,7 +51,8 @@ class SettingsManager:
                 Updates .mambarc configuration file with proxy settings.
         """
         self.proxies = proxies
-        if self.usePixi: return
+        if self.usePixi:
+            return
         condaConfigPath = self.condaPath / ".mambarc"
         condaConfig = dict()
         import yaml
@@ -66,16 +73,18 @@ class SettingsManager:
         Returns:
                 Tuple of (conda directory path, binary relative path).
         """
-        condaName = 'pixi' if self.usePixi else 'micromamba'
-        return self.condaPath.resolve(), Path(f"bin/{condaName}" if platform.system() != "Windows" else f"{condaName}.exe")
+        condaName = "pixi" if self.usePixi else "micromamba"
+        return self.condaPath.resolve(), Path(
+            f"bin/{condaName}" if platform.system() != "Windows" else f"{condaName}.exe"
+        )
 
-    def getWorkspacePath(self, environment:str | Path)-> Path:
+    def getWorkspacePath(self, environment: str | Path) -> Path:
         """Returns the workspace folder of the environment"""
-        return self.condaPath / 'workspaces' / environment if isinstance(environment, str) else Path(environment)
-    
-    def getManifestPath(self, environment:str | Path)-> Path:
+        return self.condaPath / "workspaces" / environment if isinstance(environment, str) else Path(environment)
+
+    def getManifestPath(self, environment: str | Path) -> Path:
         """Returns the manifest path (pixi.toml) of the workspace of the environment"""
-        return self.getWorkspacePath(environment) / 'pixi.toml'
+        return self.getWorkspacePath(environment) / "pixi.toml"
 
     def getProxyEnvironmentVariablesCommands(self) -> list[str]:
         """Generates proxy environment variable commands.

@@ -6,6 +6,7 @@ import example_module
 
 shm: shared_memory.SharedMemory | None = None
 
+
 def segment(imagePath: Path | str):
     global shm
     # Segment the image with example_module.py
@@ -19,10 +20,12 @@ def segment(imagePath: Path | str):
     # Return the shape, dtype and shared memory name to recreate the numpy array on the other side
     return masks.shape, masks.dtype, shm.name
 
+
 def clean():
     global shm
-    if shm is None: return
+    if shm is None:
+        return
     # Clean up the shared memory in this process
     shm.close()
-     # Free and release the shared memory block
+    # Free and release the shared memory block
     shm.unlink()

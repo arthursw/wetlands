@@ -4,6 +4,7 @@ import urllib.request
 from multiprocessing.connection import Listener, Connection
 import example_module
 
+
 def downloadImage(imagePath: Path | str, connection: Connection):
     # Download example image from cellpose
     imageUrl = "https://www.cellpose.org/static/images/img02.png"

@@ -28,7 +28,7 @@ sharedMemoryModule.clean()
 
 # Avoid resource_tracker warnings
 try:
-    resource_tracker.unregister(shm._name, 'shared_memory') # type: ignore
+    resource_tracker.unregister(shm._name, "shared_memory")  # type: ignore
 except Exception:
     pass  # Silently ignore if unregister fails
 

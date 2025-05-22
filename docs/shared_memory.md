@@ -11,7 +11,9 @@ The `shared_memory_example.py` script demonstrate this.
 It will use `shared_memory_module.py` to create the segmentation and the shared memory holding the resulting masks.
 
 This module defines two functions:
+
 - a `segment` function which uses the `segment` function of `example_module.py` and creates a NumPy array backed by a shared memory to store the resulting masks,
+
 - a `clean` function to clean up, free and release the shared memory block.
 
 ```python

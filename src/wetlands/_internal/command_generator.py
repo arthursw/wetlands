@@ -36,7 +36,8 @@ class CommandGenerator:
         Returns:
                 OS-specific commands to activate Conda shell hooks.
         """
-        if self.settingsManager.usePixi: return []
+        if self.settingsManager.usePixi:
+            return []
         currentPath = Path.cwd().resolve()
         condaPath, condaBinPath = self.settingsManager.getCondaPaths()
         if platform.system() == "Windows":
@@ -56,7 +57,8 @@ class CommandGenerator:
 
     def createMambaConfigFile(self, condaPath):
         """Create Mamba config file .mambarc in condaPath, with nodefaults and conda-forge channels."""
-        if self.settingsManager.usePixi: return
+        if self.settingsManager.usePixi:
+            return
         with open(condaPath / ".mambarc", "w") as f:
             mambaSettings = dict(
                 channel_priority="flexible",
@@ -105,13 +107,15 @@ class CommandGenerator:
         self.createMambaConfigFile(condaPath)
 
         commands = self.settingsManager.getProxyEnvironmentVariablesCommands()
-        
+
         # Only install if conda is not already installed
         if platform.system() == "Windows":
-            commands += [f'if (-not (Test-Path "{condaPath / condaBinPath}")) {{',]
+            commands += [
+                f'if (-not (Test-Path "{condaPath / condaBinPath}")) {{',
+            ]
         else:
             commands += [f'if [ ! -f "{condaPath / condaBinPath}" ]; then']
-        
+
         proxyString = self.settingsManager.getProxyString()
 
         if platform.system() == "Windows":
@@ -132,12 +136,12 @@ class CommandGenerator:
                 commands += [
                     'echo "Installing pixi..."',
                     '$tempFile = "$env:TEMP\\pixi-install.ps1"',
-                    'try {',
-                    f'Invoke-Webrequest {proxyArgs} -UseBasicParsing -URI https://pixi.sh/install.ps1',
+                    "try {",
+                    f"Invoke-Webrequest {proxyArgs} -UseBasicParsing -URI https://pixi.sh/install.ps1",
                     f'& $tempFile -PixiHome "{condaPath}" -NoPathUpdate',
-                    '} finally {',
-                    'Remove-Item $tempFile -ErrorAction SilentlyContinue',
-                    '}',
+                    "} finally {",
+                    "Remove-Item $tempFile -ErrorAction SilentlyContinue",
+                    "}",
                 ]
             else:
                 commands += [
@@ -147,7 +151,7 @@ class CommandGenerator:
                     f'  Invoke-WebRequest {proxyArgs} -URI "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$env:Temp\\vc_redist.x64.exe"; Start-Process "$env:Temp\\vc_redist.x64.exe" -ArgumentList "/quiet /norestart" -Wait; Remove-Item "$env:Temp\\vc_redist.x64.exe"',
                     f'  echo "Installing micromamba..."',
                     f"  Invoke-Webrequest {proxyArgs} -URI https://github.com/mamba-org/micromamba-releases/releases/download/2.0.4-0/micromamba-win-64 -OutFile micromamba.exe",
-                    '}',
+                    "}",
                 ]
         else:
             system = "osx" if platform.system() == "Darwin" else "linux"
@@ -158,16 +162,16 @@ class CommandGenerator:
                 commands += [
                     f'cd "{condaPath}"',
                     f'echo "Installing pixi..."',
-                    f'curl {proxyArgs} -fsSL https://pixi.sh/install.sh | PIXI_HOME="{condaPath}" PIXI_NO_PATH_UPDATE=1 bash'
+                    f'curl {proxyArgs} -fsSL https://pixi.sh/install.sh | PIXI_HOME="{condaPath}" PIXI_NO_PATH_UPDATE=1 bash',
                 ]
             else:
                 commands += [
                     f'cd "{condaPath}"',
                     f'echo "Installing micromamba..."',
-                    f'curl {proxyArgs} -fsSL https://micro.mamba.pm/api/micromamba/{system}-{machine}/latest | tar -xvj bin/micromamba',
+                    f"curl {proxyArgs} -fsSL https://micro.mamba.pm/api/micromamba/{system}-{machine}/latest | tar -xvj bin/micromamba",
                 ]
         # Close the if which checks if conda is already installed
-        commands += ['}'] if platform.system() == "Windows" else ['fi']
+        commands += ["}"] if platform.system() == "Windows" else ["fi"]
 
         return commands
 
@@ -177,7 +181,7 @@ class CommandGenerator:
         return commands + self.getShellHookCommands()
 
     def getActivateEnvironmentCommands(
-        self, environment: str | None, additionalActivateCommands: Commands = {}, activateConda = True
+        self, environment: str | None, additionalActivateCommands: Commands = {}, activateConda: bool = True
     ) -> list[str]:
         """Generates commands to activate the given environment
 
@@ -197,12 +201,14 @@ class CommandGenerator:
             if platform.system() != "Windows":
                 commands += [f'eval "$({self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}")"']
             else:
-                commands += [f'.\\{self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}" | Out-String | Invoke-Expression']
+                commands += [
+                    f'.\\{self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}" | Out-String | Invoke-Expression'
+                ]
         else:
             commands += [f"{self.settingsManager.condaBin} activate {environment}"]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
 
-    def getAddChannelsCommands(self, environment:str, condaDependencies: list[str]):
+    def getAddChannelsCommands(self, environment: str, condaDependencies: list[str]) -> list[str]:
         """Add Conda channels in manifest file when using Pixi (`pixi add channelName::packageName` is not enough, channelName must be in manifest file).
         The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`
 
@@ -213,10 +219,13 @@ class CommandGenerator:
         Returns:
                 List of commands to add required channels
         """
-        if not self.settingsManager.usePixi: return []
-        channels = set([dep.split("::")[0].replace('"', '') for dep in condaDependencies if "::" in dep])
-        if len(channels)==0:
+        if not self.settingsManager.usePixi:
+            return []
+        channels = set([dep.split("::")[0].replace('"', "") for dep in condaDependencies if "::" in dep])
+        if len(channels) == 0:
             return []
         manifestPath = self.settingsManager.getManifestPath(environment)
-        return [f'{self.settingsManager.condaBin} project channel add --manifest-path "{manifestPath}" --no-progress --prepend ' + ' '.join(channels)]
-        
+        return [
+            f'{self.settingsManager.condaBin} project channel add --manifest-path "{manifestPath}" --no-progress --prepend '
+            + " ".join(channels)
+        ]
