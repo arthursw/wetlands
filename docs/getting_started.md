@@ -8,8 +8,9 @@ Let's see the main script [`getting_started.py`](https://github.com/arthursw/wet
 We will segment the image `img02.png` (available [here](https://www.cellpose.org/static/images/img02.png)).
 
 ```python
-imagePath = "img02.png"
-segmentationPath = "img02_segmentation.png"
+from pathlib import Path
+imagePath = Path("img02.png")
+segmentationPath = imagePath.parent / f"{imagePath.stem}_segmentation.png"
 ```
 
 #### 1. Initialize the Environment Manager
@@ -18,14 +19,13 @@ We start by initializing the [EnvironmentManager][wetlands.environment_manager.E
 
 ```python
 from wetlands.environment_manager import EnvironmentManager
-from pathlib import Path
 
 environmentManager = EnvironmentManager("pixi/")
 ```
 
 !!! note
     
-    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument (only usable with micromamba for now), useful if Wetlands is used in a conda environment (e.g. `environmentManager = EnvironmentManager("micromamba/", False, "/path/to/project/environment/")`). Wetlands will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Wetlands communication server.
+    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument, useful if Wetlands is used in a conda environment (e.g. `environmentManager = EnvironmentManager("micromamba/", False, "/path/to/project/environment/")`). Wetlands will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Wetlands communication server.
 
 #### 2. Create (or get) an Environment and Install Dependencies
 
@@ -96,34 +96,7 @@ print("Done.")
 ??? note "`getting_started.py` source code"
 
     ```python
-    from wetlands.environment_manager import EnvironmentManager
-
-    # Declare our input and output paths
-    imagePath = "img02.png"
-    segmentationPath = "img02_segmentation.png"
-
-    # Initialize the environment manager
-# Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
-# otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
-    environmentManager = EnvironmentManager("pixi/")
-
-    # Create and launch an isolated Conda environment named "cellpose"
-    env = environmentManager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
-    env.launch()
-
-    # Import example_module in the environment
-    example_module = env.importModule("example_module.py")
-    # example_module is a proxy to example_module.py in the environment,
-    # calling example_module.function_name(args) will run env.execute(module_name, function_name, args)
-    diameters = example_module.segment(imagePath, segmentationPath)
-
-    # Or use env.execute() directly
-    # diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
-
-    print(f"Found diameters of {diameters} pixels.")
-
-    # Clean up and exit the environment
-    env.exit()
+    {% include "../examples/getting_started.py" %}
     ```
 
 Now, let's look at the [`example_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/example_module.py) file. This code contains the actual segmentation logic and is executed *inside* the isolated `cellpose_env` when called via the proxy object.
@@ -141,20 +114,20 @@ from typing import Any, cast
 model = None
 
 def segment(
-    input_image: Path | str,
+    inputImage: Path | str,
     segmentation: Path | str,
-    model_type="cyto",
-    use_gpu=False,
+    modelType="cyto",
+    useGPU=False,
     channels=[0, 0],
-    auto_diameter=True,
+    autoDiameter=True,
     diameter=30,
 ):
     """Performs cell segmentation using Cellpose."""
     global model
 
-    input_image = Path(input_image)
-    if not input_image.exists():
-        raise FileNotFoundError(f"Error: input image {input_image}"\
+    inputImage = Path(inputImage)
+    if not inputImage.exists():
+        raise FileNotFoundError(f"Error: input image {inputImage}"\
                                 "does not exist.")
 ```
 
@@ -163,7 +136,7 @@ def segment(
 Crucially, the necessary libraries (`cellpose`, `numpy`) are imported *within this function*, meaning they are resolved using the packages installed inside the isolated `cellpose_env`, not the main script's environment. This is important to enable the main script to import `example_module.py` without raising a `ModuleNotFoundError`. In this way, the main script can see the functions defined in `example_module.py`. This is only necessary when using the proxy object ([`env.importModule("example_module.py")`][wetlands.environment.Environment.importModule] then `example_module.function(args)`) but it is not required when using [`env.execute("example_module.py", "function", (args))`][wetlands.environment.Environment.execute] directly.
 
 ```python
-    print(f"[[1/4]] Load libraries and model '{model_type}'")
+    print(f"[[1/4]] Load libraries and model '{modelType}'")
     import cellpose.models
     import cellpose.io
     import numpy as np
@@ -192,13 +165,13 @@ Crucially, the necessary libraries (`cellpose`, `numpy`) are imported *within th
 The code proceeds to load the Cellpose model (if not already cached) and the input image. All this happens within the context of the `cellpose_env`.
 
 ```python
-    if model is None or model.cp.model_type != model_type:
+    if model is None or model.cp.model_type != modelType:
         print("Loading model...")
-        gpu_flag = str(use_gpu).lower() == 'true'
-        model = cellpose.models.Cellpose(gpu=gpu_flag, model_type=model_type)
+        gpu_flag = str(useGPU).lower() == 'true'
+        model = cellpose.models.Cellpose(gpu=gpu_flag, model_type=modelType)
 
-    print(f"[[2/4]] Load image {input_image}")
-    image = cast(np.ndarray, cellpose.io.imread(str(input_image)))
+    print(f"[[2/4]] Load image {inputImage}")
+    image = cast(np.ndarray, cellpose.io.imread(str(inputImage)))
 ```
 
 #### Perform Segmentation
@@ -208,7 +181,7 @@ The core segmentation task is performed using the loaded model and image. Any ex
 ```python
     print(f"[[3/4]] Compute segmentation for image shape {image.shape}")
     try:
-        kwargs: Any = dict(diameter=int(diameter)) if auto_diameter else {}
+        kwargs: Any = dict(diameter=int(diameter)) if autoDiameter else {}
         masks, _, _, diams = model.eval(image, channels=channels, **kwargs)
     except Exception as e:
         print(f"Error during segmentation: {e}")
@@ -221,11 +194,15 @@ The core segmentation task is performed using the loaded model and image. Any ex
 The segmentation results (masks) are saved to disk, potentially renaming the output file. The function then returns the calculated cell diameters (`diams`). This return value is serialized by Wetlands and sent back to the main script.
 
 ```python
+
+    if segmentation is None:                # If segmentation is None: return all results
+        return masks, flows, styles, diams
+
     segmentation_path = Path(segmentation)
     print(f"[[4/4]] Save segmentation to {segmentation_path}")
 
-    cellpose.io.save_masks(image, masks, flows, str(input_image), png=True)
-    default_output = input_image.parent / f"{input_image.stem}_cp_masks.png"
+    cellpose.io.save_masks(image, masks, flows, str(inputImage), png=True)
+    default_output = inputImage.parent / f"{inputImage.stem}_cp_masks.png"
 
     if default_output.exists():
         if segmentation_path.exists():
@@ -241,64 +218,9 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 ??? note "`example_module.py` source code"
 
     ```python
-    from pathlib import Path
-    from typing import Any, cast
-
-    model = None
-
-
-    def segment(
-        input_image: Path | str,
-        segmentation: Path | str,
-        model_type="cyto",
-        use_gpu=False,
-        channels=[0, 0],
-        auto_diameter=True,
-        diameter=30,
-    ):
-        global model
-
-        input_image = Path(input_image)
-        if not input_image.exists():
-            raise Exception(f"Error: input image {input_image} does not exist.")
-
-        print(f"[[1/4]] Load libraries and model {model_type}")
-        print("Loading libraries...")
-        import cellpose.models  # type: ignore
-        import cellpose.io  # type: ignore
-        import numpy as np  # type: ignore
-
-        if model is None or model.cp.model_type != model_type:
-            print("Loading model...")
-            model = cellpose.models.Cellpose(gpu=True if use_gpu == "True" else False, model_type=model_type)
-
-        print(f"[[2/4]] Load image {input_image}")
-        image = cast(np.ndarray, cellpose.io.imread(str(input_image)))
-
-        print("[[3/4]] Compute segmentation", image.shape)
-        try:
-            kwargs: Any = dict(diameter=int(diameter)) if auto_diameter else {}
-            masks, flows, styles, diams = model.eval(image, channels=channels, **kwargs)
-        except Exception as e:
-            print(e)
-            raise e
-        print("segmentation finished.")
-
-        segmentation = Path(segmentation)
-        print(f"[[4/4]] Save segmentation {segmentation}")
-        # save results as png
-        cellpose.io.save_masks(image, masks, flows, str(input_image), png=True)
-        output_mask = input_image.parent / f"{input_image.stem}_cp_masks.png"
-        if output_mask.exists():
-            if segmentation.exists():
-                segmentation.unlink()
-            (output_mask).rename(segmentation)
-            print(f"Saved out: {segmentation}")
-        else:
-            print("Segmentation was not generated because no masks were found.")
-        return diams
-
+    {% include "../examples/example_module.py" %}
     ```
+
 
 #### Summary of Example 1 Flow:
 

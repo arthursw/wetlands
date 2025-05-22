@@ -69,10 +69,12 @@ class SettingsManager:
         condaName = 'pixi' if self.usePixi else 'micromamba'
         return self.condaPath.resolve(), Path(f"bin/{condaName}" if platform.system() != "Windows" else f"{condaName}.exe")
 
-    def getWorkspacePath(self, environment:str)-> Path:
-        return self.condaPath / 'workspaces' / environment
+    def getWorkspacePath(self, environment:str | Path)-> Path:
+        """Returns the workspace folder of the environment"""
+        return self.condaPath / 'workspaces' / environment if isinstance(environment, str) else Path(environment)
     
-    def getManifestPath(self, environment:str)-> Path:
+    def getManifestPath(self, environment:str | Path)-> Path:
+        """Returns the manifest path (pixi.toml) of the workspace of the environment"""
         return self.getWorkspacePath(environment) / 'pixi.toml'
 
     def getProxyEnvironmentVariablesCommands(self) -> list[str]:

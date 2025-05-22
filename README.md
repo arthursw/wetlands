@@ -112,6 +112,8 @@ The script `scripts/gen_ref_pages.py` generates the API reference automatically 
 ## 📋 Todo
 
 - Handle general [dependency specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#dependency-specifiers) (handle version specifiers like '>=', '~=' etc.).
+- Use Pixi features and environment instead of creating one workspace per environment.
+- Accept `environment.yml` files for environment creation.
 
 ## 📜 License
 

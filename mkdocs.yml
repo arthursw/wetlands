@@ -33,6 +33,7 @@ nav:
   - Overview: index.md
   - Getting started: getting_started.md
   - Advanced example: advanced_example.md
+  - Shared memory: shared_memory.md
   - Secifying dependencies: dependencies.md
   - How it works: how_it_works.md
   - Code Reference: reference/
@@ -55,6 +56,7 @@ plugins:
               functions: true
   - mike:
       alias_type: symlink
+  - include-markdown
 
 markdown_extensions:
   - admonition

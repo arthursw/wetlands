@@ -1,37 +1,44 @@
+from pathlib import Path
 from wetlands.environment_manager import EnvironmentManager
 import urllib.request
 
-# Initialize the environment manager
-# Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
-# otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
-environmentManager = EnvironmentManager("pixi/")
+def initialize():
+    # Initialize the environment manager
+    # Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
+    # otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
+    environmentManager = EnvironmentManager("pixi/")
 
-# Create and launch an isolated Conda environment named "cellpose"
-env = environmentManager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
-env.launch()
+    # Create and launch an isolated Conda environment named "cellpose"
+    env = environmentManager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
+    env.launch()
 
-# Download example image from cellpose
-imagePath = "cellpose_img02.png"
-imageUrl = "https://www.cellpose.org/static/images/img02.png"
+    # Download example image from cellpose
+    imagePath = Path("cellpose_img02.png")
+    imageUrl = "https://www.cellpose.org/static/images/img02.png"
 
-with urllib.request.urlopen(imageUrl) as response:
-    imageData = response.read()
+    with urllib.request.urlopen(imageUrl) as response:
+        imageData = response.read()
 
-with open(imagePath, "wb") as handler:
-    handler.write(imageData)
+    with open(imagePath, "wb") as handler:
+        handler.write(imageData)
 
-segmentationPath = imagePath.replace(".png", "_segmentation.png")
+    segmentationPath = imagePath.parent / f"{imagePath.stem}_segmentation.png"
+    return imagePath, segmentationPath, env
 
-# Import example_module in the environment
-example_module = env.importModule("example_module.py")
-# example_module is a proxy to example_module.py in the environment,
-# calling example_module.function_name(args) will run env.execute(module_name, function_name, args)
-diameters = example_module.segment(imagePath, segmentationPath)
+if __name__ == '__main__':
+    # Initialize: create the environment manager, the Cellpose conda environment, and download the image to segment
+    imagePath, segmentationPath, env = initialize()
 
-# Or use env.execute() directly
-# diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
+    # Import example_module in the environment
+    exampleModule = env.importModule("example_module.py")
+    # exampleModule is a proxy to example_module.py in the environment,
+    # calling exampleModule.function_name(args) will run env.execute(module_name, function_name, args)
+    diameters = exampleModule.segment(imagePath, segmentationPath)
 
-print(f"Found diameters of {diameters} pixels.")
+    # Or use env.execute() directly
+    # diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
 
-# Clean up and exit the environment
-env.exit()
+    print(f"Found diameters of {diameters} pixels.")
+
+    # Clean up and exit the environment
+    env.exit()

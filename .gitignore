@@ -8,7 +8,9 @@ p3.10/
 .DS_Store
 uv.lock
 micromamba/
+pixi/
 *.log
 *.png
+examples/*_segmentation.bin
 !Wetland.png
 reference.md

@@ -168,7 +168,7 @@ class CommandGenerator:
                 ]
         # Close the if which checks if conda is already installed
         commands += ['}'] if platform.system() == "Windows" else ['fi']
-        
+
         return commands
 
     def getActivateCondaCommands(self) -> list[str]:
@@ -201,3 +201,22 @@ class CommandGenerator:
         else:
             commands += [f"{self.settingsManager.condaBin} activate {environment}"]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
+
+    def getAddChannelsCommands(self, environment:str, condaDependencies: list[str]):
+        """Add Conda channels in manifest file when using Pixi (`pixi add channelName::packageName` is not enough, channelName must be in manifest file).
+        The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`
+
+        Args:
+                environment: Environment name.
+                condaDependencies: The conda dependecies to install (e.g. ["bioimageit::atlas", "openjdk"]).
+
+        Returns:
+                List of commands to add required channels
+        """
+        if not self.settingsManager.usePixi: return []
+        channels = set([dep.split("::")[0].replace('"', '') for dep in condaDependencies if "::" in dep])
+        if len(channels)==0:
+            return []
+        manifestPath = self.settingsManager.getManifestPath(environment)
+        return [f'{self.settingsManager.condaBin} project channel add --manifest-path "{manifestPath}" --no-progress --prepend ' + ' '.join(channels)]
+        

@@ -78,3 +78,15 @@ def test_get_platform_common_name_windows(mock_platform, command_generator_pixi)
 @patch("platform.system", return_value="Linux")
 def test_get_commands_for_current_platform(mock_platform, command_generator_pixi, additional_commands, expected):
     assert command_generator_pixi.getCommandsForCurrentPlatform(additional_commands) == expected
+
+
+def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
+    """Test a mix of dependencies, some with channels and some without."""
+    environment = "base"
+    dependencies = ["conda-forge::requests", "python", "nvidia::cuda-toolkit", "conda-forge::scipy"]
+    # Channels are sorted alphabetically and unique
+    expected_channels = "conda-forge", "nvidia"
+    expected_command = rf'pixi project channel add --manifest-path ".*" --no-progress --prepend'
+    commands = command_generator_pixi.getAddChannelsCommands(environment, dependencies)
+    assert re.search(expected_command, commands[0])
+    assert all(ec in commands[0] for ec in expected_channels)

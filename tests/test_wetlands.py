@@ -46,22 +46,28 @@ def test_environment_creation(env_manager):
     installedPackages = env_manager.getInstalledPackages(env_name)
     assert any(icp["name"] == "requests" for icp in installedPackages)
     
+    # Verify that recreating the same env returns it
+    same_env = env_manager.create(env_name, dependencies)
+    assert env == same_env
     env.exit()
+    other_env = env_manager.create(env_name, dependencies)
+    assert other_env != same_env
+    other_env.exit()
 
 
 def test_dependency_installation(env_manager):
-    """Test that EnvironmentManager.install() correctly installs dependencies."""
+    """Test that EnvironmentManager.install() correctly installs dependencies (in existing env)."""
     env_name = "test_env_deps"
     logger.info(f"Testing dependency installation: {env_name}")
     env = cast(ExternalEnvironment, env_manager.create(env_name, forceExternal=True))
-    dependencies = Dependencies({"pip": ["numpy==2.2.0"], "conda": ["bioimageit::noise2self==1.0"]})
+    dependencies = Dependencies({"pip": ["munch==4.0.0"], "conda": ["bioimageit::noise2self==1.0"]})
 
     env.install(dependencies)
 
     # Verify that 'numpy' and 'noise2self' is installed
     installedPackages = env_manager.getInstalledPackages(env_name)
     assert any(icp["name"] == "noise2self" and icp["version"].startswith("1.0") and icp["kind"] == "conda" for icp in installedPackages)
-    assert any(icp["name"] == "numpy" and icp["version"].startswith("2.2.0") and icp["kind"] == "pypi" for icp in installedPackages)
+    assert any(icp["name"] == "munch" and icp["version"].startswith("4.0.0") and icp["kind"] == "pypi" for icp in installedPackages)
     
     env.exit()
 
@@ -118,6 +124,8 @@ def test_mambarc_modification(env_manager, tmp_path):
     env_manager.setProxies(proxies)
     if env_manager.settingsManager.usePixi:
         assert env_manager.settingsManager.proxies == proxies
+        env_manager.setProxies({})
+        assert env_manager.settingsManager.proxies == {}
         return
     mambarc_path = Path(env_manager.settingsManager.condaPath) / ".mambarc"
     assert os.path.exists(mambarc_path)
