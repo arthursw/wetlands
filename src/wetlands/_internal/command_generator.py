@@ -31,15 +31,18 @@ class CommandGenerator:
         self.settingsManager = settingsManager
 
     def getShellHookCommands(self) -> list[str]:
-        """Generates shell commands for Conda initialization. Only relevant when using micromamba.
+        """Generates shell commands for Conda initialization.
 
         Returns:
                 OS-specific commands to activate Conda shell hooks.
         """
-        if self.settingsManager.usePixi:
-            return []
         currentPath = Path.cwd().resolve()
         condaPath, condaBinPath = self.settingsManager.getCondaPaths()
+        if self.settingsManager.usePixi:
+            if platform.system() == "Windows":
+                return [f'$env:PATH = "{condaPath / condaBinPath.parent};" + $env:PATH']
+            else:
+                return [f'export PATH="{condaPath / condaBinPath.parent}:$PATH"']
         if platform.system() == "Windows":
             return [
                 f'Set-Location -Path "{condaPath}"',
@@ -145,13 +148,11 @@ class CommandGenerator:
                 ]
             else:
                 commands += [
-                    f'if (-not (Test-Path "{condaPath / condaBinPath}")) {{',
-                    f'  Set-Location -Path "{condaPath}"',
-                    f'  echo "Installing Visual C++ Redistributable if necessary..."',
-                    f'  Invoke-WebRequest {proxyArgs} -URI "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$env:Temp\\vc_redist.x64.exe"; Start-Process "$env:Temp\\vc_redist.x64.exe" -ArgumentList "/quiet /norestart" -Wait; Remove-Item "$env:Temp\\vc_redist.x64.exe"',
-                    f'  echo "Installing micromamba..."',
-                    f"  Invoke-Webrequest {proxyArgs} -URI https://github.com/mamba-org/micromamba-releases/releases/download/2.0.4-0/micromamba-win-64 -OutFile micromamba.exe",
-                    "}",
+                    f'Set-Location -Path "{condaPath}"',
+                    f'echo "Installing Visual C++ Redistributable if necessary..."',
+                    f'Invoke-WebRequest {proxyArgs} -URI "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$env:Temp\\vc_redist.x64.exe"; Start-Process "$env:Temp\\vc_redist.x64.exe" -ArgumentList "/quiet /norestart" -Wait; Remove-Item "$env:Temp\\vc_redist.x64.exe"',
+                    f'echo "Installing micromamba..."',
+                    f"Invoke-Webrequest {proxyArgs} -URI https://github.com/mamba-org/micromamba-releases/releases/download/2.0.4-0/micromamba-win-64 -OutFile micromamba.exe",
                 ]
         else:
             system = "osx" if platform.system() == "Darwin" else "linux"
