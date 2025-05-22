@@ -189,7 +189,7 @@ class CommandGenerator:
         Args:
                 environment: Environment name to launch. If none, the resulting command list will be empty.
                 additionalActivateCommands: Platform-specific activation commands.
-                activateConda: Whether to activate conda (micromamba) or not.
+                activateConda: Whether to activate Conda or not.
 
         Returns:
                 List of commands to activate the environment
@@ -209,13 +209,14 @@ class CommandGenerator:
             commands += [f"{self.settingsManager.condaBin} activate {environment}"]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
 
-    def getAddChannelsCommands(self, environment: str, condaDependencies: list[str]) -> list[str]:
+    def getAddChannelsCommands(self, environment: str, condaDependencies: list[str], activateConda: bool = True) -> list[str]:
         """Add Conda channels in manifest file when using Pixi (`pixi add channelName::packageName` is not enough, channelName must be in manifest file).
-        The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`
+        The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`.
 
         Args:
                 environment: Environment name.
                 condaDependencies: The conda dependecies to install (e.g. ["bioimageit::atlas", "openjdk"]).
+                activateConda: Whether to activate conda or not.
 
         Returns:
                 List of commands to add required channels
@@ -226,7 +227,9 @@ class CommandGenerator:
         if len(channels) == 0:
             return []
         manifestPath = self.settingsManager.getManifestPath(environment)
-        return [
+        commands = self.getActivateCondaCommands() if activateConda else []
+        commands += [
             f'{self.settingsManager.condaBin} project channel add --manifest-path "{manifestPath}" --no-progress --prepend '
             + " ".join(channels)
         ]
+        return commands

@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
 from wetlands._internal.settings_manager import SettingsManager
@@ -10,7 +11,7 @@ def mock_settings_manager_micromamba(tmp_path_factory):
     temp_dir = tmp_path_factory.mktemp("conda_env")  # Creates a unique temp directory
     mock = MagicMock(spec=SettingsManager)
     mock.usePixi = False
-    mock.getCondaPaths.return_value = (temp_dir, "micromamba")
+    mock.getCondaPaths.return_value = (temp_dir, Path("bin/micromamba"))
     mock.getProxyEnvironmentVariablesCommands.return_value = []
     mock.getProxyString.return_value = None
     mock.condaBin = "micromamba"
@@ -23,7 +24,7 @@ def mock_settings_manager_pixi(tmp_path_factory):
     temp_dir = tmp_path_factory.mktemp("conda_env")  # Creates a unique temp directory
     mock = MagicMock(spec=SettingsManager)
     mock.usePixi = True
-    mock.getCondaPaths.return_value = (temp_dir, "pixi")
+    mock.getCondaPaths.return_value = (temp_dir, Path("bin/pixi"))
     mock.getProxyEnvironmentVariablesCommands.return_value = []
     mock.getProxyString.return_value = None
     mock.condaBin = "pixi"

@@ -91,6 +91,6 @@ def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
     # Channels are sorted alphabetically and unique
     expected_channels = "conda-forge", "nvidia"
     expected_command = rf'pixi project channel add --manifest-path ".*" --no-progress --prepend'
-    commands = command_generator_pixi.getAddChannelsCommands(environment, dependencies)
-    assert re.search(expected_command, commands[0])
-    assert all(ec in commands[0] for ec in expected_channels)
+    commands = command_generator_pixi.getAddChannelsCommands(environment, dependencies, activateConda=True)
+    assert re.search(expected_command, commands[-1])
+    assert all(ec in commands[-1] for ec in expected_channels)

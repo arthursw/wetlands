@@ -84,7 +84,8 @@ class EnvironmentManager:
         """
         if self.settingsManager.usePixi:
             manifestPath = self.settingsManager.getManifestPath(environment)
-            commands = [f'{self.settingsManager.condaBin} list --json --manifest-path "{manifestPath}"']
+            commands = self.commandGenerator.getActivateCondaCommands()
+            commands += [f'{self.settingsManager.condaBin} list --json --manifest-path "{manifestPath}"']
             return self.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
         else:
             commands = self.commandGenerator.getActivateEnvironmentCommands(str(environment)) + [

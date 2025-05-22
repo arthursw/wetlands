@@ -121,10 +121,11 @@ class DependencyManager:
                 f'One pip dependency has a channel specifier "::". Is it a conda dependency?\n\n({dependencies.get("pip")})'
             )
         installDepsCommands = self.settingsManager.getProxyEnvironmentVariablesCommands()
+        installDepsCommands += self.commandGenerator.getActivateCondaCommands()
 
         if environment:
-            installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(environment)
-            installDepsCommands += self.commandGenerator.getAddChannelsCommands(environment, condaDependencies)
+            installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(environment, activateConda=False)
+            installDepsCommands += self.commandGenerator.getAddChannelsCommands(environment, condaDependencies, activateConda=False)
 
         proxyString = self.settingsManager.getProxyString()
         proxyArgs = f"--proxy {proxyString}" if proxyString is not None else ""
