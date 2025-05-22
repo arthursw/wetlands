@@ -21,7 +21,7 @@ The name ***Wetlands*** comes from the tropical *environments* where anacondas t
 - **Automatic Environment Management**: Create and configure environments on demand.
 - **Dependency Isolation**: Install dependencies without conflicts.
 - **Embedded Execution**: Run Python functions inside isolated environments.
-- **Micromamba**: Wetlands uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
+- **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
 
 ---
 
@@ -45,7 +45,7 @@ Here is a minimal example usage:
 from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager
-environmentManager = EnvironmentManager("micromamba/")
+environmentManager = EnvironmentManager("pixi/")
 
 # Create and launch a Conda environment named "numpy_env"
 env = environmentManager.create("numpy_env", {"pip": ["numpy==2.2.4"]})

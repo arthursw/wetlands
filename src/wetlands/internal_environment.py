@@ -9,14 +9,10 @@ if TYPE_CHECKING:
 
 
 class InternalEnvironment(Environment):
-    def __init__(self, name: Path | str | None, environmentManager: "EnvironmentManager") -> None:
-        super().__init__(self._addTrailingSlash(name), environmentManager)
-
-    def _addTrailingSlash(self, path: Path | str | None) -> str | None:
-        # https://stackoverflow.com/questions/47572165/whats-the-best-way-to-add-a-trailing-slash-to-a-pathlib-directory
-        if path is None:
-            return path
-        return str(Path(path) / "_")[:-1]
+    def __init__(self, path: Path | None, environmentManager: "EnvironmentManager") -> None:
+        """Use absolute path as name for micromamba to consider the activation from a folder path, not from a name"""
+        name = str(path.resolve()) if isinstance(path, Path) else path
+        super().__init__(name, environmentManager)
 
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
         """Raise an exception. See [`Environment.launch`][wetlands.environment.Environment.launch] and [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""

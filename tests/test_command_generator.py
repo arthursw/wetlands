@@ -1,58 +1,69 @@
 import re
 from unittest.mock import patch
 import pytest
+
 from wetlands._internal.command_generator import CommandGenerator
 
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 
 
 @pytest.fixture
-def command_generator(mock_settings_manager, mock_dependency_manager):
-    return CommandGenerator(mock_settings_manager, mock_dependency_manager)
+def command_generator_pixi(mock_settings_manager_pixi):
+    return CommandGenerator(mock_settings_manager_pixi)
+
+
+@pytest.fixture
+def command_generator_micromamba(mock_settings_manager_micromamba):
+    return CommandGenerator(mock_settings_manager_micromamba)
 
 
 @patch("pathlib.Path.exists", return_value=True)
-def test_get_install_conda_commands_exists(mock_exists, command_generator):
-    assert command_generator.getInstallCondaCommands() == []
+def test_get_install_conda_commands_exists(mock_exists, command_generator_pixi):
+    assert command_generator_pixi.getInstallCondaCommands() == []
 
 
 @patch("platform.system", return_value="Windows")
-def test_get_install_conda_commands_windows(mock_platform, command_generator, mock_settings_manager):
-    commands = command_generator.getInstallCondaCommands()
-    condaPath, condaBinPath = mock_settings_manager.getCondaPaths()
-    assert any(re.match(r"Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands)
-    assert any(re.match(rf'\$Env\:MAMBA_ROOT_PREFIX\="{condaPath}"', cmd) for cmd in commands)
-    assert any(
-        re.match(
-            rf"\.\\{condaBinPath} shell hook -s powershell \| Out-String \| Invoke-Expression",
-            cmd,
-        )
-        for cmd in commands
-    )
+def test_get_install_conda_commands_windows_pixi(mock_platform, command_generator_pixi):
+    commands = command_generator_pixi.getInstallCondaCommands()
+    condaPath, condaBinPath = command_generator_pixi.settingsManager.getCondaPaths()
+    assert any(re.match(r" *Invoke-Webrequest.*-URI.*pixi", cmd) for cmd in commands)
+
+
+@patch("platform.system", return_value="Windows")
+def test_get_install_conda_commands_windows_micromamba(mock_platform, command_generator_micromamba):
+    commands = command_generator_micromamba.getInstallCondaCommands()
+    condaPath, condaBinPath = command_generator_micromamba.settingsManager.getCondaPaths()
+    assert any(re.match(r" *Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands)
 
 
 @patch("platform.system", return_value="Linux")
-def test_get_install_conda_commands_linux(mock_platform, command_generator, mock_settings_manager):
-    commands = command_generator.getInstallCondaCommands()
-    condaPath, condaBinPath = mock_settings_manager.getCondaPaths()
-    assert any(re.match(r"curl.* -Ls.*micromamba", cmd) for cmd in commands)
-    assert any(re.match(rf'export MAMBA_ROOT_PREFIX="{condaPath}"', cmd) for cmd in commands)
-    assert any(re.match(rf'eval "\$\({condaBinPath} shell hook -s posix\)"', cmd) for cmd in commands)
+def test_get_install_conda_commands_linux_pixi(mock_platform, command_generator_pixi):
+    commands = command_generator_pixi.getInstallCondaCommands()
+    condaPath, condaBinPath = command_generator_pixi.settingsManager.getCondaPaths()
+    assert any(re.match(r"curl.*pixi", cmd) for cmd in commands)
+
+
+@patch("platform.system", return_value="Linux")
+def test_get_install_conda_commands_linux_micromamba(mock_platform, command_generator_micromamba):
+    command_generator_micromamba.settingsManager.setCondaPath("micromamba", False)
+    commands = command_generator_micromamba.getInstallCondaCommands()
+    condaPath, condaBinPath = command_generator_micromamba.settingsManager.getCondaPaths()
+    assert any(re.match(r"curl.*micromamba", cmd) for cmd in commands)
 
 
 @patch("platform.system", return_value="Darwin")
-def test_get_platform_common_name_mac(mock_platform, command_generator):
-    assert command_generator.getPlatformCommonName() == "mac"
+def test_get_platform_common_name_mac(mock_platform, command_generator_pixi):
+    assert command_generator_pixi.getPlatformCommonName() == "mac"
 
 
 @patch("platform.system", return_value="Linux")
-def test_get_platform_common_name_linux(mock_platform, command_generator):
-    assert command_generator.getPlatformCommonName() == "linux"
+def test_get_platform_common_name_linux(mock_platform, command_generator_pixi):
+    assert command_generator_pixi.getPlatformCommonName() == "linux"
 
 
 @patch("platform.system", return_value="Windows")
-def test_get_platform_common_name_windows(mock_platform, command_generator):
-    assert command_generator.getPlatformCommonName() == "windows"
+def test_get_platform_common_name_windows(mock_platform, command_generator_pixi):
+    assert command_generator_pixi.getPlatformCommonName() == "windows"
 
 
 @pytest.mark.parametrize(
@@ -69,5 +80,17 @@ def test_get_platform_common_name_windows(mock_platform, command_generator):
     ],
 )
 @patch("platform.system", return_value="Linux")
-def test_get_commands_for_current_platform(mock_platform, command_generator, additional_commands, expected):
-    assert command_generator.getCommandsForCurrentPlatform(additional_commands) == expected
+def test_get_commands_for_current_platform(mock_platform, command_generator_pixi, additional_commands, expected):
+    assert command_generator_pixi.getCommandsForCurrentPlatform(additional_commands) == expected
+
+
+def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
+    """Test a mix of dependencies, some with channels and some without."""
+    environment = "base"
+    dependencies = ["conda-forge::requests", "python", "nvidia::cuda-toolkit", "conda-forge::scipy"]
+    # Channels are sorted alphabetically and unique
+    expected_channels = "conda-forge", "nvidia"
+    expected_command = rf'pixi project channel add --manifest-path ".*" --no-progress --prepend'
+    commands = command_generator_pixi.getAddChannelsCommands(environment, dependencies)
+    assert re.search(expected_command, commands[0])
+    assert all(ec in commands[0] for ec in expected_channels)
