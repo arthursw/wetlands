@@ -74,7 +74,8 @@ class ExternalEnvironment(Environment):
             threading.Thread(target=self.logOutput, args=[]).start()
 
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
-        """Executes a function in the given module and return the result.
+        """Executes a function in the given module and return the result. 
+        Warning: all arguments (args and kwargs) must be picklable (since they will be send with [multiprocessing.connection.Connection.send](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send))!
 
         Args:
                 modulePath: the path to the module to import

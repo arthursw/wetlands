@@ -12,7 +12,7 @@ imagePath, segmentationPath, env = getting_started.initialize()
 # Import shared_memory_module in the environment
 sharedMemoryModule = env.importModule("shared_memory_module.py")
 # run env.execute(module_name, function_name, args)
-masksShape, masksDtype, shmName = sharedMemoryModule.segment(imagePath)
+masksShape, masksDtype, shmName = sharedMemoryModule.segment(str(imagePath))
 
 # Save the segmentation from the shared memory
 shm = shared_memory.SharedMemory(name=shmName)

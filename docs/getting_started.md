@@ -64,7 +64,7 @@ print("Importing module in environment...")
 example_module = env.importModule("example_module.py")
 
 print(f"Running segmentation on {imagePath}...")
-diameters = example_module.segment(imagePath, segmentationPath)
+diameters = example_module.segment(str(imagePath), str(segmentationPath))
 
 print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 ```
@@ -74,11 +74,15 @@ Alternatively, we could use [`env.execute()`][wetlands.environment.Environment.e
 
 ```python
 print(f"Running segmentation on {imagePath}...")
-args = (imagePath, segmentationPath)
+args = (str(imagePath), str(segmentationPath))
 diameters = env.execute("example_module.py", "segment", args)
 
 print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 ```
+
+!!! note "Function arguments must be serializable"
+
+    The arguments of the segment function will be send to the other process via [`multiprocessing.connection.Connection.send()`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send) so the objects must be picklable.
 
 #### 5. Clean Up
 

@@ -35,7 +35,7 @@ if __name__ == "__main__":
     exampleModule = env.importModule("example_module.py")
     # exampleModule is a proxy to example_module.py in the environment,
     # calling exampleModule.function_name(args) will run env.execute(module_name, function_name, args)
-    diameters = exampleModule.segment(imagePath, segmentationPath)
+    diameters = exampleModule.segment(str(imagePath), str(segmentationPath))
 
     # Or use env.execute() directly
     # diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
