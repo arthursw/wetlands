@@ -1,3 +1,4 @@
+import logging
 import pytest
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
@@ -63,14 +64,20 @@ def test_execute_with_kwargs(mock_client):
 
 
 @patch("multiprocessing.connection.Client")
-def test_execute_error(mock_client):
+def test_execute_error(mock_client, caplog):
     env = ExternalEnvironment("test_env", MagicMock())
     env.connection = MagicMock()
     env.connection.closed = False
-    env.connection.recv.side_effect = [{"action": "error", "message": "Some error"}]
+    env.connection.recv.side_effect = [{"action": "error", "exception": "A fake error occurred", "traceback": ["line 1", "line 2"]}]
 
     with pytest.raises(ExecutionException):
-        env.execute("module.py", "func", (1, 2, 3))
+        with caplog.at_level(logging.ERROR):
+            env.execute("module.py", "func", (1, 2, 3))
+    
+    assert "An error occurred" in caplog.text
+    assert "Traceback:" in caplog.text
+    assert "line 1" in caplog.text
+    assert "line 2" in caplog.text
 
 
 @patch("wetlands._internal.command_executor.CommandExecutor.killProcess")

@@ -98,6 +98,10 @@ class ExternalEnvironment(Environment):
                     logger.info("execution finished")
                     return message.get("result")
                 elif message["action"] == "error":
+                    logger.error(message["exception"])
+                    logger.error("Traceback:")
+                    for line in message["traceback"]:
+                        logger.error(line)
                     raise ExecutionException(message)
                 else:
                     logger.warning(f"Got an unexpected message: {message}")
