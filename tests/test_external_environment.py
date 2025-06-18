@@ -74,7 +74,7 @@ def test_execute_error(mock_client, caplog):
         with caplog.at_level(logging.ERROR):
             env.execute("module.py", "func", (1, 2, 3))
     
-    assert "An error occurred" in caplog.text
+    assert "A fake error occurred" in caplog.text
     assert "Traceback:" in caplog.text
     assert "line 1" in caplog.text
     assert "line 2" in caplog.text

@@ -94,8 +94,12 @@ Check for code errors with `uv run ruff check` and format the code with `uv run 
 Test wetlands with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
 Use `--last-failed` to only re-run the failures: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb --last-failed tests`
 
-### Generate documentation
+### Build and Publish
 
+Build with `uv build`
+Publish with `uv publish dist/wetlands-VERSION_NAME*`
+
+### Generate documentation
 
 The Wetlands documentation is generated with [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/), [`mkdocstrings`](https://mkdocstrings.github.io/), [`mike`](https://github.com/jimporter/mike) and others.
 
@@ -114,9 +118,10 @@ The script `scripts/gen_ref_pages.py` is used  by mkdocs to generate the API ref
 - Handle general [dependency specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#dependency-specifiers) (handle version specifiers like '>=', '~=' etc.).
 - Use Pixi features and environment instead of creating one workspace per environment.
 - Accept `environment.yml` files for environment creation.
+- Enable to change the logs paths.
 
 ## 📜 License
 
-This project was made at Inria in Rennes (Centre Inria de l'Université de Rennes) and is licensed under the MIT License.
+This project was made by the [SAIRPICO team](https://www.inria.fr/en/sairpico) at Inria in Rennes (Centre Inria de l'Université de Rennes) and is licensed under the MIT License.
 
 The logo Wetland was made by [Dan Hetteix](https://thenounproject.com/creator/DHETTEIX/) from Noun Project (CC BY 3.0).
