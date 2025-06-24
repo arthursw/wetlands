@@ -6,6 +6,7 @@ import subprocess
 import sys
 from typing import Any, Literal
 
+from wetlands._internal.install import installMicromamba, installPixi
 from wetlands.internal_environment import InternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies, DependencyManager
 from wetlands._internal.command_executor import CommandExecutor
@@ -14,7 +15,8 @@ from wetlands._internal.settings_manager import SettingsManager
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
 
-
+PIXI_VERSION = "v2.3.0-1"
+MICROMAMBA_VERSION = "v0.48.2"
 class EnvironmentManager:
     """Manages Conda environments using micromamba for isolation and dependency management.
 
@@ -42,10 +44,27 @@ class EnvironmentManager:
         """
         self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath, usePixi)
+        self.installConda()
         self.commandGenerator = CommandGenerator(self.settingsManager)
         self.dependencyManager = DependencyManager(self.commandGenerator)
         self.commandExecutor = CommandExecutor()
 
+    def installConda(self):
+        """Install Pixi or Micromamba (depending on settingsManager.usePixi)
+        """
+
+        condaPath, condaBinPath = self.settingsManager.getCondaPaths()
+        if (condaPath / condaBinPath).exists():
+            return []
+
+        condaPath.mkdir(exist_ok=True, parents=True)
+
+        if self.settingsManager.usePixi:
+            installPixi(condaPath, PIXI_VERSION, self.settingsManager.proxies)
+        else:
+            installMicromamba(condaPath, MICROMAMBA_VERSION, self.settingsManager.proxies)
+        return
+    
     def setCondaPath(self, condaPath: str | Path, usePixi: bool = True) -> None:
         """Updates the micromamba path and loads proxy settings if exists.
 

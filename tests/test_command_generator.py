@@ -16,41 +16,6 @@ def command_generator_pixi(mock_settings_manager_pixi):
 def command_generator_micromamba(mock_settings_manager_micromamba):
     return CommandGenerator(mock_settings_manager_micromamba)
 
-
-@patch("pathlib.Path.exists", return_value=True)
-def test_get_install_conda_commands_exists(mock_exists, command_generator_pixi):
-    assert command_generator_pixi.getInstallCondaCommands() == []
-
-
-@patch("platform.system", return_value="Windows")
-def test_get_install_conda_commands_windows_pixi(mock_platform, command_generator_pixi):
-    commands = command_generator_pixi.getInstallCondaCommands()
-    condaPath, condaBinPath = command_generator_pixi.settingsManager.getCondaPaths()
-    assert any(re.match(r" *Invoke-Webrequest.*-URI.*pixi", cmd) for cmd in commands)
-
-
-@patch("platform.system", return_value="Windows")
-def test_get_install_conda_commands_windows_micromamba(mock_platform, command_generator_micromamba):
-    commands = command_generator_micromamba.getInstallCondaCommands()
-    condaPath, condaBinPath = command_generator_micromamba.settingsManager.getCondaPaths()
-    assert any(re.match(r" *Invoke-Webrequest.*-URI.*micromamba", cmd) for cmd in commands)
-
-
-@patch("platform.system", return_value="Linux")
-def test_get_install_conda_commands_linux_pixi(mock_platform, command_generator_pixi):
-    commands = command_generator_pixi.getInstallCondaCommands()
-    condaPath, condaBinPath = command_generator_pixi.settingsManager.getCondaPaths()
-    assert any(re.match(r"curl.*pixi", cmd) for cmd in commands)
-
-
-@patch("platform.system", return_value="Linux")
-def test_get_install_conda_commands_linux_micromamba(mock_platform, command_generator_micromamba):
-    command_generator_micromamba.settingsManager.setCondaPath("micromamba", False)
-    commands = command_generator_micromamba.getInstallCondaCommands()
-    condaPath, condaBinPath = command_generator_micromamba.settingsManager.getCondaPaths()
-    assert any(re.match(r"curl.*micromamba", cmd) for cmd in commands)
-
-
 @patch("platform.system", return_value="Darwin")
 def test_get_platform_common_name_mac(mock_platform, command_generator_pixi):
     assert command_generator_pixi.getPlatformCommonName() == "mac"

@@ -29,10 +29,11 @@ jobs:
 
   test:
     if: "!contains(github.event.head_commit.message, '[skip tests]')" # skip the job if the commit message contains "[skip tests]"
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.platform }} Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
+        platform: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
@@ -87,3 +88,4 @@ jobs:
 
       - name: Deploy version with mike (update gh-pages branch and push it)
         run: mike deploy --push --update-aliases 0.2.0 latest
+

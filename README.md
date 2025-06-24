@@ -119,6 +119,7 @@ The script `scripts/gen_ref_pages.py` is used  by mkdocs to generate the API ref
 - Use Pixi features and environment instead of creating one workspace per environment.
 - Accept `environment.yml` files for environment creation.
 - Enable to change the logs paths.
+- Update doc for windows
 
 ## 📜 License
 

@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 from wetlands.environment_manager import EnvironmentManager
@@ -6,7 +7,7 @@ from wetlands.internal_environment import InternalEnvironment
 
 def test_execute_function_success():
     env_manager = MagicMock(spec=EnvironmentManager)
-    internal_env = InternalEnvironment("test_env", env_manager)
+    internal_env = InternalEnvironment(Path("test_env"), env_manager)
     module_path = "fake_module.py"
     function_name = "test_function"
     args = (1, 2, 3)
@@ -27,7 +28,7 @@ def test_execute_function_success():
 
 def test_execute_raises_exception_for_missing_function():
     env_manager = MagicMock(spec=EnvironmentManager)
-    internal_env = InternalEnvironment("test_env", env_manager)
+    internal_env = InternalEnvironment(Path("test_env"), env_manager)
     module_path = "fake_module.py"
     function_name = "non_existent_function"
 

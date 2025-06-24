@@ -94,92 +94,10 @@ class CommandGenerator:
             commands += additionalCommandsDict.get(name, [])
         return commands
 
-    def getInstallCondaCommands(self) -> list[str]:
-        """Generates commands to install micromamba if missing.
-
-        Returns:
-                List of installation commands for the current OS.
-        """
-        condaPath, condaBinPath = self.settingsManager.getCondaPaths()
-        if (condaPath / condaBinPath).exists():
-            return []
-        if platform.system() not in ["Windows", "Linux", "Darwin"]:
-            raise Exception(f"Platform {platform.system()} is not supported.")
-
-        condaPath.mkdir(exist_ok=True, parents=True)
-        self.createMambaConfigFile(condaPath)
-
-        commands = self.settingsManager.getProxyEnvironmentVariablesCommands()
-
-        # Only install if conda is not already installed
-        if platform.system() == "Windows":
-            commands += [
-                f'if (-not (Test-Path "{condaPath / condaBinPath}")) {{',
-            ]
-        else:
-            commands += [f'if [ ! -f "{condaPath / condaBinPath}" ]; then']
-
-        proxyString = self.settingsManager.getProxyString()
-
-        if platform.system() == "Windows":
-            proxyCredentials = ""
-            if proxyString is not None:
-                match = re.search(r"^[a-zA-Z]+://(.*?):(.*?)@", proxyString)
-                if match:
-                    username, password = match.groups()
-                    commands += [
-                        f'$proxyUsername = "{username}"',
-                        f'$proxyPassword = "{password}"',
-                        "$securePassword = ConvertTo-SecureString $proxyPassword -AsPlainText -Force",
-                        "$proxyCredentials = New-Object System.Management.Automation.PSCredential($proxyUsername, $securePassword)",
-                    ]
-                    proxyCredentials = f"-ProxyCredential $proxyCredentials"
-            proxyArgs = f"-Proxy {proxyString} {proxyCredentials}" if proxyString is not None else ""
-            if self.settingsManager.usePixi:
-                commands += [
-                    'echo "Installing pixi..."',
-                    '$tempFile = "$env:TEMP\\pixi-install.ps1"',
-                    "try {",
-                    f"Invoke-Webrequest {proxyArgs} -UseBasicParsing -URI https://pixi.sh/install.ps1",
-                    f'& $tempFile -PixiHome "{condaPath}" -NoPathUpdate',
-                    "} finally {",
-                    "Remove-Item $tempFile -ErrorAction SilentlyContinue",
-                    "}",
-                ]
-            else:
-                commands += [
-                    f'Set-Location -Path "{condaPath}"',
-                    f'echo "Installing Visual C++ Redistributable if necessary..."',
-                    f'Invoke-WebRequest {proxyArgs} -URI "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "$env:Temp\\vc_redist.x64.exe"; Start-Process "$env:Temp\\vc_redist.x64.exe" -ArgumentList "/quiet /norestart" -Wait; Remove-Item "$env:Temp\\vc_redist.x64.exe"',
-                    f'echo "Installing micromamba..."',
-                    f"Invoke-Webrequest {proxyArgs} -URI https://github.com/mamba-org/micromamba-releases/releases/download/2.0.4-0/micromamba-win-64 -OutFile micromamba.exe",
-                ]
-        else:
-            system = "osx" if platform.system() == "Darwin" else "linux"
-            machine = platform.machine()
-            machine = "64" if machine == "x86_64" else machine
-            proxyArgs = f'--proxy "{proxyString}"' if proxyString is not None else ""
-            if self.settingsManager.usePixi:
-                commands += [
-                    f'cd "{condaPath}"',
-                    f'echo "Installing pixi..."',
-                    f'curl {proxyArgs} -fsSL https://pixi.sh/install.sh | PIXI_HOME="{condaPath}" PIXI_NO_PATH_UPDATE=1 bash',
-                ]
-            else:
-                commands += [
-                    f'cd "{condaPath}"',
-                    f'echo "Installing micromamba..."',
-                    f"curl {proxyArgs} -fsSL https://micro.mamba.pm/api/micromamba/{system}-{machine}/latest | tar -xvj bin/micromamba",
-                ]
-        # Close the if which checks if conda is already installed
-        commands += ["}"] if platform.system() == "Windows" else ["fi"]
-
-        return commands
-
     def getActivateCondaCommands(self) -> list[str]:
-        """Generates commands to install (if needed) and activate Conda."""
-        commands = self.getInstallCondaCommands()
-        return commands + self.getShellHookCommands()
+        """Generates commands to activate Conda"""
+        # Previouly, this function was also installing Conda if necessary
+        return self.getShellHookCommands()
 
     def getActivateEnvironmentCommands(
         self, environment: str | None, additionalActivateCommands: Commands = {}, activateConda: bool = True
