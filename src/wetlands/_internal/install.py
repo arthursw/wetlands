@@ -23,7 +23,7 @@ VC_REDIST_URL_DEFAULT = f"https://aka.ms/vs/17/release/{VC_REDIST_ARTIFACT_NAME}
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CHECKSUMS_BASE_DIR = SCRIPT_DIR / "checksums"
 
-VC_REDIST_CHECKSUM_PATH = CHECKSUMS_BASE_DIR / "vc_redist.sha256"
+VC_REDIST_CHECKSUM_PATH = CHECKSUMS_BASE_DIR / "vc_redist.x64.exe.sha256"
 
 # --- Helper Functions ---
 
