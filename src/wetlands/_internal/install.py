@@ -116,12 +116,12 @@ def getMicromambaPlatformInfo() -> Tuple[str, str]:
         "amd64": "64",
     }
     platformArch = archMap.get(arch)
-    if not platformArch:
+    if (not platformArch) or (platformOs == "win" and platformArch != "64"):
         print(f"Warning: Detected architecture '{arch}', defaulting to '64'.")
         platformArch = "64"
 
     # Validate the final combination
-    validCombinations = {"linux-aarch64", "linux-ppc64le", "linux-64", "osx-arm64", "osx-64", "win-64", "win-arm64"}
+    validCombinations = {"linux-aarch64", "linux-ppc64le", "linux-64", "osx-arm64", "osx-64", "win-64"}
     if f"{platformOs}-{platformArch}" not in validCombinations:
         raise ValueError(f"Unsupported OS-Architecture combination: {platformOs}-{platformArch}")
 
@@ -149,12 +149,18 @@ def installVcRedistWindows(proxies: Optional[Dict[str, str]]) -> None:
 
         print(f"Installing {VC_REDIST_ARTIFACT_NAME}...")
         try:
-            # /passive shows progress, /quiet is silent. /norestart is critical.
+
+            # Prepare the PowerShell command to launch the installer with -Wait
+            ps_command = [
+                "powershell", "-Command",
+                f"Start-Process -FilePath '{vcRedistPath}' -ArgumentList '/install','/passive','/norestart' -Wait -NoNewWindow"
+            ]
+
             result = subprocess.run(
-                [str(vcRedistPath), "/install", "/passive", "/norestart"],
+                ps_command,
                 check=False,  # We check returncode manually for success codes
                 capture_output=True,
-                text=True,
+                text=True
             )
 
             # Successful exit codes for vc_redist are 0 (success) or 3010 (reboot required)
@@ -169,7 +175,6 @@ def installVcRedistWindows(proxies: Optional[Dict[str, str]]) -> None:
                 f"  Stderr: {e.stderr}"
             )
             raise RuntimeError(error_message) from e
-
 
 def createMambaConfigFile(mambaPath):
     """Create Mamba config file .mambarc in condaPath, with nodefaults and conda-forge channels."""
