@@ -1,4 +1,3 @@
-
 import subprocess
 from pathlib import Path
 
@@ -31,15 +30,16 @@ def test_install_micromamba(tmp_path: Path):
         [str(executable_path), "--version"],
         capture_output=True,
         text=True,
-        check=True  # Fails the test if the command fails
+        check=True,  # Fails the test if the command fails
     )
 
     # Assert that the command's output is what we expect.
     stdout = result.stdout.strip().lower()
-    versionNumber = version.split('-')[0]
+    versionNumber = version.split("-")[0]
     assert versionNumber in stdout, f"The output of '--version' should contain {versionNumber}"
 
     print(f"--- Test successful. Micromamba version output: {result.stdout.strip()} ---")
+
 
 def test_install_pixi(tmp_path: Path):
     print(f"--- Running Pixi install test in temporary directory: {tmp_path} ---")
@@ -67,7 +67,7 @@ def test_install_pixi(tmp_path: Path):
         [str(executable_path), "--version"],
         capture_output=True,
         text=True,
-        check=True  # Fails the test if the command fails
+        check=True,  # Fails the test if the command fails
     )
 
     # Assert that the command's output is what we expect.

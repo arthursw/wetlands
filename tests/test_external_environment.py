@@ -68,12 +68,14 @@ def test_execute_error(mock_client, caplog):
     env = ExternalEnvironment("test_env", MagicMock())
     env.connection = MagicMock()
     env.connection.closed = False
-    env.connection.recv.side_effect = [{"action": "error", "exception": "A fake error occurred", "traceback": ["line 1", "line 2"]}]
+    env.connection.recv.side_effect = [
+        {"action": "error", "exception": "A fake error occurred", "traceback": ["line 1", "line 2"]}
+    ]
 
     with pytest.raises(ExecutionException):
         with caplog.at_level(logging.ERROR):
             env.execute("module.py", "func", (1, 2, 3))
-    
+
     assert "A fake error occurred" in caplog.text
     assert "Traceback:" in caplog.text
     assert "line 1" in caplog.text

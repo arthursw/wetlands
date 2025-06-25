@@ -124,8 +124,12 @@ class DependencyManager:
         installDepsCommands += self.commandGenerator.getActivateCondaCommands()
 
         if environment:
-            installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(environment, activateConda=False)
-            installDepsCommands += self.commandGenerator.getAddChannelsCommands(environment, condaDependencies, activateConda=False)
+            installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(
+                environment, activateConda=False
+            )
+            installDepsCommands += self.commandGenerator.getAddChannelsCommands(
+                environment, condaDependencies, activateConda=False
+            )
 
         proxyString = self.settingsManager.getProxyString()
         proxyArgs = f"--proxy {proxyString}" if proxyString is not None else ""

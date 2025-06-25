@@ -49,8 +49,7 @@ class EnvironmentManager:
         self.commandExecutor = CommandExecutor()
 
     def installConda(self):
-        """Install Pixi or Micromamba (depending on settingsManager.usePixi)
-        """
+        """Install Pixi or Micromamba (depending on settingsManager.usePixi)"""
 
         condaPath, condaBinPath = self.settingsManager.getCondaPaths()
         if (condaPath / condaBinPath).exists():
@@ -63,7 +62,7 @@ class EnvironmentManager:
         else:
             installMicromamba(condaPath, proxies=self.settingsManager.proxies)
         return
-    
+
     def setCondaPath(self, condaPath: str | Path, usePixi: bool = True) -> None:
         """Updates the micromamba path and loads proxy settings if exists.
 

@@ -16,6 +16,7 @@ def command_generator_pixi(mock_settings_manager_pixi):
 def command_generator_micromamba(mock_settings_manager_micromamba):
     return CommandGenerator(mock_settings_manager_micromamba)
 
+
 @patch("platform.system", return_value="Darwin")
 def test_get_platform_common_name_mac(mock_platform, command_generator_pixi):
     assert command_generator_pixi.getPlatformCommonName() == "mac"

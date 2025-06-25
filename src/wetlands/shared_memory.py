@@ -1,14 +1,12 @@
 from contextlib import contextmanager, suppress
-from multiprocessing import shared_memory
+from multiprocessing import resource_tracker, shared_memory
 
 import numpy as np
 
 
 def create_shared_array(shape: tuple, dtype: str | type):
     # Create the shared memory
-    shm = shared_memory.SharedMemory(
-        create=True, size=int(np.prod(shape) * np.dtype(dtype).itemsize)
-    )
+    shm = shared_memory.SharedMemory(create=True, size=int(np.prod(shape) * np.dtype(dtype).itemsize))
     # Create a NumPy array backed by shared memory
     shared = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
     return shared, shm
@@ -31,9 +29,7 @@ def wrap(shared: np.ndarray, shm: shared_memory.SharedMemory):
 
 def unwrap(shmw: dict):
     shm = shared_memory.SharedMemory(name=shmw["name"])
-    shared_array = np.ndarray(
-        shmw["shape"], dtype=shmw["dtype"], buffer=shm.buf
-    )
+    shared_array = np.ndarray(shmw["shape"], dtype=shmw["dtype"], buffer=shm.buf)
     return shared_array, shm
 
 
@@ -49,9 +45,7 @@ def release_shared_memory(
 
 
 @contextmanager
-def share_manage_array(
-    original_array: np.ndarray, unlink_on_exit: bool = True
-):
+def share_manage_array(original_array: np.ndarray, unlink_on_exit: bool = True):
     shm = None
     try:
         shared, shm = share_array(original_array)
@@ -69,6 +63,7 @@ def get_shared_array(wrapper: dict):
     finally:
         if shm is not None:
             shm.close()
+
 
 def unregister(shm: shared_memory.SharedMemory):
     # Avoid resource_tracker warnings

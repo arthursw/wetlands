@@ -1,6 +1,5 @@
 from pathlib import Path
 import platform
-import re
 
 try:
     from typing import NotRequired, TypedDict  # type: ignore
@@ -127,7 +126,9 @@ class CommandGenerator:
             commands += [f"{self.settingsManager.condaBin} activate {environment}"]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
 
-    def getAddChannelsCommands(self, environment: str, condaDependencies: list[str], activateConda: bool = True) -> list[str]:
+    def getAddChannelsCommands(
+        self, environment: str, condaDependencies: list[str], activateConda: bool = True
+    ) -> list[str]:
         """Add Conda channels in manifest file when using Pixi (`pixi add channelName::packageName` is not enough, channelName must be in manifest file).
         The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`.
 
