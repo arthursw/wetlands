@@ -69,8 +69,8 @@ def mock_command_executor(monkeypatch):
 @pytest.fixture
 def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeypatch):
     """Provides an EnvironmentManager instance with mocked CommandExecutor."""
-    dummy_micromamba_path = tmp_path_factory.mktemp("conda root")
-    main_env_path = tmp_path_factory.mktemp("conda root") / "envs" / "main_test_env"
+    dummy_micromamba_path = tmp_path_factory.mktemp("conda_root")
+    main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
     # Don't create main_env_path directory, let the manager handle checks
 
@@ -92,7 +92,7 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 @pytest.fixture
 def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, monkeypatch):
     """Provides an EnvironmentManager instance with mocked CommandExecutor."""
-    dummy_pixi_path = tmp_path_factory.mktemp("pixi root")
+    dummy_pixi_path = tmp_path_factory.mktemp("pixi_root")
 
     manager = EnvironmentManager(condaPath=dummy_pixi_path, usePixi=True)
 
@@ -112,6 +112,21 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
 # --- Test Functions ---
 
 # ---- _dependenciesAreInstalled Tests ----
+
+
+def test_environment_manager_conda_path(tmp_path_factory):
+    """Check that an exception is raised if the provided CondaPath contains the name of another conda manager."""
+    
+    dummy_conda_path = tmp_path_factory.mktemp("path_containing_pixi_and_micromamba").resolve()
+
+    with pytest.raises(Exception):
+        manager = EnvironmentManager(condaPath=dummy_conda_path, usePixi=False)
+    
+    with pytest.raises(Exception):
+        manager = EnvironmentManager(condaPath=dummy_conda_path, usePixi=True)
+
+    manager = EnvironmentManager(condaPath=dummy_conda_path, usePixi=True, acceptAllCondaPaths=True)
+    assert manager is not None
 
 
 def test_dependencies_are_installed_python_mismatch(environment_manager_fixture):

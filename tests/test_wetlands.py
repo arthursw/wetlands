@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 logger = logging.getLogger(__name__)
 
 
-@pytest.fixture(scope="module", params=["micromamba root/", "pixi root/"])
+@pytest.fixture(scope="module", params=["micromamba_root/", "pixi_root/"])
 def env_manager(request, tmp_path_factory):
     # Setup temporary conda root
     temp_root = tmp_path_factory.mktemp(request.param)

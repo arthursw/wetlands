@@ -33,14 +33,23 @@ class EnvironmentManager:
     environments: dict[str, Environment] = {}
 
     def __init__(
-        self, condaPath: str | Path = Path("pixi"), usePixi=True, mainCondaEnvironmentPath: Path | None = None
+        self, condaPath: str | Path = Path("pixi"), usePixi=True, mainCondaEnvironmentPath: Path | None = None, acceptAllCondaPaths=False
     ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
         Args:
-                condaPath: Path to the micromamba binary. Defaults to "micromamba".
+                condaPath: Path to the micromamba binary. Defaults to "micromamba". Warning: cannot contain any space character on Windows.
+                usePixi: Whether to use Pixi as the conda manager.
                 mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the folder containing the pixi.toml (or pyproject.toml) file.
+                acceptAllCondaPaths: Whether to accept Conda path containing "pixi" when using micromamba or "micromamba" when using pixi.
         """
+        condaPath = Path(condaPath)
+        if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
+            raise Exception(f"The Micromamba path cannot contain any space character on Windows (given path is \"{condaPath}\").")
+        condaName = "pixi" if usePixi else "micromamba"
+        otherName = "micromamba" if usePixi else "pixi"
+        if (not acceptAllCondaPaths) and otherName in str(condaPath):
+            raise Exception(f"You provided the condaPath \"{condaPath}\" which contains \"{otherName}\", but you asked to use {condaName}. Use acceptAllCondaPaths to use this path anyway.")
         self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath, usePixi)
         self.installConda()
