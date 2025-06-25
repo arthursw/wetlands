@@ -65,8 +65,7 @@ def verifyChecksum(filePath: Path, checksumFilePath: Path) -> None:
     
     try:
         with open(checksumFilePath, 'r') as f:
-            # .strip() handles newlines, .split()[0] handles 'hash  filename' format
-            expectedChecksum = f.read().strip().split()[0]
+            expectedChecksum = f.read().strip().split()[0].lower()
     except (FileNotFoundError, IndexError) as e:
         raise ValueError(f"Could not read expected checksum from {checksumFilePath}") from e
 
