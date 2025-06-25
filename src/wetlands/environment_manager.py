@@ -33,7 +33,11 @@ class EnvironmentManager:
     environments: dict[str, Environment] = {}
 
     def __init__(
-        self, condaPath: str | Path = Path("pixi"), usePixi=True, mainCondaEnvironmentPath: Path | None = None, acceptAllCondaPaths=False
+        self,
+        condaPath: str | Path = Path("pixi"),
+        usePixi=True,
+        mainCondaEnvironmentPath: Path | None = None,
+        acceptAllCondaPaths=False,
     ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
@@ -45,11 +49,15 @@ class EnvironmentManager:
         """
         condaPath = Path(condaPath)
         if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
-            raise Exception(f"The Micromamba path cannot contain any space character on Windows (given path is \"{condaPath}\").")
+            raise Exception(
+                f'The Micromamba path cannot contain any space character on Windows (given path is "{condaPath}").'
+            )
         condaName = "pixi" if usePixi else "micromamba"
         otherName = "micromamba" if usePixi else "pixi"
         if (not acceptAllCondaPaths) and otherName in str(condaPath):
-            raise Exception(f"You provided the condaPath \"{condaPath}\" which contains \"{otherName}\", but you asked to use {condaName}. Use acceptAllCondaPaths to use this path anyway.")
+            raise Exception(
+                f'You provided the condaPath "{condaPath}" which contains "{otherName}", but you asked to use {condaName}. Use acceptAllCondaPaths to use this path anyway.'
+            )
         self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath, usePixi)
         self.installConda()

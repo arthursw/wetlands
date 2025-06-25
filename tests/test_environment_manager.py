@@ -116,12 +116,12 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
 
 def test_environment_manager_conda_path(tmp_path_factory):
     """Check that an exception is raised if the provided CondaPath contains the name of another conda manager."""
-    
+
     dummy_conda_path = tmp_path_factory.mktemp("path_containing_pixi_and_micromamba").resolve()
 
     with pytest.raises(Exception):
         manager = EnvironmentManager(condaPath=dummy_conda_path, usePixi=False)
-    
+
     with pytest.raises(Exception):
         manager = EnvironmentManager(condaPath=dummy_conda_path, usePixi=True)
 
