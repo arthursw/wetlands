@@ -201,10 +201,7 @@ def installMicromamba(
     print(f"Target Micromamba URL: {micromambaUrl}")
 
     micromambaFinalName = "micromamba.exe" if currentOs == "win" else "micromamba"
-    # Assume a standard bin directory structure
-    binDir = installPath / "bin"
-    binDir.mkdir(parents=True, exist_ok=True)
-    micromambaFullPath = binDir / micromambaFinalName
+    micromambaFullPath = installPath / micromambaFinalName
 
     # Use the combined helper to download and verify
     downloadAndVerify(micromambaUrl, micromambaFullPath, CHECKSUMS_BASE_DIR / f"{micromambaBaseName}.sha256", proxies)
