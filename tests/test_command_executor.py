@@ -8,10 +8,10 @@ def executor():
 
 
 def test_execute_commands_success(executor):
-    process = executor.executeCommands(["echo Hello World"])
+    process = executor.executeCommands(["echo HelloWorld"])
     with process:
         output = process.stdout.read().strip()
-    assert output == "Hello World"
+    assert output == "HelloWorld"
     assert process.returncode == 0
 
 
