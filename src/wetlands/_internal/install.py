@@ -121,7 +121,7 @@ def getMicromambaPlatformInfo() -> Tuple[str, str]:
         platformArch = "64"
 
     # Validate the final combination
-    validCombinations = {"linux-aarch64", "linux-ppc64le", "linux-64", "osx-arm64", "osx-64", "win-64"}
+    validCombinations = {"linux-aarch64", "linux-ppc64le", "linux-64", "osx-arm64", "osx-64", "win-64", "win-arm64"}
     if f"{platformOs}-{platformArch}" not in validCombinations:
         raise ValueError(f"Unsupported OS-Architecture combination: {platformOs}-{platformArch}")
 
