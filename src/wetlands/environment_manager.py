@@ -15,8 +15,7 @@ from wetlands._internal.settings_manager import SettingsManager
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
 
-PIXI_VERSION = "v2.3.0-1"
-MICROMAMBA_VERSION = "v0.48.2"
+
 class EnvironmentManager:
     """Manages Conda environments using micromamba for isolation and dependency management.
 
@@ -60,9 +59,9 @@ class EnvironmentManager:
         condaPath.mkdir(exist_ok=True, parents=True)
 
         if self.settingsManager.usePixi:
-            installPixi(condaPath, PIXI_VERSION, self.settingsManager.proxies)
+            installPixi(condaPath, proxies=self.settingsManager.proxies)
         else:
-            installMicromamba(condaPath, MICROMAMBA_VERSION, self.settingsManager.proxies)
+            installMicromamba(condaPath, proxies=self.settingsManager.proxies)
         return
     
     def setCondaPath(self, condaPath: str | Path, usePixi: bool = True) -> None:

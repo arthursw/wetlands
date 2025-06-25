@@ -1,16 +1,10 @@
 
-
-import pytest
 import subprocess
 from pathlib import Path
 
 from wetlands._internal.install import installMicromamba, installPixi
 
-# Define a custom marker for slow, network-dependent tests
-# This allows to run only fast, local tests with `pytest -m "not network"`
-slow_network_test = pytest.mark.network
 
-@slow_network_test
 def test_install_micromamba(tmp_path: Path):
     print(f"--- Running Micromamba install test in temporary directory: {tmp_path} ---")
 
@@ -42,18 +36,18 @@ def test_install_micromamba(tmp_path: Path):
 
     # Assert that the command's output is what we expect.
     stdout = result.stdout.strip().lower()
-    assert version in stdout, f"The output of '--version' should contain {version}"
+    versionNumber = version.split('-')[0]
+    assert versionNumber in stdout, f"The output of '--version' should contain {versionNumber}"
 
     print(f"--- Test successful. Micromamba version output: {result.stdout.strip()} ---")
 
-@slow_network_test
 def test_install_pixi(tmp_path: Path):
     print(f"--- Running Pixi install test in temporary directory: {tmp_path} ---")
 
     # 1. ARRANGE: The tmp_path fixture handles setup. The installation
     # directory is ready and isolated.
     install_root_dir = tmp_path
-    version="0.48.2"
+    version = "v0.48.2"
 
     # 2. ACT: Call the function to be tested.
     # Any exception here will automatically fail the test.
@@ -78,6 +72,7 @@ def test_install_pixi(tmp_path: Path):
 
     # Assert that the command's output is what we expect.
     stdout = result.stdout.strip().lower()
-    assert version in stdout, f"The output of '--version' should contain {version}"
+    versionNumber = version[1:]
+    assert versionNumber in stdout, f"The output of '--version' should contain {versionNumber}"
 
     print(f"--- Test successful. Micromamba version output: {result.stdout.strip()} ---")

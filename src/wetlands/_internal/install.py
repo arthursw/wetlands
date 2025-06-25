@@ -14,7 +14,9 @@ from typing import Dict, Optional, Tuple
 import yaml
 
 # --- Configuration ---
-# Constants remain in UPPER_SNAKE_CASE as per PEP 8 convention.
+PIXI_VERSION = "v0.48.2"
+MICROMAMBA_VERSION = "2.3.0-1"
+
 VC_REDIST_ARTIFACT_NAME = "vc_redist.x64.exe"
 VC_REDIST_URL_DEFAULT = f"https://aka.ms/vs/17/release/{VC_REDIST_ARTIFACT_NAME}"
 
@@ -22,7 +24,6 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 CHECKSUMS_BASE_DIR = SCRIPT_DIR / "checksums"
 
 VC_REDIST_CHECKSUM_PATH = CHECKSUMS_BASE_DIR / "vc_redist.sha256"
-MICROMAMBA_CHECKSUM_PATH = CHECKSUMS_BASE_DIR / "micromamba.sha256"
 
 # --- Helper Functions ---
 
@@ -128,14 +129,14 @@ def getMicromambaPlatformInfo() -> Tuple[str, str]:
     
     return platformOs, platformArch
 
-def getMicromambaUrl(platformOs: str, platformArch: str, version: str) -> str:
+def getMicromambaUrl(platformOs: str, platformArch: str, version: str) -> Tuple[str, str]:
     """Constructs the micromamba download URL."""
     baseName = f"micromamba-{platformOs}-{platformArch}"
     baseUrl = "https://github.com/mamba-org/micromamba-releases/releases"
 
     if version:
-        return f"{baseUrl}/download/{version}/{baseName}"
-    return f"{baseUrl}/latest/download/{baseName}"
+        return f"{baseUrl}/download/{version}/{baseName}", baseName
+    return f"{baseUrl}/latest/download/{baseName}", baseName
 
 def installVcRedistWindows(proxies: Optional[Dict[str, str]]) -> None:
     """Downloads, verifies, and silently installs VC Redistributable on Windows."""
@@ -184,7 +185,7 @@ def createMambaConfigFile(mambaPath):
         )
         yaml.safe_dump(mambaSettings, f)
 
-def installMicromamba(installPath: Path, version: str = "latest", proxies: Optional[Dict[str, str]] = None) -> Path:
+def installMicromamba(installPath: Path, version: str = MICROMAMBA_VERSION, proxies: Optional[Dict[str, str]] = None) -> Path:
     """High-level function to orchestrate Micromamba installation."""
     currentOs, currentArch = getMicromambaPlatformInfo()
 
@@ -192,7 +193,7 @@ def installMicromamba(installPath: Path, version: str = "latest", proxies: Optio
         installVcRedistWindows(proxies)
 
     print(f"\n--- Starting Micromamba Setup for {currentOs}-{currentArch} ---")
-    micromambaUrl = getMicromambaUrl(currentOs, currentArch, version)
+    micromambaUrl, micromambaBaseName = getMicromambaUrl(currentOs, currentArch, version)
     print(f"Target Micromamba URL: {micromambaUrl}")
 
     micromambaFinalName = "micromamba.exe" if currentOs == "win" else "micromamba"
@@ -202,7 +203,7 @@ def installMicromamba(installPath: Path, version: str = "latest", proxies: Optio
     micromambaFullPath = binDir / micromambaFinalName
     
     # Use the combined helper to download and verify
-    downloadAndVerify(micromambaUrl, micromambaFullPath, MICROMAMBA_CHECKSUM_PATH, proxies)
+    downloadAndVerify(micromambaUrl, micromambaFullPath, CHECKSUMS_BASE_DIR / f"{micromambaBaseName}.sha256", proxies)
 
     if currentOs in ["linux", "osx"]:
         micromambaFullPath.chmod(0o755)  # rwxr-xr-x
@@ -239,7 +240,7 @@ def getPixiTarget(architecture=None) -> str:
     return f"pixi-{architecture}-{platformName}{archiveExtension}"
     
 
-def installPixi(installPath: Path, version: str = "latest", proxies: Optional[Dict[str, str]] = None) -> Path:
+def installPixi(installPath: Path, version: str = PIXI_VERSION, proxies: Optional[Dict[str, str]] = None) -> Path:
     """Downloads, verifies, and installs a specific version of Pixi."""
 
     binaryFilename = getPixiTarget()
@@ -274,14 +275,15 @@ def installPixi(installPath: Path, version: str = "latest", proxies: Optional[Di
                     zip_ref.extractall(binDir)
             else: # .tar.gz
                 with tarfile.open(archive_path, "r:gz") as tar_ref:
-                    tar_ref.extractall(binDir)
+                    tar_ref.extractall(binDir, filter='data')
 
             print("Pixi installed successfully.")
 
     except (RuntimeError, ValueError, FileNotFoundError) as e:
         raise Exception("Pixi installation failed") from e
     
-    return binDir
+    executable = binDir / "pixi"
+    return executable.with_suffix(".exe") if platform.system() == "Windows" else executable
 
 # --- Main Execution ---
 
