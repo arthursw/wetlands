@@ -282,7 +282,13 @@ def installPixi(installPath: Path, version: str = PIXI_VERSION, proxies: Optiona
                     zip_ref.extractall(binDir)
             else:  # .tar.gz
                 with tarfile.open(archive_path, "r:gz") as tar_ref:
-                    tar_ref.extractall(binDir, filter="data")
+                    if sys.version_info >= (3, 12):
+                        tar_ref.extractall(binDir, filter="data")
+                    else:
+                        # Emulate 'filter="data"' for 3.10–3.11
+                        for member in tar_ref.getmembers():
+                            if member.isfile():  # Only extract files, not symlinks/devices/etc
+                                tar_ref.extract(member, path=binDir)
 
             print("Pixi installed successfully.")
 
