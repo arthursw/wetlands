@@ -23,15 +23,10 @@ Wetlands uses the `EnvironmentManager.executeCommands()` for different operation
 Behind the scenes, this method creates and executes a temporary script (a bash script on Linux and Mac, and a PowerShell script on Windows) which looks like the following:
 
 ```bash
-# Install Micromamba (only if necessary)
-cd "/path/to/examples/micromamba"
-echo "Installing micromamba..."
-curl  -Ls https://micro.mamba.pm/api/micromamba/osx-arm64/latest | tar -xvj bin/micromamba
-
 # Initialize Micromamba
 cd "/path/to/examples/micromamba"
 export MAMBA_ROOT_PREFIX="/path/to/examples/micromamba"
-eval "$(bin/micromamba shell hook -s posix)"
+eval "$(micromamba shell hook -s posix)"
 
 # Create the cellpose environment
 cd "/Users/amasson/Travail/wetlands/examples"
