@@ -252,7 +252,8 @@ class EnvironmentManager:
         if self.settingsManager.usePixi:
             manifestPath = self.settingsManager.getManifestPath(environment)
             if not manifestPath.exists():
-                createEnvCommands += [f'{self.settingsManager.condaBin} init --no-progress "{manifestPath.parent}"']
+                platformArgs = f'--platform win-arm64 --platform win-64' if platform.system() == "Windows" else ""
+                createEnvCommands += [f'{self.settingsManager.condaBin} init --no-progress {platformArgs} "{manifestPath.parent}"']
             createEnvCommands += [
                 f'{self.settingsManager.condaBin} add --no-progress --manifest-path "{manifestPath}" {pythonRequirement}'
             ]
