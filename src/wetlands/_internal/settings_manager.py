@@ -21,7 +21,9 @@ class SettingsManager:
                 Updates condaBinConfig and proxies from the .mambarc file.
         """
         self.usePixi = usePixi
-        self.condaBin = "pixi" if usePixi else "micromamba"
+        self.condaBin = (
+            "pixi.exe" if platform.system() == "Windows" and usePixi else "pixi" if usePixi else "micromamba"
+        )
         self.condaPath = Path(condaPath).resolve()
         # condaBinConfig is only used with micromamba but let's initialize it for pixi as well
         condaConfigPath = self.condaPath / "pixi.toml" if self.usePixi else self.condaPath / ".mambarc"
