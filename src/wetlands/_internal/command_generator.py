@@ -116,11 +116,12 @@ class CommandGenerator:
         commands = self.getActivateCondaCommands() if activateConda else []
         if self.settingsManager.usePixi:
             manifestPath = self.settingsManager.getManifestPath(environment)
+            # Warning: Use `pixi shell-hook` instead of `pixi shell` since `pixi shell` creates a new shell (and we want to keep the same shell)
             if platform.system() != "Windows":
                 commands += [f'eval "$({self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}")"']
             else:
                 commands += [
-                    f'.\\{self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}" | Out-String | Invoke-Expression'
+                    f'{self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}" | Out-String | Invoke-Expression'
                 ]
         else:
             commands += [f"{self.settingsManager.condaBin} activate {environment}"]
