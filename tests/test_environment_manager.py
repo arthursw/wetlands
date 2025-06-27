@@ -572,12 +572,13 @@ def test_create_with_python_version_pixi(environment_manager_pixi_fixture, monke
     mock_execute_output.assert_called()
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
-    assert any(f"pixi init" in cmd for cmd in command_list)
+    pixi_bin = "pixi.exe" if platform.system() == "Windows" else "pixi"
+    assert any(f"{pixi_bin} init" in cmd for cmd in command_list)
     # Check python version is in create command
-    assert any(re.match(rf"pixi add .* python={py_version}", cmd) is not None for cmd in command_list)
+    assert any(re.match(rf"{pixi_bin} add .* python={py_version}", cmd) is not None for cmd in command_list)
     # Check install command for dependencies
-    assert any("toolz" in cmd and "--pypi" in cmd for cmd in command_list if "pixi add" in cmd)
-    assert any("dep" in cmd for cmd in command_list if "pixi add" in cmd)
+    assert any("toolz" in cmd and "--pypi" in cmd for cmd in command_list if f"{pixi_bin} add" in cmd)
+    assert any("dep" in cmd for cmd in command_list if f"{pixi_bin} add" in cmd)
 
 
 # ---- install Tests ----
@@ -593,6 +594,7 @@ def test_install_in_existing_env_pixi(environment_manager_pixi_fixture):
     mock_execute_output.assert_called_once()
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
+    pixi_bin = "pixi.exe" if platform.system() == "Windows" else "pixi"
 
     # Check for install commands targeting the environment
-    assert any("new_dep==1.0" in cmd for cmd in command_list if "pixi add" in cmd)
+    assert any("new_dep==1.0" in cmd for cmd in command_list if f"{pixi_bin} add" in cmd)
