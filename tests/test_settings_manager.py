@@ -54,13 +54,13 @@ def test_get_conda_paths():
     sm = SettingsManager("/some/path", False)
     root, bin_path = sm.getCondaPaths()
     assert root == Path("/some/path").resolve()
-    expected_bin = "bin/micromamba" if platform.system() != "Windows" else "micromamba.exe"
+    expected_bin = "bin/micromamba" if platform.system() != "Windows" else "bin/micromamba.exe"
     assert bin_path == Path(expected_bin)
 
     sm = SettingsManager("/some/path")
     root, bin_path = sm.getCondaPaths()
     assert root == Path("/some/path").resolve()
-    expected_bin = "bin/pixi" if platform.system() != "Windows" else "pixi.exe"
+    expected_bin = "bin/pixi" if platform.system() != "Windows" else "bin/pixi.exe"
     assert bin_path == Path(expected_bin)
 
 

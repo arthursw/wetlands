@@ -76,7 +76,8 @@ class SettingsManager:
                 Tuple of (conda directory path, binary relative path).
         """
         condaName = "pixi" if self.usePixi else "micromamba"
-        condaBinPath = f"bin/{condaName}" if platform.system() != "Windows" else f"{condaName}.exe"
+        suffix = ".exe" if platform.system() == "Windows" else ""
+        condaBinPath = f"bin/{condaName}{suffix}"
         return self.condaPath.resolve(), Path(condaBinPath)
 
     def getWorkspacePath(self, environment: str | Path) -> Path:
