@@ -1,6 +1,6 @@
 [project]
 name = "wetlands"
-version = "0.2.1"
+version = "0.2.2"
 description = "Wetlands is a lightweight library to create conda environment and execute code inside them."
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
