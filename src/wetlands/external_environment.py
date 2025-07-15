@@ -5,6 +5,7 @@ import threading
 from typing import Any, TYPE_CHECKING
 
 from wetlands.logger import logger
+from wetlands import config
 from wetlands._internal.command_generator import Commands
 from wetlands.environment import Environment
 from wetlands._internal.exceptions import ExecutionException
@@ -44,12 +45,17 @@ class ExternalEnvironment(Environment):
                 logOutputInThread: Logs the process output in a separate thread.
         """
 
-        moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / "module_executor.py"
+        moduleExecutorFile = "module_executor.py" if not config.debug else "debug.py"
+        moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / moduleExecutorFile
 
         commands = self.environmentManager.commandGenerator.getActivateEnvironmentCommands(
             self.name, additionalActivateCommands
         )
-        commands += [f'python -u "{moduleExecutorPath}" {self.name}']
+
+        python = self.environmentManager.settingsManager.getEnvironmentPythonPath(self.name) if self.name and config.debug else ""
+        debugArgs = f" --environment {self.name} --python {python}" if config.debug else ""
+        commands += [f'python -u "{moduleExecutorPath}" {self.name}{debugArgs}']
+
         self.process = self.executeCommands(commands)
 
         if self.process.stdout is not None:

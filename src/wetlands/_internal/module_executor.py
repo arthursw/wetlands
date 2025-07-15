@@ -28,6 +28,7 @@ logging.basicConfig(
     ],
 )
 
+port = 0
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         "Wetlands module executor",
@@ -35,8 +36,9 @@ if __name__ == "__main__":
         "When instructed, it can import a module and execute one of its functions.",
     )
     parser.add_argument("environment", help="The name of the execution environment.")
+    parser.add_argument("port", help="The port to listen to.", default=0, type=int)
     args = parser.parse_args()
-
+    port = args.port
     logger = logging.getLogger(args.environment)
 else:
     logger = logging.getLogger("module_executor")
@@ -123,7 +125,7 @@ def launchListener():
         The listener automatically closes after receiving an 'exit' command.
     """
     lock = threading.Lock()
-    with Listener(("localhost", 0)) as listener:
+    with Listener(("localhost", port)) as listener:
         while True:
             # Print ready message for the environment manager (it can now open a client to send messages)
             print(f"Listening port {listener.address[1]}")
