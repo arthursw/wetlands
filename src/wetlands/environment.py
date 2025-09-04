@@ -66,10 +66,9 @@ class Environment:
         """
         return self.environmentManager.install(self.name, dependencies, additionalInstallCommands)
 
-    @abstractmethod
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
-        """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Raises an exception in [InternalEnvironment][wetlands.internal_environment.InternalEnvironment]. See [`InternalEnvironment.launch`][wetlands.internal_environment.InternalEnvironment.launch] and [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
-        pass
+        """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Do nothing when InternalEnvironment. See [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
+        return
 
     def executeCommands(
         self, commands: Commands, additionalActivateCommands: Commands = {}, popenKwargs: dict[str, Any] = {}
