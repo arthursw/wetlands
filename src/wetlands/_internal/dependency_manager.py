@@ -22,6 +22,7 @@ class Dependency(TypedDict):
 class Dependencies(TypedDict):
     python: NotRequired[str]
     conda: NotRequired[list[str | Dependency]]
+    channels: NotRequired[list[str]]
     pip: NotRequired[list[str | Dependency]]
 
 
@@ -128,7 +129,7 @@ class DependencyManager:
                 environment, activateConda=False
             )
             installDepsCommands += self.commandGenerator.getAddChannelsCommands(
-                environment, condaDependencies, activateConda=False
+                environment, dependencies.get('channels', []), condaDependencies, activateConda=False
             )
 
         proxyString = self.settingsManager.getProxyString()

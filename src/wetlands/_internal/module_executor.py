@@ -36,7 +36,7 @@ if __name__ == "__main__":
         "When instructed, it can import a module and execute one of its functions.",
     )
     parser.add_argument("environment", help="The name of the execution environment.")
-    parser.add_argument("port", help="The port to listen to.", default=0, type=int)
+    parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
     args = parser.parse_args()
     port = args.port
     logger = logging.getLogger(args.environment)

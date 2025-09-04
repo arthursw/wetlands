@@ -234,6 +234,8 @@ class EnvironmentManager:
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
+        if isinstance(environment, str) and ('/' in environment or '\\' in environment):
+            raise Exception("Environments name cannot contain any forward nor backward slash.")
         if self.environmentExists(environment):
             environment = str(environment)
             if environment not in self.environments:

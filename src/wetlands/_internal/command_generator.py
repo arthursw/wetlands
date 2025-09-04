@@ -128,13 +128,14 @@ class CommandGenerator:
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
 
     def getAddChannelsCommands(
-        self, environment: str, condaDependencies: list[str], activateConda: bool = True
+        self, environment: str, channels: list[str], condaDependencies: list[str], activateConda: bool = True
     ) -> list[str]:
         """Add Conda channels in manifest file when using Pixi (`pixi add channelName::packageName` is not enough, channelName must be in manifest file).
         The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`.
 
         Args:
                 environment: Environment name.
+                condaChannels: The channels to add.
                 condaDependencies: The conda dependecies to install (e.g. ["bioimageit::atlas", "openjdk"]).
                 activateConda: Whether to activate conda or not.
 
@@ -142,8 +143,11 @@ class CommandGenerator:
                 List of commands to add required channels
         """
         if not self.settingsManager.usePixi:
-            return []
-        channels = set([dep.split("::")[0].replace('"', "") for dep in condaDependencies if "::" in dep])
+            if len(channels)>0:
+                return [f'{self.settingsManager.condaBinConfig} config --add channels ' + " ".join(channels)]
+            else:
+                return []
+        channels += set([dep.split("::")[0].replace('"', "") for dep in condaDependencies if "::" in dep])
         if len(channels) == 0:
             return []
         manifestPath = self.settingsManager.getManifestPath(environment)
