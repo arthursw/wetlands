@@ -1,7 +1,4 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
@@ -10,7 +7,23 @@
             "request": "launch",
             "program": "${workspaceFolder}/src/wetlands/_internal/module_executor.py",
             "console": "integratedTerminal",
-            "args": ["env"]
-        },
+            "python": "/Users/amasson/Travail/bioimageflow/pixi/workspaces/atlas/.pixi/envs/default/bin/python",
+            "justMyCode": false,
+            "autoReload": {
+                "enable": true
+            },
+            "windows": {
+                "python": "/Users/amasson/Travail/bioimageflow/pixi/workspaces/atlas/.pixi/envs/default/bin/python"
+            },
+            "args": [
+                "atlas",
+                "--port",
+                "55180"
+            ],
+            "cwd": "/Users/amasson/Travail/bioimageflow",
+            "env": {
+                "PATH": "/Users/amasson/Travail/bioimageflow/pixi/workspaces/atlas/.pixi/envs/default/bin:${env:PATH}"
+            }
+        }
     ]
 }

@@ -44,36 +44,37 @@ class ExternalEnvironment(Environment):
                 additionalActivateCommands: Platform-specific activation commands.
                 logOutputInThread: Logs the process output in a separate thread.
         """
+        if self.launched():
+            return
+        
+        self.port = 0 # config.debugPorts.get(self.name, 0)
+        if self.port == 0:
+            moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / "module_executor.py"
+            commands = self.environmentManager.commandGenerator.getActivateEnvironmentCommands(
+                self.name, additionalActivateCommands
+            )
 
-        moduleExecutorFile = "module_executor.py" if not config.debug else "debug.py"
-        moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / moduleExecutorFile
+            commands += [f'python -u "{moduleExecutorPath}" {self.name}']
 
-        commands = self.environmentManager.commandGenerator.getActivateEnvironmentCommands(
-            self.name, additionalActivateCommands
-        )
+            self.process = self.executeCommands(commands)
 
-        python = self.environmentManager.settingsManager.getEnvironmentPythonPath(self.name) if self.name and config.debug else ""
-        debugArgs = f" --environment {self.name} --python {python}" if config.debug else ""
-        commands += [f'python -u "{moduleExecutorPath}" {self.name}{debugArgs}']
-
-        self.process = self.executeCommands(commands)
-
-        if self.process.stdout is not None:
-            try:
-                for line in self.process.stdout:
-                    logger.info(line.strip())
-                    if line.strip().startswith("Listening port "):
-                        self.port = int(line.strip().replace("Listening port ", ""))
-                        break
-            except Exception as e:
-                self.process.stdout.close()
-                raise e
-        if self.process.poll() is not None:
             if self.process.stdout is not None:
-                self.process.stdout.close()
-            raise Exception(f"Process exited with return code {self.process.returncode}.")
-        if self.port is None:
-            raise Exception(f"Could not find the server port.")
+                try:
+                    for line in self.process.stdout:
+                        logger.info(line.strip())
+                        if line.strip().startswith("Listening port "):
+                            self.port = int(line.strip().replace("Listening port ", ""))
+                            break
+                except Exception as e:
+                    self.process.stdout.close()
+                    raise e
+            if self.process.poll() is not None:
+                if self.process.stdout is not None:
+                    self.process.stdout.close()
+                raise Exception(f"Process exited with return code {self.process.returncode}.")
+            if self.port is None:
+                raise Exception(f"Could not find the server port.")
+        logger.info(f"Connecting {self.name} to port {self.port}")
         self.connection = Client(("localhost", self.port))
 
         if logOutputInThread:
@@ -95,6 +96,7 @@ class ExternalEnvironment(Environment):
             OSError when raised by the communication.
         """
         connection = self.connection
+
         if connection is None or connection.closed:
             logger.warning(f"Connection not ready. Skipping execute {modulePath}.{function}({args})")
             return None
@@ -144,6 +146,7 @@ class ExternalEnvironment(Environment):
             except OSError as e:
                 if e.args[0] == "handle is closed":
                     pass
+            logger.debug(f"Close connection of environment {self.name}")
             self.connection.close()
 
         CommandExecutor.killProcess(self.process)

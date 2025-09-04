@@ -1,7 +1,7 @@
 from pathlib import Path
 from wetlands.environment_manager import EnvironmentManager
 import urllib.request
-
+from wetlands import config
 
 def initialize():
     # Initialize the environment manager
@@ -28,6 +28,9 @@ def initialize():
 
 
 if __name__ == "__main__":
+    # Set debug mode to open a VS Code window when launching environments
+    # config.setDebug(True)
+
     # Initialize: create the environment manager, the Cellpose conda environment, and download the image to segment
     imagePath, segmentationPath, env = initialize()
 

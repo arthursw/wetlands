@@ -1,5 +1,6 @@
-debug = False
+debugPorts: dict[str, int] = {}
 
-def set_debug(value: bool):
-    global debug
-    debug = value
+def setDebugPorts(dps: dict[str, int]):
+    global debugPorts
+    debugPorts = dps
+    

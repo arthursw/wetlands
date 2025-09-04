@@ -14,10 +14,6 @@ class InternalEnvironment(Environment):
         name = str(path.resolve()) if isinstance(path, Path) else path
         super().__init__(name, environmentManager)
 
-    def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
-        """Raise an exception. See [`Environment.launch`][wetlands.environment.Environment.launch] and [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
-        raise Exception("Cannot launch the main environment.")
-
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
         """Executes a function in the given module
 

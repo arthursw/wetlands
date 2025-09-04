@@ -21,7 +21,7 @@ from multiprocessing.connection import Listener, Connection
 
 # Configure logging to both file and console
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     handlers=[
         logging.FileHandler("environments.log", encoding="utf-8"),
         logging.StreamHandler(),
@@ -36,7 +36,7 @@ if __name__ == "__main__":
         "When instructed, it can import a module and execute one of its functions.",
     )
     parser.add_argument("environment", help="The name of the execution environment.")
-    parser.add_argument("port", help="The port to listen to.", default=0, type=int)
+    parser.add_argument("--port", help="The port to listen to.", default=0, type=int)
     args = parser.parse_args()
     port = args.port
     logger = logging.getLogger(args.environment)
@@ -136,7 +136,7 @@ def launchListener():
                     while message := getMessage(connection):
                         logger.debug(f"Got message: {message}")
                         if message["action"] == "execute":
-                            logger.info(f"Execute {message['modulePath']}.{message['function']}({message['args']})")
+                            logger.info(f"Execute {message['modulePath']}:{message['function']}({message['args']})")
 
                             thread = threading.Thread(
                                 target=functionExecutor,
@@ -148,6 +148,7 @@ def launchListener():
                             logger.info(f"exit")
                             with lock:
                                 connection.send(dict(action="exited"))
+                            logger.debug("Close connection")
                             listener.close()
                             return
                 except Exception as e:
