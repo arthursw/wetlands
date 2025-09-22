@@ -1,6 +1,7 @@
 import subprocess
 from pathlib import Path
 from multiprocessing.connection import Client, Connection
+import functools
 import threading
 from typing import Any, TYPE_CHECKING
 
@@ -14,6 +15,13 @@ from wetlands._internal.command_executor import CommandExecutor
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
 
+def synchronized(method):
+    """Decorator to wrap a method call with self._lock."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 class ExternalEnvironment(Environment):
     port: int | None = None
@@ -22,6 +30,8 @@ class ExternalEnvironment(Environment):
 
     def __init__(self, name: str, environmentManager: "EnvironmentManager") -> None:
         super().__init__(name, environmentManager)
+        self._lock = threading.RLock()
+        self._log_thread: threading.Thread | None = None
 
     def logOutput(self) -> None:
         """Logs output from the subprocess."""
@@ -37,6 +47,7 @@ class ExternalEnvironment(Environment):
             logger.error(f"Exception in logging thread: {e}")
         return
 
+    @synchronized
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
         """Launches a server listening for orders in the environment.
 
@@ -45,6 +56,9 @@ class ExternalEnvironment(Environment):
                 logOutputInThread: Logs the process output in a separate thread.
         """
 
+        if self.launched():
+            return
+            
         moduleExecutorFile = "module_executor.py" if not config.debug else "debug.py"
         moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / moduleExecutorFile
 
@@ -68,6 +82,9 @@ class ExternalEnvironment(Environment):
             except Exception as e:
                 self.process.stdout.close()
                 raise e
+        
+        self.environmentManager.registerEnvironmentProcess(self)
+
         if self.process.poll() is not None:
             if self.process.stdout is not None:
                 self.process.stdout.close()
@@ -77,8 +94,10 @@ class ExternalEnvironment(Environment):
         self.connection = Client(("localhost", self.port))
 
         if logOutputInThread:
-            threading.Thread(target=self.logOutput, args=[]).start()
+            self._log_thread = threading.Thread(target=self.logOutput)
+            self._log_thread.start()
 
+    @synchronized
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
         """Executes a function in the given module and return the result.
         Warning: all arguments (args and kwargs) must be picklable (since they will be send with [multiprocessing.connection.Connection.send](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send))!
@@ -98,6 +117,7 @@ class ExternalEnvironment(Environment):
         if connection is None or connection.closed:
             logger.warning(f"Connection not ready. Skipping execute {modulePath}.{function}({args})")
             return None
+    
         try:
             connection.send(dict(action="execute", modulePath=modulePath, function=function, args=args, kwargs=kwargs))
             while message := connection.recv():
@@ -125,6 +145,7 @@ class ExternalEnvironment(Environment):
                 raise e
         return None
 
+    @synchronized
     def launched(self) -> bool:
         """Return true if the environment server process is launched and the connection is open."""
         return (
@@ -136,6 +157,7 @@ class ExternalEnvironment(Environment):
             and self.connection.readable
         )
 
+    @synchronized
     def _exit(self) -> None:
         """Close the connection to the environment and kills the process."""
         if self.connection is not None:
@@ -145,5 +167,11 @@ class ExternalEnvironment(Environment):
                 if e.args[0] == "handle is closed":
                     pass
             self.connection.close()
-
+            
+            if self._log_thread:
+                self._log_thread.join(timeout=2)
+    
+        if self.process and self.process.stdout:
+            self.process.stdout.close()
+        
         CommandExecutor.killProcess(self.process)

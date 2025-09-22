@@ -1,10 +1,11 @@
+import json
 import re
 import platform
 from importlib import metadata
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from wetlands._internal.install import installMicromamba, installPixi
 from wetlands.internal_environment import InternalEnvironment
@@ -30,6 +31,7 @@ class EnvironmentManager:
     """
 
     mainEnvironment: InternalEnvironment
+    wetlandsInstancePath: Path
     environments: dict[str, Environment] = {}
 
     def __init__(
@@ -38,6 +40,7 @@ class EnvironmentManager:
         usePixi=True,
         mainCondaEnvironmentPath: Path | None = None,
         acceptAllCondaPaths=False,
+        wetlandsInstancePath=Path | None = None
     ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
@@ -46,6 +49,7 @@ class EnvironmentManager:
                 usePixi: Whether to use Pixi as the conda manager.
                 mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the folder containing the pixi.toml (or pyproject.toml) file.
                 acceptAllCondaPaths: Whether to accept Conda path containing "pixi" when using micromamba or "micromamba" when using pixi.
+                wetlandsInstancePath: Path to the folder which will contain the state (environment process ids, stored in environment_process_ids.json) of this wetlands instance. Default is condaPath / 'wetlands'.
         """
         condaPath = Path(condaPath)
         if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
@@ -60,6 +64,10 @@ class EnvironmentManager:
             )
         self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath, usePixi)
+        if wetlandsInstancePath is None:
+            self.wetlandsInstancePath = self.settingsManager.condaPath / 'wetlands'
+        else:
+            self.wetlandsInstancePath = cast(Path, wetlandsInstancePath)
         self.installConda()
         self.commandGenerator = CommandGenerator(self.settingsManager)
         self.dependencyManager = DependencyManager(self.commandGenerator)
@@ -313,6 +321,29 @@ class EnvironmentManager:
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(activateCommands + platformCommands, popenKwargs=popenKwargs)
 
+    def registerEnvironmentProcess(self, environment: ExternalEnvironment)-> None:
+        """
+        Register the environment process (save its PID is `wetlandsInstancePath / environment_process_ids.json`) so that it can be debugged later.
+
+        Args:
+                environment: The external environment object to register
+        """
+        if environment.process is None:
+            return
+        wetlands_process_ids_path = self.wetlandsInstancePath / 'environment_process_ids.json'
+        wetlands_process_ids = {}
+        try:
+            if wetlands_process_ids_path.exists():
+                with open(wetlands_process_ids_path, 'r') as f:
+                    wetlands_process_ids = json.load(f)
+            wetlands_process_ids[environment.name] = environment.process.pid
+            with open(wetlands_process_ids_path, 'w') as f:
+                json.dump(wetlands_process_ids, f)
+        except Exception as e:
+            e.add_note(f'Error while updating the process ids file {wetlands_process_ids_path}.')
+            raise e
+        return
+    
     def _removeEnvironment(self, environment: Environment) -> None:
         """Remove an environment.
 
