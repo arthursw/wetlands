@@ -38,6 +38,8 @@ if __name__ == "__main__":
     parser.add_argument("environment", help="The name of the execution environment.")
     parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
     parser.add_argument("-dp", "--debugPort", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int)
+    # wetlandsInstancePath is not used in this script, but it is extracted from the command line by the debug command line with psutil (see main.py)
+    parser.add_argument("-wip", "--wetlandsInstancePath", help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.", default=None, type=Path)
     args = parser.parse_args()
     port = args.port
     if args.debugPort is not None:
@@ -141,7 +143,7 @@ def launchListener():
                     while message := getMessage(connection):
                         logger.debug(f"Got message: {message}")
                         if message["action"] == "execute":
-                            logger.info(f"Execute {message['modulePath']}.{message['function']}({message['args']})")
+                            logger.info(f"Execute {message['modulePath']}:{message['function']}({message['args']})")
 
                             thread = threading.Thread(
                                 target=functionExecutor,

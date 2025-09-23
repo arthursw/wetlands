@@ -51,7 +51,7 @@ class EnvironmentManager:
                 usePixi: Whether to use Pixi as the conda manager.
                 mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the folder containing the pixi.toml (or pyproject.toml) file.
                 acceptAllCondaPaths: Whether to accept Conda path containing "pixi" when using micromamba or "micromamba" when using pixi.
-                wetlandsInstancePath: Path to the folder which will contain the state (environment process debug ports, stored in debug_ports.json) of this wetlands instance. Default is condaPath / 'wetlands'.
+                wetlandsInstancePath: Path to the folder which will contain the state of this wetlands instance (environment process debug ports, stored in debug_ports.json). Default is condaPath / 'wetlands'.
                 debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlandsInstancePath / debug_ports.json
         """
         condaPath = Path(condaPath)
@@ -70,7 +70,7 @@ class EnvironmentManager:
         if wetlandsInstancePath is None:
             self.wetlandsInstancePath = self.settingsManager.condaPath / 'wetlands'
         else:
-            self.wetlandsInstancePath = cast(Path, wetlandsInstancePath)
+            self.wetlandsInstancePath = cast(Path, wetlandsInstancePath).resolve()
         self.debug = debug
         self.installConda()
         self.commandGenerator = CommandGenerator(self.settingsManager)
@@ -246,14 +246,13 @@ class EnvironmentManager:
                             return
                     elif dep['name'] == 'debugpy':
                         return
-        # Add debugpy
-        debugpy = "debugpy==1.8.17"
-        if "pip" in dependencies:
-            dependencies["pip"].append(debugpy)
-        elif "conda" in dependencies:
+        # Add debugpy without version because we need one compatible with the required python version
+        # Use conda (conda forge) since there are more versions available (especially for python 3.9 on macOS arm64)
+        debugpy = "debugpy"
+        if "conda" in dependencies:
             dependencies["conda"].append(debugpy)
         else:
-            dependencies["pip"] = [debugpy]
+            dependencies["conda"] = [debugpy]
         return
     
     def create(
@@ -354,7 +353,7 @@ class EnvironmentManager:
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(activateCommands + platformCommands, popenKwargs=popenKwargs)
 
-    def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int)-> None:
+    def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path)-> None:
         """
         Register the environment (save its debug port to `wetlandsInstancePath / debug_ports.json`) so that it can be debugged later.
 
@@ -365,13 +364,13 @@ class EnvironmentManager:
         if environment.process is None:
             return
         wetlands_debug_ports_path = self.wetlandsInstancePath / 'debug_ports.json'
-        wetlands_debug_ports_path.mkdir(exist_ok=True, parents=True)
+        wetlands_debug_ports_path.parent.mkdir(exist_ok=True, parents=True)
         wetlands_debug_ports = {}
         try:
             if wetlands_debug_ports_path.exists():
                 with open(wetlands_debug_ports_path, 'r') as f:
                     wetlands_debug_ports = json.load(f)
-            wetlands_debug_ports[environment.name] = debugPort
+            wetlands_debug_ports[environment.name] = dict(debugPort=debugPort, moduleExecutorPath=str(moduleExecutorPath))
             with open(wetlands_debug_ports_path, 'w') as f:
                 json.dump(wetlands_debug_ports, f)
         except Exception as e:

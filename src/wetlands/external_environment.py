@@ -65,8 +65,8 @@ class ExternalEnvironment(Environment):
             self.name, additionalActivateCommands
         )
 
-        debugArgs = ' --debugPort 0' if self.environmentManager.debug else ''
-        commands += [f'python -u "{moduleExecutorPath}" {self.name}{debugArgs}']
+        debugArgs = f' --debugPort 0' if self.environmentManager.debug else ''
+        commands += [f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}']
 
         self.process = self.executeCommands(commands)
 
@@ -77,7 +77,7 @@ class ExternalEnvironment(Environment):
                     if self.environmentManager.debug:
                         if line.strip().startswith("Listening debug port "):
                             debugPort = int(line.strip().replace("Listening debug port ", ""))
-                            self.environmentManager.registerEnvironment(self, debugPort)
+                            self.environmentManager.registerEnvironment(self, debugPort, moduleExecutorPath)
                     if line.strip().startswith("Listening port "):
                         self.port = int(line.strip().replace("Listening port ", ""))
                         break

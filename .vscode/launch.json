@@ -12,5 +12,23 @@
             "console": "integratedTerminal",
             "args": ["env"]
         },
+        {
+            "name": "Main list",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "/Users/amasson/Travail/wetlands/.venv/bin/python3",
+            "program": "${workspaceFolder}/src/wetlands/main.py",
+            "console": "integratedTerminal",
+            "args": ["list"]
+        },
+        {
+            "name": "Main kill",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "/Users/amasson/Travail/wetlands/.venv/bin/python3",
+            "program": "${workspaceFolder}/src/wetlands/main.py",
+            "console": "integratedTerminal",
+            "args": ["-wip", "/Users/amasson/Travail/galaxy/pixi/wetlands/", "kill", "-n", "custom_splitchannels"]
+        }
     ]
 }
