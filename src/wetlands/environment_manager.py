@@ -32,6 +32,7 @@ class EnvironmentManager:
 
     mainEnvironment: InternalEnvironment
     wetlandsInstancePath: Path
+    debug: bool
     environments: dict[str, Environment] = {}
 
     def __init__(
@@ -40,7 +41,8 @@ class EnvironmentManager:
         usePixi=True,
         mainCondaEnvironmentPath: Path | None = None,
         acceptAllCondaPaths=False,
-        wetlandsInstancePath=Path | None = None
+        wetlandsInstancePath:Path | None = None,
+        debug: bool = False
     ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
@@ -49,7 +51,8 @@ class EnvironmentManager:
                 usePixi: Whether to use Pixi as the conda manager.
                 mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the folder containing the pixi.toml (or pyproject.toml) file.
                 acceptAllCondaPaths: Whether to accept Conda path containing "pixi" when using micromamba or "micromamba" when using pixi.
-                wetlandsInstancePath: Path to the folder which will contain the state (environment process ids, stored in environment_process_ids.json) of this wetlands instance. Default is condaPath / 'wetlands'.
+                wetlandsInstancePath: Path to the folder which will contain the state (environment process debug ports, stored in debug_ports.json) of this wetlands instance. Default is condaPath / 'wetlands'.
+                debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlandsInstancePath / debug_ports.json
         """
         condaPath = Path(condaPath)
         if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
@@ -68,6 +71,7 @@ class EnvironmentManager:
             self.wetlandsInstancePath = self.settingsManager.condaPath / 'wetlands'
         else:
             self.wetlandsInstancePath = cast(Path, wetlandsInstancePath)
+        self.debug = debug
         self.installConda()
         self.commandGenerator = CommandGenerator(self.settingsManager)
         self.dependencyManager = DependencyManager(self.commandGenerator)
@@ -224,6 +228,34 @@ class EnvironmentManager:
                 condaMeta = Path(self.settingsManager.condaPath) / "envs" / environment / "conda-meta"
             return condaMeta.is_dir()
 
+    def _addDebugpyInDependencies(self, dependencies: Dependencies)-> None:
+        """Add debugpy in the dependencies to be able to debug in debug mode. Does nothing when not in debug mode.
+        
+        Args:
+                dependencies: Dependencies to install.
+        """
+        if not self.debug: return
+        # Check that debugpy is not already in dependencies
+        for packageManager in ["pip", "conda"]:    
+            if packageManager in dependencies:
+                for dep in dependencies[packageManager]:
+                    import re
+                    pattern = r"debugpy(?==|$)"
+                    if isinstance(dep, str):
+                        if bool(re.search(pattern, dep)):
+                            return
+                    elif dep['name'] == 'debugpy':
+                        return
+        # Add debugpy
+        debugpy = "debugpy==1.8.17"
+        if "pip" in dependencies:
+            dependencies["pip"].append(debugpy)
+        elif "conda" in dependencies:
+            dependencies["conda"].append(debugpy)
+        else:
+            dependencies["pip"] = [debugpy]
+        return
+    
     def create(
         self,
         environment: str | Path,
@@ -251,6 +283,7 @@ class EnvironmentManager:
             return self.environments[environment]
         if isinstance(environment, Path):
             raise Exception(f"The environment {environment.resolve()} was not found.")
+        self._addDebugpyInDependencies(dependencies)
         if not forceExternal and self._dependenciesAreInstalled(dependencies):
             return self.mainEnvironment
         pythonVersion = dependencies.get("python", "").replace("=", "")
@@ -321,26 +354,28 @@ class EnvironmentManager:
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(activateCommands + platformCommands, popenKwargs=popenKwargs)
 
-    def registerEnvironmentProcess(self, environment: ExternalEnvironment)-> None:
+    def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int)-> None:
         """
-        Register the environment process (save its PID is `wetlandsInstancePath / environment_process_ids.json`) so that it can be debugged later.
+        Register the environment (save its debug port to `wetlandsInstancePath / debug_ports.json`) so that it can be debugged later.
 
         Args:
                 environment: The external environment object to register
+                debugPort: The debug port to save
         """
         if environment.process is None:
             return
-        wetlands_process_ids_path = self.wetlandsInstancePath / 'environment_process_ids.json'
-        wetlands_process_ids = {}
+        wetlands_debug_ports_path = self.wetlandsInstancePath / 'debug_ports.json'
+        wetlands_debug_ports_path.mkdir(exist_ok=True, parents=True)
+        wetlands_debug_ports = {}
         try:
-            if wetlands_process_ids_path.exists():
-                with open(wetlands_process_ids_path, 'r') as f:
-                    wetlands_process_ids = json.load(f)
-            wetlands_process_ids[environment.name] = environment.process.pid
-            with open(wetlands_process_ids_path, 'w') as f:
-                json.dump(wetlands_process_ids, f)
+            if wetlands_debug_ports_path.exists():
+                with open(wetlands_debug_ports_path, 'r') as f:
+                    wetlands_debug_ports = json.load(f)
+            wetlands_debug_ports[environment.name] = debugPort
+            with open(wetlands_debug_ports_path, 'w') as f:
+                json.dump(wetlands_debug_ports, f)
         except Exception as e:
-            e.add_note(f'Error while updating the process ids file {wetlands_process_ids_path}.')
+            e.add_note(f'Error while updating the debug ports file {wetlands_debug_ports_path}.')
             raise e
         return
     

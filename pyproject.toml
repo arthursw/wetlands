@@ -19,6 +19,9 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
 ]
 
+[project.scripts]
+wetlands = "wetlands.main:main"
+
 [build-system]
 build-backend = "hatchling.build"
 requires = ["hatchling"]
@@ -38,6 +41,10 @@ docs = [
 # Problem: we might want shared memory for other things than numpy, in which case we don't need numpy
 shared-memory = [
     "numpy>=1.26",
+]
+debug = [
+    "debugpy>=1.8.17",
+    "json5>=0.12.1"
 ]
 
 [dependency-groups]

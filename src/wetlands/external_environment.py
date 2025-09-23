@@ -6,7 +6,6 @@ import threading
 from typing import Any, TYPE_CHECKING
 
 from wetlands.logger import logger
-from wetlands import config
 from wetlands._internal.command_generator import Commands
 from wetlands.environment import Environment
 from wetlands._internal.exceptions import ExecutionException
@@ -59,15 +58,14 @@ class ExternalEnvironment(Environment):
         if self.launched():
             return
             
-        moduleExecutorFile = "module_executor.py" if not config.debug else "debug.py"
+        moduleExecutorFile = "module_executor.py"
         moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / moduleExecutorFile
 
         commands = self.environmentManager.commandGenerator.getActivateEnvironmentCommands(
             self.name, additionalActivateCommands
         )
 
-        python = self.environmentManager.settingsManager.getEnvironmentPythonPath(self.name) if self.name and config.debug else ""
-        debugArgs = f" --environment {self.name} --python {python}" if config.debug else ""
+        debugArgs = ' --debugPort 0' if self.environmentManager.debug else ''
         commands += [f'python -u "{moduleExecutorPath}" {self.name}{debugArgs}']
 
         self.process = self.executeCommands(commands)
@@ -76,14 +74,16 @@ class ExternalEnvironment(Environment):
             try:
                 for line in self.process.stdout:
                     logger.info(line.strip())
+                    if self.environmentManager.debug:
+                        if line.strip().startswith("Listening debug port "):
+                            debugPort = int(line.strip().replace("Listening debug port ", ""))
+                            self.environmentManager.registerEnvironment(self, debugPort)
                     if line.strip().startswith("Listening port "):
                         self.port = int(line.strip().replace("Listening port ", ""))
                         break
             except Exception as e:
                 self.process.stdout.close()
                 raise e
-        
-        self.environmentManager.registerEnvironmentProcess(self)
 
         if self.process.poll() is not None:
             if self.process.stdout is not None:

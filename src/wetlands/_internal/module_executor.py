@@ -37,8 +37,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("environment", help="The name of the execution environment.")
     parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
+    parser.add_argument("-dp", "--debugPort", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int)
     args = parser.parse_args()
     port = args.port
+    if args.debugPort is not None:
+        import debugpy
+        _, debugPort = debugpy.listen(args.debugPort)
+        print(f"Listening debug port {debugPort}")
     logger = logging.getLogger(args.environment)
 else:
     logger = logging.getLogger("module_executor")
