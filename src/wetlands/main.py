@@ -67,7 +67,7 @@ def setup_and_launch_vscode(args):
     for env, detail in debug_ports.items():
         if env == args.name:
             port = detail["debugPort"]
-            moduleExecutorPath = str(Path(detail["moduleExecutorPath"]).parent)
+            moduleExecutorPath = Path(detail["moduleExecutorPath"])
             break
     
     if port is None or moduleExecutorPath is None:
@@ -80,14 +80,15 @@ def setup_and_launch_vscode(args):
         "name": configuration_name,
         "type": "debugpy",
         "request": "attach",
+        "justMyCode": args.justMyCode,
         "connect": {
             "host": "localhost",
             "port": port
         },
         "pathMappings": [
             {
-                "localRoot": moduleExecutorPath,
-                "remoteRoot": moduleExecutorPath
+                "localRoot": str(moduleExecutorPath.parent),
+                "remoteRoot": str(moduleExecutorPath.parent)
             }
         ]
     }
@@ -123,7 +124,7 @@ def setup_and_launch_vscode(args):
         json.dump(launch_configs, f, indent=4)
 
     # Open VS Code in new window
-    subprocess.run(["code", "--new-window", str(args.sources)])
+    subprocess.run(["code", "--new-window", str(args.sources), str(moduleExecutorPath)])
     
     # # Wait for VS Code to start
     # time.sleep(1)
@@ -201,6 +202,7 @@ def main():
     debug_parser = subparsers.add_parser('debug', help="Debug Wetlands environments: opens VS Code at the given path to debug the environment at the given port")
     debug_parser.add_argument("-s","--sources", help="Path of the sources to debug", type=Path, required=True)
     debug_parser.add_argument("-n", "--name", help="Name of the environment to debug.", type=str, required=True)
+    debug_parser.add_argument("-jmc", "--justMyCode", help="Only debug the given sources files, not used libraries. Sets the justMyCode property to true in the VS Code launch.json configuration.", action="store_true")
     debug_parser.set_defaults(func=setup_and_launch_vscode)
     list_parser = subparsers.add_parser('list', help="List the running Wetlands environments and their debug ports.")
     list_parser.set_defaults(func=list_environments)

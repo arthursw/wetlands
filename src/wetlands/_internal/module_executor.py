@@ -22,6 +22,7 @@ from multiprocessing.connection import Listener, Connection
 # Configure logging to both file and console
 logging.basicConfig(
     level=logging.INFO,
+    format='%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s',
     handlers=[
         logging.FileHandler("environments.log", encoding="utf-8"),
         logging.StreamHandler(),
@@ -42,11 +43,12 @@ if __name__ == "__main__":
     parser.add_argument("-wip", "--wetlandsInstancePath", help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.", default=None, type=Path)
     args = parser.parse_args()
     port = args.port
+    logger = logging.getLogger(args.environment)
     if args.debugPort is not None:
+        logger.setLevel(logging.DEBUG)
         import debugpy
         _, debugPort = debugpy.listen(args.debugPort)
         print(f"Listening debug port {debugPort}")
-    logger = logging.getLogger(args.environment)
 else:
     logger = logging.getLogger("module_executor")
 
@@ -88,15 +90,21 @@ def functionExecutor(lock: threading.Lock, connection: Connection, message: dict
     """
     try:
         modulePath = Path(message["modulePath"])
+        logger.debug(f"Import module {modulePath}")
         sys.path.append(str(modulePath.parent))
         module = import_module(modulePath.stem)
         if not hasattr(module, message["function"]):
             raise Exception(f"Module {modulePath} has no function {message['function']}.")
         args = message.get("args", [])
         kwargs = message.get("kwargs", {})
-        result = getattr(module, message["function"])(*args, **kwargs)
+        logger.info(f"Execute {message['modulePath']}:{message['function']}({message['args']})")
+        try:
+            result = getattr(module, message["function"])(*args, **kwargs)
+        except SystemExit as se:
+            raise Exception(f"Function raised the following SystemExit exception: {se}\n\n")
         logger.info(f"Executed")
         with lock:
+            logger.debug("Send execution finished")
             connection.send(
                 dict(
                     action="execution finished",
@@ -104,15 +112,23 @@ def functionExecutor(lock: threading.Lock, connection: Connection, message: dict
                     result=result,
                 )
             )
+
     except Exception as e:
+        logger.error(str(e))
+        logger.error("Traceback:")
+        tbftb = traceback.format_tb(e.__traceback__)
+        for line in tbftb:
+            logger.error(line)
         with lock:
+            logger.debug("Send error")
             connection.send(
                 dict(
                     action="error",
                     exception=str(e),
-                    traceback=traceback.format_tb(e.__traceback__),
+                    traceback=tbftb,
                 )
             )
+            logger.debug("Error sent")
 
 
 def launchListener():
@@ -143,8 +159,9 @@ def launchListener():
                     while message := getMessage(connection):
                         logger.debug(f"Got message: {message}")
                         if message["action"] == "execute":
-                            logger.info(f"Execute {message['modulePath']}:{message['function']}({message['args']})")
 
+                            logger.debug(f"Launch execution thread for function call {message['modulePath']}:{message['function']}({message['args']})")
+                            
                             thread = threading.Thread(
                                 target=functionExecutor,
                                 args=(lock, connection, message),
@@ -154,6 +171,7 @@ def launchListener():
                         if message["action"] == "exit":
                             logger.info(f"exit")
                             with lock:
+                                logger.debug(f"Send exited")
                                 connection.send(dict(action="exited"))
                             listener.close()
                             return
@@ -165,6 +183,7 @@ def launchListener():
                         logger.error(line)
                     logger.error(message)
                     with lock:
+                        logger.debug("Send error")
                         connection.send(
                             dict(
                                 action="error",
