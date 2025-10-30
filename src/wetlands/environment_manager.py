@@ -144,7 +144,7 @@ class EnvironmentManager:
             commands = self.commandGenerator.getActivateEnvironmentCommands(str(environment)) + [
                 f"pip freeze --all",
             ]
-            output = self.commandExecutor.executeCommandAndGetOutput(commands, log=False)
+            output = self.commandExecutor.executeCommandsAndGetOutput(commands, log=False)
             parsedOutput = [o.split("==") for o in output if "==" in o]
             packages += [{"name": name, "version": version, "kind": "pypi"} for name, version in parsedOutput]
             return packages
@@ -307,7 +307,7 @@ class EnvironmentManager:
             ]
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
-        self.commandExecutor.executeCommandAndGetOutput(createEnvCommands)
+        self.commandExecutor.executeCommandsAndGetOutput(createEnvCommands)
         self.environments[environment] = ExternalEnvironment(environment, self)
         return self.environments[environment]
 
@@ -327,7 +327,7 @@ class EnvironmentManager:
         """
         installCommands = self.dependencyManager.getInstallDependenciesCommands(environmentName, dependencies)
         installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
-        return self.commandExecutor.executeCommandAndGetOutput(installCommands)
+        return self.commandExecutor.executeCommandsAndGetOutput(installCommands)
 
     def executeCommands(
         self,
@@ -335,6 +335,7 @@ class EnvironmentManager:
         commands: Commands,
         additionalActivateCommands: Commands = {},
         popenKwargs: dict[str, Any] = {},
+        wait: bool = False,
     ) -> subprocess.Popen:
         """Executes the given commands in the given environment.
 
@@ -351,7 +352,7 @@ class EnvironmentManager:
             environmentName, additionalActivateCommands
         )
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
-        return self.commandExecutor.executeCommands(activateCommands + platformCommands, popenKwargs=popenKwargs)
+        return self.commandExecutor.executeCommands(activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait)
 
     def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path)-> None:
         """

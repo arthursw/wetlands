@@ -61,7 +61,7 @@ def mock_command_executor(monkeypatch):
     # We'll apply these mocks within the main fixture
     mocks = {
         "executeCommands": mock_execute,
-        "executeCommandAndGetOutput": mock_execute_output,
+        "executeCommandsAndGetOutput": mock_execute_output,
     }
     return mocks
 
@@ -79,14 +79,14 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
     # Apply the mocks to the specific instance's commandExecutor
     monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])
     monkeypatch.setattr(
-        manager.commandExecutor, "executeCommandAndGetOutput", mock_command_executor["executeCommandAndGetOutput"]
+        manager.commandExecutor, "executeCommandsAndGetOutput", mock_command_executor["executeCommandsAndGetOutput"]
     )
 
     # Mock environmentExists to simplify create tests
     # We can override this in specific tests if needed
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommandAndGetOutput"], mock_command_executor["executeCommands"]
+    return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
 
 
 @pytest.fixture
@@ -99,14 +99,14 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
     # Apply the mocks to the specific instance's commandExecutor
     monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])
     monkeypatch.setattr(
-        manager.commandExecutor, "executeCommandAndGetOutput", mock_command_executor["executeCommandAndGetOutput"]
+        manager.commandExecutor, "executeCommandsAndGetOutput", mock_command_executor["executeCommandsAndGetOutput"]
     )
 
     # Mock environmentExists to simplify create tests
     # We can override this in specific tests if needed
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommandAndGetOutput"], mock_command_executor["executeCommands"]
+    return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
 
 
 # --- Test Functions ---

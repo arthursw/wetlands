@@ -1,3 +1,4 @@
+import queue
 import subprocess
 from pathlib import Path
 from multiprocessing.connection import Client, Connection
@@ -30,7 +31,8 @@ class ExternalEnvironment(Environment):
     def __init__(self, name: str, environmentManager: "EnvironmentManager") -> None:
         super().__init__(name, environmentManager)
         self._lock = threading.RLock()
-        self._log_thread: threading.Thread | None = None
+        self._logThread: threading.Thread | None = None
+        self.loggingQueue = queue.Queue()
 
     def logOutput(self) -> None:
         """Logs output from the subprocess."""
@@ -42,8 +44,12 @@ class ExternalEnvironment(Environment):
                 # Since readline() is called directly in each iteration, it immediately processes available output instead of accumulating it in a buffer.
                 # This effectively forces line-by-line reading in real-time rather than waiting for the subprocess to fill its buffer.
                 logger.info(line.strip())
+                self.loggingQueue.put(line.strip())
         except Exception as e:
             logger.error(f"Exception in logging thread: {e}")
+            self.loggingQueue.put(f"Exception in logging thread: {e}")
+        finally:
+            self.loggingQueue.put(None)
         return
 
     @synchronized
@@ -61,14 +67,10 @@ class ExternalEnvironment(Environment):
         moduleExecutorFile = "module_executor.py"
         moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / moduleExecutorFile
 
-        commands = self.environmentManager.commandGenerator.getActivateEnvironmentCommands(
-            self.name, additionalActivateCommands
-        )
-
         debugArgs = f' --debugPort 0' if self.environmentManager.debug else ''
-        commands += [f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}']
-
-        self.process = self.executeCommands(commands)
+        commands = [f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}']
+        
+        self.process = self.executeCommands(commands, additionalActivateCommands)
 
         if self.process.stdout is not None:
             try:
@@ -94,8 +96,8 @@ class ExternalEnvironment(Environment):
         self.connection = Client(("localhost", self.port))
 
         if logOutputInThread:
-            self._log_thread = threading.Thread(target=self.logOutput)
-            self._log_thread.start()
+            self._logThread = threading.Thread(target=self.logOutput)
+            self._logThread.start()
 
     @synchronized
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
@@ -119,7 +121,7 @@ class ExternalEnvironment(Environment):
             return None
     
         try:
-            connection.send(dict(action="execute", modulePath=modulePath, function=function, args=args, kwargs=kwargs))
+            connection.send(dict(action="execute", modulePath=str(modulePath), function=function, args=args, kwargs=kwargs))
             while message := connection.recv():
                 if message["action"] == "execution finished":
                     logger.info("execution finished")
@@ -168,8 +170,8 @@ class ExternalEnvironment(Environment):
                     pass
             self.connection.close()
             
-            if self._log_thread:
-                self._log_thread.join(timeout=2)
+            if self._logThread:
+                self._logThread.join(timeout=2)
     
         if self.process and self.process.stdout:
             self.process.stdout.close()

@@ -46,6 +46,7 @@ if __name__ == "__main__":
     logger = logging.getLogger(args.environment)
     if args.debugPort is not None:
         logger.setLevel(logging.DEBUG)
+        logger.debug(f"Starting {args.environment} with python {sys.version}")
         import debugpy
         _, debugPort = debugpy.listen(args.debugPort)
         print(f"Listening debug port {debugPort}")
@@ -119,6 +120,9 @@ def functionExecutor(lock: threading.Lock, connection: Connection, message: dict
         tbftb = traceback.format_tb(e.__traceback__)
         for line in tbftb:
             logger.error(line)
+        
+        sys.stderr.flush()
+
         with lock:
             logger.debug("Send error")
             connection.send(

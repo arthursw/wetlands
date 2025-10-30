@@ -107,13 +107,15 @@ class CommandExecutor:
         commands: list[str],
         exitIfCommandError: bool = True,
         popenKwargs: dict[str, Any] = {},
+        wait: bool = False,
     ) -> subprocess.Popen:
-        """Executes shell commands in a subprocess.
+        """Executes shell commands in a subprocess. Warning: does not wait for completion unless ``wait`` is True.
 
         Args:
                 commands: List of shell commands to execute.
                 exitIfCommandError: Whether to insert error checking after each command to make sure the whole command chain stops if an error occurs (otherwise the script will be executed entirely even when one command fails at the beginning).
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+                wait: Whether to wait for the process to complete before returning.
 
         Returns:
                 Subprocess handle for the executed commands.
@@ -152,9 +154,11 @@ class CommandExecutor:
                 "bufsize": 1,  # 1 means line buffered
             }
             process = subprocess.Popen(executeFile, **(defaultPopenKwargs | popenKwargs))
+            if wait:
+                process.wait()
             return process
 
-    def executeCommandAndGetOutput(
+    def executeCommandsAndGetOutput(
         self, commands: list[str], exitIfCommandError: bool = True, log: bool = True, popenKwargs: dict[str, Any] = {}
     ) -> list[str]:
         """Executes commands and captures their output. See [`CommandExecutor.executeCommands`][wetlands._internal.command_executor.CommandExecutor.executeCommands] for more details on the arguments.
@@ -177,10 +181,10 @@ class CommandExecutor:
     def executeCommandAndGetJsonOutput(
         self, commands: list[str], exitIfCommandError: bool = True, log: bool = True, popenKwargs: dict[str, Any] = {}
     ) -> list[dict[str, str]]:
-        """Execute [`CommandExecutor.executeCommandAndGetOutput`][wetlands._internal.command_executor.CommandExecutor.executeCommandAndGetOutput] and parse the json output.
+        """Execute [`CommandExecutor.executeCommandsAndGetOutput`][wetlands._internal.command_executor.CommandExecutor.executeCommandsAndGetOutput] and parse the json output.
 
         Returns:
                 Output json.
         """
-        output = self.executeCommandAndGetOutput(commands, exitIfCommandError, log, popenKwargs)
+        output = self.executeCommandsAndGetOutput(commands, exitIfCommandError, log, popenKwargs)
         return json.loads("".join(output))

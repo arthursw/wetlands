@@ -118,7 +118,7 @@ def setup_and_launch_vscode(args):
                     existing_launch_configs["configurations"].append(new_config)
             else:
                 existing_launch_configs["configurations"] = [new_config]
-                launch_configs = existing_launch_configs
+            launch_configs = existing_launch_configs
 
     with open(launch_json_path, "w") as f:
         json.dump(launch_configs, f, indent=4)
