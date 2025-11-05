@@ -280,3 +280,172 @@ with Listener(("localhost", 0)) as listener:
     connection.send(dict(action="exit"))
     result = connection.recv()
     assert result["action"] == "exited"
+
+
+def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
+    """Test that users can reference existing environments using Path objects.
+
+    This integration test verifies real-world behavior by:
+    - Creating a real environment directly with micromamba via subprocess
+    - Installing a dependency in that environment
+    - Accessing it via EnvironmentManager using Path object instead of name
+    - Verifying the dependency is detected regardless of access method
+    """
+    import subprocess
+    import json
+    
+    # Setup temporary conda root
+    temp_root = tmp_path_factory.mktemp("micromamba_root")
+    logger.info(f"Creating test directory {temp_root}")
+    # Basic environment configuration
+    env_manager = EnvironmentManager(temp_root, usePixi=False)
+
+    env_name = "test_env_access_via_path"
+    logger.info(f"Testing existing environment access via Path: {env_name}")
+
+    # Get the conda root path
+    conda_root = Path(env_manager.settingsManager.condaPath)
+    env_path = conda_root / "envs" / env_name
+    conda_bin = env_manager.settingsManager.condaBin
+
+    # Step 1: Create environment directly with micromamba via subprocess
+    logger.info(f"Creating environment at {env_path} using subprocess")
+    # Need to activate micromamba first
+    import os
+    import shlex
+
+    env_vars = os.environ.copy()
+    env_vars["MAMBA_ROOT_PREFIX"] = str(conda_root)
+
+    # Create command with proper shell activation
+    shell_cmd = f"""
+    cd "{conda_root}"
+    export MAMBA_ROOT_PREFIX="{conda_root}"
+    eval "$({str(conda_bin)} shell hook -s posix)"
+    {str(conda_bin)} create -n {env_name} python=3.11 requests -y
+    """
+
+    result = subprocess.run(shell_cmd, capture_output=True, text=True, shell=True, env=env_vars)
+    assert result.returncode == 0, f"Failed to create environment: {result.stderr}\nstdout: {result.stdout}"
+    assert env_path.exists(), f"Environment path not created: {env_path}"
+    logger.info(f"Successfully created environment at {env_path}")
+
+    # Step 2: Verify environment is recognized by name
+    env_by_name = env_manager.create(env_name)
+    installed_by_name = env_manager.getInstalledPackages(env_name)
+    assert any(pkg["name"] == "requests" for pkg in installed_by_name), \
+        f"'requests' not found when accessing by name: {[p['name'] for p in installed_by_name]}"
+    logger.info(f"Verified 'requests' is installed when accessing by name")
+
+    # Step 3: Access the same environment using Path object
+    env_by_path = env_manager.create(env_path)
+    logger.info(f"Successfully accessed environment via Path: {env_path}")
+
+    # Verify we got a valid environment back
+    assert isinstance(env_by_path, ExternalEnvironment)
+
+    # Step 4: Verify dependency is still detected when accessed by path
+    installed_by_path = env_manager.getInstalledPackages(env_path)
+    assert any(pkg["name"] == "requests" for pkg in installed_by_path), \
+        f"'requests' not found when accessing by path: {[p['name'] for p in installed_by_path]}"
+    logger.info(f"Verified 'requests' is installed when accessing by path")
+
+    # Step 5: Verify package lists are consistent
+    assert len(installed_by_name) == len(installed_by_path), \
+        f"Package count mismatch: {len(installed_by_name)} vs {len(installed_by_path)}"
+    logger.info(f"Package counts match between name and path access")
+
+    env_by_name.exit()
+    env_by_path.exit()
+    logger.info(f"Test complete for {env_name}")
+
+
+def test_existing_pixi_environment_access_via_path(tmp_path_factory):
+    """Test that users can reference existing pixi environments using workspace Path.
+
+    This test verifies real-world pixi behavior by:
+    - Creating a real pixi environment directly with subprocess
+    - Installing dependencies via pixi add
+    - Accessing it via EnvironmentManager using workspace Path
+    - Verifying dependencies are detected regardless of access method
+    """
+    import subprocess
+
+    # Setup temporary pixi root
+    temp_root = tmp_path_factory.mktemp("pixi_root")
+    logger.info(f"Creating test directory {temp_root}")
+    env_manager = EnvironmentManager(temp_root, usePixi=True)
+
+    env_name = "test_pixi_access_via_path"
+    logger.info(f"Testing pixi environment access via Path: {env_name}")
+
+    # Get paths
+    pixi_bin = env_manager.settingsManager.condaBin
+    workspace_root = Path(env_manager.settingsManager.condaPath) / "workspaces"
+    workspace_path = workspace_root / env_name
+    manifest_path = workspace_path / "pixi.toml"
+
+    # Step 1: Create workspace and pixi.toml directly with subprocess
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Creating pixi environment at {workspace_path}")
+
+    init_cmd = [str(pixi_bin), "init", "--no-progress", str(workspace_path)]
+    result = subprocess.run(init_cmd, capture_output=True, text=True)
+    assert result.returncode == 0, f"Failed to init pixi environment: {result.stderr}\nstdout: {result.stdout}"
+    assert manifest_path.exists(), f"pixi.toml not created: {manifest_path}"
+    logger.info(f"Successfully initialized pixi environment")
+
+    # Step 2: Add python and requests directly with subprocess
+    add_python_cmd = [str(pixi_bin), "add", "--no-progress", "--manifest-path", str(manifest_path), "python=3.11"]
+    result = subprocess.run(add_python_cmd, capture_output=True, text=True)
+    assert result.returncode == 0, f"Failed to add python: {result.stderr}\nstdout: {result.stdout}"
+
+    add_requests_cmd = [str(pixi_bin), "add", "--manifest-path", str(manifest_path), "requests"]
+    result = subprocess.run(add_requests_cmd, capture_output=True, text=True)
+    assert result.returncode == 0, f"Failed to add requests: {result.stderr}\nstdout: {result.stdout}"
+    logger.info(f"Successfully added python and requests to pixi environment")
+
+    # Step 3: Verify environment is recognized by name
+    env_by_name = env_manager.create(env_name)
+    installed_by_name = env_manager.getInstalledPackages(env_name)
+    assert any(pkg["name"] == "requests" for pkg in installed_by_name), \
+        f"'requests' not found when accessing by name: {[p['name'] for p in installed_by_name]}"
+    logger.info(f"Verified 'requests' is installed when accessing by name")
+
+    # Step 4: Access the environment using workspace Path
+    env_by_path = env_manager.create(workspace_path)
+    logger.info(f"Successfully accessed pixi environment via workspace path")
+
+    # Verify we got a valid environment back
+    assert isinstance(env_by_path, ExternalEnvironment)
+
+    # Step 5: Verify dependencies are consistent
+    installed_by_path = env_manager.getInstalledPackages(workspace_path)
+    assert any(pkg["name"] == "requests" for pkg in installed_by_path), \
+        f"'requests' not found when accessing via path: {[p['name'] for p in installed_by_path]}"
+    assert len(installed_by_name) == len(installed_by_path)
+    logger.info(f"Verified dependencies are consistent between name and path access")
+
+    env_by_name.exit()
+    env_by_path.exit()
+    logger.info(f"Test complete for {env_name}")
+
+
+def test_nonexistent_environment_path_raises_error(env_manager):
+    """Test that attempting to use a nonexistent Path as environment raises an error.
+
+    This verifies that the system properly validates paths:
+    - Attempting to reference a nonexistent Path raises an exception
+    - The system doesn't silently create environments for invalid paths
+    """
+    logger.info("Testing error handling for nonexistent environment path")
+
+    # Create a path that definitely doesn't exist
+    nonexistent_env_path = Path(env_manager.settingsManager.condaPath) / "envs" / "definitely_not_exists_xyz123"
+    assert not nonexistent_env_path.exists()
+    logger.info(f"Verified nonexistent path: {nonexistent_env_path}")
+
+    # Attempting to use a nonexistent path should raise an error
+    with pytest.raises(Exception, match="was not found"):
+        env_manager.create(nonexistent_env_path)
+    logger.info("Verified error raised for nonexistent environment path")

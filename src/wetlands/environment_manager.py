@@ -330,6 +330,17 @@ class EnvironmentManager:
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
+
+        if isinstance(environment, str) and ('/' in environment or '\\' in environment):
+            raise Exception("Environments name cannot contain any forward nor backward slash.")
+        if self.environmentExists(environment):
+            environment = str(environment)
+            if environment not in self.environments:
+                self.environments[environment] = ExternalEnvironment(environment, self)
+            return self.environments[environment]
+        if isinstance(environment, Path):
+            raise Exception(f"The environment {environment.resolve()} was not found.")
+        
         # Parse config file if dependencies is a path
         if isinstance(dependencies, (str, Path)):
             dependencies = self._parseDependenciesFromConfig(
@@ -341,16 +352,7 @@ class EnvironmentManager:
             dependencies = {}
         elif not isinstance(dependencies, dict):
             raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
-
-        if isinstance(environment, str) and ('/' in environment or '\\' in environment):
-            raise Exception("Environments name cannot contain any forward nor backward slash.")
-        if self.environmentExists(environment):
-            environment = str(environment)
-            if environment not in self.environments:
-                self.environments[environment] = ExternalEnvironment(environment, self)
-            return self.environments[environment]
-        if isinstance(environment, Path):
-            raise Exception(f"The environment {environment.resolve()} was not found.")
+        
         self._addDebugpyInDependencies(dependencies)
         if not forceExternal and self._dependenciesAreInstalled(dependencies):
             return self.mainEnvironment

@@ -900,3 +900,24 @@ class TestCheckRequirement:
 
         result = manager._checkRequirement("conda-forge::numpy==1.2.3", "conda", installed_packages)
         assert result is True
+
+
+class TestExistingEnvironmentAccess:
+    """Tests for accessing existing environments via Path objects."""
+
+    def test_environment_exists_with_path_not_found(self, tmp_path):
+        """Test that environmentExists() returns False for nonexistent Path."""
+        nonexistent = tmp_path / "nonexistent"
+        manager = EnvironmentManager(condaPath=tmp_path, usePixi=False)
+        assert not manager.environmentExists(nonexistent)
+
+    def test_create_nonexistent_path_raises_error(self, tmp_path_factory):
+        """Test that create() raises an error when given a nonexistent Path."""
+        tmp = tmp_path_factory.mktemp("conda_root")
+        nonexistent = tmp / "nonexistent"
+
+        manager = EnvironmentManager(condaPath=tmp, usePixi=False)
+
+        # Should raise because the environment doesn't exist
+        with pytest.raises(Exception, match="was not found"):
+            manager.create(nonexistent)
