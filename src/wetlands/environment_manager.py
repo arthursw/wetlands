@@ -5,7 +5,7 @@ from importlib import metadata
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, Union
 
 from wetlands._internal.install import installMicromamba, installPixi
 from wetlands.internal_environment import InternalEnvironment
@@ -13,6 +13,7 @@ from wetlands._internal.dependency_manager import Dependencies, DependencyManage
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.command_generator import Commands, CommandGenerator
 from wetlands._internal.settings_manager import SettingsManager
+from wetlands._internal.config_parser import ConfigParser
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
 
@@ -254,25 +255,93 @@ class EnvironmentManager:
         else:
             dependencies["conda"] = [debugpy]
         return
-    
+
+    def _parseDependenciesFromConfig(
+        self,
+        config_path: Union[str, Path],
+        environmentName: str | None = None,
+        optionalDependencies: list[str] | None = None,
+    ) -> Dependencies:
+        """Parse dependencies from a config file (pixi.toml, pyproject.toml, or environment.yml).
+
+        Args:
+                config_path: Path to configuration file
+                environmentName: Environment name for pixi/pyproject configs
+                optionalDependencies: Optional dependency groups for pyproject configs
+
+        Returns:
+                Dependencies dict
+
+        Raises:
+                FileNotFoundError: If config file doesn't exist
+                ValueError: If config format is invalid or parameters are missing
+        """
+        config_path = Path(config_path)
+        parser = ConfigParser()
+
+        # Detect and validate config file type
+        try:
+            file_type = parser.detectConfigFileType(config_path)
+        except ValueError as e:
+            raise ValueError(f"Unsupported config file: {e}")
+
+        # Validate required parameters for specific file types
+        if file_type == "pixi" and not environmentName:
+            raise ValueError(
+                f"environmentName is required for pixi.toml files. "
+                f"Please provide the environment name to extract dependencies from."
+            )
+
+        if file_type == "pyproject" and not environmentName and not optionalDependencies:
+            raise ValueError(
+                f"For pyproject.toml, provide either environmentName (for pixi config) "
+                f"or optionalDependencies (for optional dependency groups)."
+            )
+
+        # Parse the config file
+        return parser.parse(
+            config_path,
+            environmentName=environmentName,
+            optionalDependencies=optionalDependencies,
+        )
+
     def create(
         self,
         environment: str | Path,
-        dependencies: Dependencies = {},
+        dependencies: Union[Dependencies, str, Path, None] = None,
+        environmentName: str | None = None,
+        optionalDependencies: list[str] | None = None,
         additionalInstallCommands: Commands = {},
         forceExternal: bool = False,
     ) -> Environment:
-        """Creates a new Conda environment with specified dependencie or the main environment if dependencies are met in the main environment and forceExternal is False (in which case additional install commands will not be called). Return the existing environment if it was already created.
+        """Creates a new Conda environment with specified dependencies or the main environment if dependencies are met in the main environment and forceExternal is False (in which case additional install commands will not be called). Return the existing environment if it was already created.
 
         Args:
                 environment: Name for the new environment. Ignore if dependencies are already installed in the main environment and forceExternal is False. Can also be a pathlib.Path to an existing Conda environment (or the folder containing the pixi.toml or pyproject.toml when using Pixi). If environment is a string, it will be considered as a name; if it is a pathlib.Path, it will be considered as a path to an existing environment (will raise an exception if the environment does not exist).
-                dependencies: Dependencies to install, in the form dict(python="3.12.7", conda=["conda-forge::pyimagej==1.5.0", dict(name="openjdk=11", platforms=["osx-64", "osx-arm64", "win-64", "linux-64"], dependencies=True, optional=False)], pip=["numpy==1.26.4"]).
+                dependencies: Dependencies to install. Can be one of:
+                    - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
+                    - A Path/str to a config file: pixi.toml, pyproject.toml, or environment.yml
+                    - None (no dependencies to install)
+                environmentName: Name of environment to extract from pixi.toml or pyproject.toml (required for pixi.toml, optional for pyproject.toml if optionalDependencies is provided)
+                optionalDependencies: List of optional dependency groups to extract from pyproject.toml (alternative to environmentName)
                 additionalInstallCommands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
                 forceExternal: force create external environment even if dependencies are met in main environment
 
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
+        # Parse config file if dependencies is a path
+        if isinstance(dependencies, (str, Path)):
+            dependencies = self._parseDependenciesFromConfig(
+                dependencies,
+                environmentName=environmentName,
+                optionalDependencies=optionalDependencies
+            )
+        elif dependencies is None:
+            dependencies = {}
+        elif not isinstance(dependencies, dict):
+            raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
+
         if isinstance(environment, str) and ('/' in environment or '\\' in environment):
             raise Exception("Environments name cannot contain any forward nor backward slash.")
         if self.environmentExists(environment):
