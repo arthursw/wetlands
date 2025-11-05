@@ -99,6 +99,41 @@ class ExternalEnvironment(Environment):
             self._logThread = threading.Thread(target=self.logOutput)
             self._logThread.start()
 
+    def _sendAndWait(self, payload: dict) -> Any:
+        """Send a payload to the remote environment and wait for its response."""
+        connection = self.connection
+        if connection is None or connection.closed:
+            logger.warning(f"Connection not ready. Skipping {payload.get('action')} request.")
+            return None
+
+        try:
+            connection.send(payload)
+            while message := connection.recv():
+                action = message.get("action")
+                if action == "execution finished":
+                    logger.info(f"{payload.get('action')} finished")
+                    return message.get("result")
+                elif action == "error":
+                    logger.error(message["exception"])
+                    logger.error("Traceback:")
+                    for line in message["traceback"]:
+                        logger.error(line)
+                    raise ExecutionException(message)
+                else:
+                    logger.warning(f"Got an unexpected message: {message}")
+
+        except EOFError:
+            logger.info("Connection closed gracefully by the peer.")
+        except BrokenPipeError as e:
+            logger.error(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
+        except OSError as e:
+            if e.errno == 9:  # Bad file descriptor
+                logger.error("Connection closed abruptly by the peer.")
+            else:
+                logger.error(f"Unexpected OSError: {e}")
+                raise e
+        return None
+
     @synchronized
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
         """Executes a function in the given module and return the result.
@@ -115,38 +150,37 @@ class ExternalEnvironment(Environment):
         Raises:
             OSError when raised by the communication.
         """
-        connection = self.connection
-        if connection is None or connection.closed:
-            logger.warning(f"Connection not ready. Skipping execute {modulePath}.{function}({args})")
-            return None
+        payload = dict(
+            action="execute",
+            modulePath=str(modulePath),
+            function=function,
+            args=args,
+            kwargs=kwargs,
+        )
+        return self._sendAndWait(payload)
     
-        try:
-            connection.send(dict(action="execute", modulePath=str(modulePath), function=function, args=args, kwargs=kwargs))
-            while message := connection.recv():
-                if message["action"] == "execution finished":
-                    logger.info("execution finished")
-                    return message.get("result")
-                elif message["action"] == "error":
-                    logger.error(message["exception"])
-                    logger.error("Traceback:")
-                    for line in message["traceback"]:
-                        logger.error(line)
-                    raise ExecutionException(message)
-                else:
-                    logger.warning(f"Got an unexpected message: {message}")
-        # If the connection was closed (subprocess killed): catch and ignore the exception, otherwise: raise it
-        except EOFError:
-            print("Connection closed gracefully by the peer.")
-        except BrokenPipeError as e:
-            logger.error(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
-        except OSError as e:
-            if e.errno == 9:  # Bad file descriptor
-                logger.error("Connection closed abruptly by the peer.")
-            else:
-                logger.error(f"Unexpected OSError: {e}")
-                raise e
-        return None
+    @synchronized
+    def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
+        """
+        Runs a Python script remotely using runpy.run_path(), simulating
+        'python script.py arg1 arg2 ...'
 
+        Args:
+            scriptPath: Path to the script to execute.
+            args: List of arguments to pass (becomes sys.argv[1:] remotely).
+            run_name: Value for runpy.run_path(run_name=...); defaults to "__main__".
+
+        Returns:
+            The resulting globals dict from the executed script, or None on failure.
+        """
+        payload = dict(
+            action="run",
+            scriptPath=str(scriptPath),
+            args=args,
+            run_name=run_name,
+        )
+        return self._sendAndWait(payload)
+    
     @synchronized
     def launched(self) -> bool:
         """Return true if the environment server process is launched and the connection is open."""
