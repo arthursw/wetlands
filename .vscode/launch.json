@@ -10,7 +10,9 @@
             "request": "launch",
             "program": "${workspaceFolder}/src/wetlands/_internal/module_executor.py",
             "console": "integratedTerminal",
-            "args": ["env"]
+            "args": [
+                "env"
+            ]
         },
         {
             "name": "Main list",
@@ -19,7 +21,9 @@
             "python": "/Users/amasson/Travail/wetlands/.venv/bin/python3",
             "program": "${workspaceFolder}/src/wetlands/main.py",
             "console": "integratedTerminal",
-            "args": ["list"]
+            "args": [
+                "list"
+            ]
         },
         {
             "name": "Main kill",
@@ -28,7 +32,13 @@
             "python": "/Users/amasson/Travail/wetlands/.venv/bin/python3",
             "program": "${workspaceFolder}/src/wetlands/main.py",
             "console": "integratedTerminal",
-            "args": ["-wip", "/Users/amasson/Travail/galaxy/pixi/wetlands/", "kill", "-n", "custom_splitchannels"]
+            "args": [
+                "-wip",
+                "/Users/amasson/Travail/galaxy/pixi/wetlands/",
+                "kill",
+                "-n",
+                "custom_splitchannels"
+            ]
         }
     ]
 }
