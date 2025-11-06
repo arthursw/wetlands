@@ -110,13 +110,13 @@ def executeFunction(message: dict):
 
 def runScript(message: dict):
     """Run a Python script via runpy.run_path(), simulating 'python script.py args...'."""
-    scriptPath = Path(message["scriptPath"])
+    scriptPath = message["scriptPath"]
     args = message.get("args", [])
     run_name = message.get("run_name", "__main__")
 
-    sys.argv = [str(scriptPath)] + list(args)
+    sys.argv = [scriptPath] + list(args)
     logger.info(f"Running script {scriptPath} with args {args} and run_name={run_name}")
-    runpy.run_path(str(scriptPath), run_name=run_name)
+    runpy.run_path(scriptPath, run_name=run_name)
     logger.info("Script executed")
     return None
 

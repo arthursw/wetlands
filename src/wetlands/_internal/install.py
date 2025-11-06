@@ -17,8 +17,8 @@ import yaml
 PIXI_VERSION = "v0.48.2"
 MICROMAMBA_VERSION = "2.3.0-1"
 
-VC_REDIST_ARTIFACT_NAME = "vc_redist.x64.exe"
-VC_REDIST_URL_DEFAULT = f"https://aka.ms/vs/17/release/{VC_REDIST_ARTIFACT_NAME}"
+VC_REDIST_ARTIFACT_NAME = "VC_redist.x64.exe"
+VC_REDIST_URL_DEFAULT = f"https://download.visualstudio.microsoft.com/download/pr/7ebf5fdb-36dc-4145-b0a0-90d3d5990a61/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/{VC_REDIST_ARTIFACT_NAME}"
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CHECKSUMS_BASE_DIR = SCRIPT_DIR / "checksums"
