@@ -97,7 +97,11 @@ class TestRunScript:
         result = module_executor.runScript(message)
 
         assert result is None
-        mock_run_path.assert_called_once_with("/path/to/script.py", run_name="__main__")
+        # Normalize path for cross-platform comparison
+        from pathlib import Path
+        actual_path = mock_run_path.call_args[0][0]
+        assert Path(actual_path).as_posix() == "/path/to/script.py"
+        assert mock_run_path.call_args[1] == {"run_name": "__main__"}
 
     @patch("wetlands._internal.module_executor.runpy.run_path")
     def test_run_script_default_run_name(self, mock_run_path):
@@ -106,7 +110,11 @@ class TestRunScript:
 
         module_executor.runScript(message)
 
-        mock_run_path.assert_called_once_with("/path/to/script.py", run_name="__main__")
+        # Normalize path for cross-platform comparison
+        from pathlib import Path
+        actual_path = mock_run_path.call_args[0][0]
+        assert Path(actual_path).as_posix() == "/path/to/script.py"
+        assert mock_run_path.call_args[1] == {"run_name": "__main__"}
 
 
 class TestExecutionWorker:

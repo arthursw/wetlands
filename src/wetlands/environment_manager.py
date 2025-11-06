@@ -418,10 +418,11 @@ class EnvironmentManager:
 
         if not self.environmentExists(environmentPath):
             raise Exception(f"The environment {environmentPath} was not found.")
-
-        if environmentPath not in self.environments:
-            self.environments[environmentPath] = ExternalEnvironment(environmentPath, self)
-        return self.environments[environmentPath]
+        
+        environment = str(environmentPath)
+        if environment not in self.environments:
+            self.environments[environment] = ExternalEnvironment(environment, self)
+        return self.environments[environment]
 
     def install(
         self, environmentName: str | None, dependencies: Dependencies, additionalInstallCommands: Commands = {}
@@ -486,7 +487,7 @@ class EnvironmentManager:
                 with open(wetlands_debug_ports_path, "r") as f:
                     wetlands_debug_ports = json.load(f)
             wetlands_debug_ports[environment.name] = dict(
-                debugPort=debugPort, moduleExecutorPath=str(moduleExecutorPath)
+                debugPort=debugPort, moduleExecutorPath=moduleExecutorPath.as_posix()
             )
             with open(wetlands_debug_ports_path, "w") as f:
                 json.dump(wetlands_debug_ports, f)
