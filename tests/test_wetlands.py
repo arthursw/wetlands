@@ -5,6 +5,7 @@ import platform
 from pathlib import Path
 import logging
 import pytest
+import shutil
 
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands.internal_environment import InternalEnvironment
@@ -16,6 +17,11 @@ from wetlands.external_environment import ExternalEnvironment
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def tool_available(tool_name: str) -> bool:
+    """Check if a tool is available in PATH."""
+    return shutil.which(tool_name) is not None
 
 
 @pytest.fixture(scope="module", params=["micromamba_root/", "pixi_root/"])
@@ -282,6 +288,7 @@ with Listener(("localhost", 0)) as listener:
     assert result["action"] == "exited"
 
 
+@pytest.mark.skipif(not tool_available("micromamba"), reason="micromamba not available")
 def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     """Test that users can reference existing environments using Path objects.
 
@@ -347,6 +354,7 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     logger.info(f"Test complete for {env_name}")
 
 
+@pytest.mark.skipif(not tool_available("pixi"), reason="pixi not available")
 def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     """Test that users can reference existing pixi environments using workspace Path.
 

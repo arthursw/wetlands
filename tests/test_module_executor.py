@@ -8,7 +8,9 @@ from wetlands._internal import module_executor
 class TestSendMessage:
     def test_send_message_with_lock(self):
         """Test that sendMessage sends through connection with lock"""
-        mock_lock = MagicMock(spec=threading.Lock)
+        mock_lock = MagicMock()
+        mock_lock.__enter__ = MagicMock(return_value=None)
+        mock_lock.__exit__ = MagicMock(return_value=None)
         mock_connection = MagicMock()
         message = {"action": "test"}
 

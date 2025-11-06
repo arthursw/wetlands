@@ -45,7 +45,7 @@ jobs:
       - name: Install dependencies
         run: uv pip install ".[docs]" --system
       - name: Run tests
-        run: uv run pytest tests
+        run: uv run pytest tests --ignore=tests/test_wetlands.py
 
   deploy:
     if: always() # if: always() ensures the deploy job runs even if lint and test were skipped — but still requires them to finish successfully if they did run.

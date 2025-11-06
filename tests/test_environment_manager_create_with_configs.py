@@ -53,6 +53,9 @@ def environment_manager_for_config_tests(tmp_path_factory, mock_command_executor
     # Mock environmentExists to simplify create tests
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
+    # Mock _dependenciesAreInstalled to return False so dependencies are not checked
+    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+
     return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
 
 
