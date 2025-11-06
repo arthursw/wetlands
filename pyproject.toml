@@ -11,6 +11,7 @@ dependencies = [
     "tomli>=1.0; python_version < '3.11'",
     "psutil>=6.1.0",
     "pyyaml>=6.0.2",
+    "send2trash>=1.8.3",
 ]
 classifiers = [
   "Intended Audience :: Developers",

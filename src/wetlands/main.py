@@ -1,8 +1,6 @@
 from pathlib import Path
-import sys
 import subprocess
 import argparse
-import json
 from typing import Tuple
 import json5
 import psutil
@@ -121,7 +119,7 @@ def setup_and_launch_vscode(args):
             launch_configs = existing_launch_configs
 
     with open(launch_json_path, "w") as f:
-        json.dump(launch_configs, f, indent=4)
+        json5.dump(launch_configs, f, indent=4)
 
     # Open VS Code in new window
     subprocess.run(["code", "--new-window", str(args.sources), str(moduleExecutorPath)])
@@ -168,8 +166,16 @@ def list_environments(args):
     print(f'\n\nEnvironments of the wetlands instance {args.wetlandsInstancePath.resolve()}:\n')
     print('Environment | Debug Port | Path')
     print('---')
+    new_debug_ports = {}
     for environment, detail in debug_ports.items():
-        print(environment, '|', detail["debugPort"], '|', detail["moduleExecutorPath"])
+        # Only keep environments matching with the running processes
+        if process_match(processes, environment):
+            print(environment, '|', detail["debugPort"], '|', detail["moduleExecutorPath"])
+            new_debug_ports[environment] = detail
+    # Update the debug_ports.json to only keep running environments
+    with open(debug_ports_path, 'w') as f:
+        json5.dump(new_debug_ports, f, indent=4)
+
     return
 
 def kill_environment(args):

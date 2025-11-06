@@ -911,8 +911,8 @@ class TestExistingEnvironmentAccess:
         manager = EnvironmentManager(condaPath=tmp_path, usePixi=False)
         assert not manager.environmentExists(nonexistent)
 
-    def test_create_nonexistent_path_raises_error(self, tmp_path_factory):
-        """Test that create() raises an error when given a nonexistent Path."""
+    def test_load_nonexistent_path_raises_error(self, tmp_path_factory):
+        """Test that load() raises an error when given a nonexistent Path."""
         tmp = tmp_path_factory.mktemp("conda_root")
         nonexistent = tmp / "nonexistent"
 
@@ -920,4 +920,260 @@ class TestExistingEnvironmentAccess:
 
         # Should raise because the environment doesn't exist
         with pytest.raises(Exception, match="was not found"):
-            manager.create(nonexistent)
+            manager.load(name="test_env", environmentPath=nonexistent)
+
+
+# ---- delete Tests ----
+
+class TestDeleteEnvironment:
+    """Tests for deleting environments."""
+
+    def test_delete_nonexistent_environment_micromamba(self, environment_manager_fixture, monkeypatch):
+        """Test that delete raises an error when trying to delete a nonexistent environment."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "nonexistent-env"
+
+        # Mock environmentExists to return False
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+
+        # Create external environment and call delete on it
+        env = ExternalEnvironment(env_name, manager)
+
+        # Should raise exception
+        with pytest.raises(Exception, match="does not exist"):
+            env.delete()
+
+    def test_delete_existing_environment_micromamba(self, environment_manager_fixture, monkeypatch):
+        """Test that delete removes an existing environment (micromamba)."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "test-env"
+
+        # Mock environmentExists to return True
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+
+        # Mock send2trash
+        mock_send2trash = MagicMock()
+        monkeypatch.setattr("wetlands.external_environment.send2trash", mock_send2trash)
+
+        # Mock getEnvironmentPath
+        mock_env_path = Path("/path/to/env")
+        monkeypatch.setattr(manager.settingsManager, "getEnvironmentPath", MagicMock(return_value=mock_env_path))
+
+        # Create external environment
+        env = ExternalEnvironment(env_name, manager)
+        manager.environments[env_name] = env
+
+        env.delete()
+
+        # Should call send2trash with environment path
+        mock_send2trash.assert_called_once_with(mock_env_path)
+        # Should be removed from environments dict
+        assert env_name not in manager.environments
+
+    def test_delete_existing_environment_pixi(self, environment_manager_pixi_fixture, monkeypatch):
+        """Test that delete removes an existing environment (pixi)."""
+        manager, mock_execute_output, _ = environment_manager_pixi_fixture
+        env_name = "test-env"
+
+        # Mock environmentExists to return True
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+
+        # Mock send2trash
+        mock_send2trash = MagicMock()
+        monkeypatch.setattr("wetlands.external_environment.send2trash", mock_send2trash)
+
+        # Mock getWorkspacePath for Pixi
+        mock_workspace_path = Path("/path/to/workspace")
+        monkeypatch.setattr(manager.settingsManager, "getWorkspacePath", MagicMock(return_value=mock_workspace_path))
+
+        # Create external environment
+        env = ExternalEnvironment(env_name, manager)
+        manager.environments[env_name] = env
+
+        env.delete()
+
+        # For pixi, it should call send2trash with workspace path
+        mock_send2trash.assert_called_once_with(mock_workspace_path)
+
+    def test_delete_environment_exits_external_environment(self, environment_manager_fixture, monkeypatch):
+        """Test that delete properly exits an external environment if it's running."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "running-env"
+
+        # Mock environmentExists
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+
+        # Mock send2trash
+        mock_send2trash = MagicMock()
+        monkeypatch.setattr("wetlands.external_environment.send2trash", mock_send2trash)
+
+        # Mock getEnvironmentPath
+        mock_env_path = Path("/path/to/env")
+        monkeypatch.setattr(manager.settingsManager, "getEnvironmentPath", MagicMock(return_value=mock_env_path))
+
+        # Create external environment
+        env = ExternalEnvironment(env_name, manager)
+        manager.environments[env_name] = env
+
+        # Mock launched to return True
+        monkeypatch.setattr(env, "launched", MagicMock(return_value=True))
+
+        # Mock _exit
+        monkeypatch.setattr(env, "_exit", MagicMock())
+
+        env.delete()
+
+        # Should call _exit on the environment
+        env._exit.assert_called_once()
+        # Should call send2trash
+        mock_send2trash.assert_called_once()
+
+
+# ---- update Tests ----
+
+class TestUpdateEnvironment:
+    """Tests for updating environments."""
+
+    def test_update_nonexistent_environment_raises_error(self, environment_manager_fixture, monkeypatch):
+        """Test that update raises an error when trying to update a nonexistent environment."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "nonexistent-env"
+        dependencies: Dependencies = {"pip": ["numpy"]}
+
+        # Mock environmentExists to return False
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+
+        # Create external environment and call update on it
+        env = ExternalEnvironment(env_name, manager)
+
+        # Should raise exception
+        with pytest.raises(Exception, match="does not exist"):
+            env.update(dependencies)
+
+    def test_update_environment_with_dependencies_dict(self, environment_manager_fixture, monkeypatch):
+        """Test that update deletes and recreates an environment with new dependencies."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "test-env"
+        new_dependencies: Dependencies = {"pip": ["numpy==1.0"]}
+
+        # Mock environmentExists to return True
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+
+        # Create external environment
+        env = ExternalEnvironment(env_name, manager)
+        manager.environments[env_name] = env
+
+        # Mock delete on the environment
+        delete_mock = MagicMock()
+        monkeypatch.setattr(env, "delete", delete_mock)
+
+        # Mock manager.create to return a new environment
+        new_env = ExternalEnvironment(env_name, manager)
+        create_mock = MagicMock(return_value=new_env)
+        monkeypatch.setattr(manager, "create", create_mock)
+
+        result = env.update(new_dependencies)
+
+        # Should call delete
+        delete_mock.assert_called_once()
+        # Should call create with new dependencies
+        create_mock.assert_called_once()
+        call_args, call_kwargs = create_mock.call_args
+        assert call_args[0] == env_name
+        assert call_kwargs.get("dependencies") == new_dependencies
+        # Should return the created environment
+        assert result == new_env
+
+    def test_update_environment_with_config_file(self, environment_manager_fixture, monkeypatch):
+        """Test that update works with a config file path."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "test-env"
+        config_path = Path("/path/to/pyproject.toml")
+        optional_deps = ["dev"]
+
+        # Mock environmentExists
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+
+        # Create external environment
+        env = ExternalEnvironment(env_name, manager)
+        manager.environments[env_name] = env
+
+        # Mock delete on the environment
+        delete_mock = MagicMock()
+        monkeypatch.setattr(env, "delete", delete_mock)
+
+        # Mock manager.createFromConfig
+        new_env = ExternalEnvironment(env_name, manager)
+        create_from_config_mock = MagicMock(return_value=new_env)
+        monkeypatch.setattr(manager, "createFromConfig", create_from_config_mock)
+
+        env.update(config_path, optionalDependencies=optional_deps)
+
+        # Should call delete
+        delete_mock.assert_called_once()
+        # Should call createFromConfig with config path and optional deps
+        create_from_config_mock.assert_called_once()
+        call_args, call_kwargs = create_from_config_mock.call_args
+        assert call_args[0] == env_name
+        assert call_kwargs.get("configPath") == config_path
+        assert call_kwargs.get("optionalDependencies") == optional_deps
+
+    def test_update_with_environment_name_and_config(self, environment_manager_fixture, monkeypatch):
+        """Test that update works with config file."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "test-env"
+        config_path = Path("/path/to/pixi.toml")
+
+        # Mock environmentExists
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+
+        # Create external environment
+        env = ExternalEnvironment(env_name, manager)
+        manager.environments[env_name] = env
+
+        # Mock delete on the environment
+        delete_mock = MagicMock()
+        monkeypatch.setattr(env, "delete", delete_mock)
+
+        # Mock manager.createFromConfig
+        new_env = ExternalEnvironment(env_name, manager)
+        create_from_config_mock = MagicMock(return_value=new_env)
+        monkeypatch.setattr(manager, "createFromConfig", create_from_config_mock)
+
+        env.update(config_path)
+
+        # Should call createFromConfig
+        create_from_config_mock.assert_called_once()
+        call_args, call_kwargs = create_from_config_mock.call_args
+        assert call_args[0] == env_name
+        assert call_kwargs.get("configPath") == config_path
+
+    def test_update_with_additional_commands(self, environment_manager_fixture, monkeypatch):
+        """Test that update passes additional install commands through to create."""
+        manager, mock_execute_output, _ = environment_manager_fixture
+        env_name = "test-env"
+        dependencies: Dependencies = {"pip": ["requests"]}
+        additional_commands: Commands = {"mac": ["echo 'test'"]}
+
+        # Mock environmentExists
+        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+
+        # Create external environment
+        env = ExternalEnvironment(env_name, manager)
+        manager.environments[env_name] = env
+
+        # Mock delete on the environment
+        delete_mock = MagicMock()
+        monkeypatch.setattr(env, "delete", delete_mock)
+
+        # Mock manager.create
+        new_env = ExternalEnvironment(env_name, manager)
+        create_mock = MagicMock(return_value=new_env)
+        monkeypatch.setattr(manager, "create", create_mock)
+
+        env.update(dependencies, additionalInstallCommands=additional_commands)
+
+        # Should pass additional commands to create
+        create_mock.assert_called_once()
+        call_args = create_mock.call_args
+        assert call_args[1].get("additionalInstallCommands") == additional_commands

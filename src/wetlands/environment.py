@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from importlib import import_module
 from abc import abstractmethod
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 from types import ModuleType
 import inspect
 
@@ -103,3 +103,17 @@ class Environment:
         """Exit the environment"""
         self._exit()
         self.environmentManager._removeEnvironment(self)
+
+    def delete(self) -> None:
+        """Delete this environment. Only available in ExternalEnvironment."""
+        raise NotImplementedError("delete() is only available in ExternalEnvironment")
+
+    def update(
+        self,
+        dependencies: Union[Dependencies, str, Path, None] = None,
+        optionalDependencies: list[str] | None = None,
+        additionalInstallCommands: Commands = {},
+        forceExternal: bool = False,
+    ) -> "Environment":
+        """Update this environment with new dependencies. Only available in ExternalEnvironment."""
+        raise NotImplementedError("update() is only available in ExternalEnvironment")

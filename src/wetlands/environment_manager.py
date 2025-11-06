@@ -5,6 +5,7 @@ from importlib import metadata
 from pathlib import Path
 import subprocess
 import sys
+from send2trash import send2trash
 from typing import Any, Literal, cast, Union
 
 from wetlands._internal.install import installMicromamba, installPixi
@@ -307,52 +308,36 @@ class EnvironmentManager:
 
     def create(
         self,
-        environment: str | Path,
-        dependencies: Union[Dependencies, str, Path, None] = None,
-        environmentName: str | None = None,
-        optionalDependencies: list[str] | None = None,
+        name: str,
+        dependencies: Union[Dependencies, None] = None,
         additionalInstallCommands: Commands = {},
         forceExternal: bool = False,
     ) -> Environment:
         """Creates a new Conda environment with specified dependencies or the main environment if dependencies are met in the main environment and forceExternal is False (in which case additional install commands will not be called). Return the existing environment if it was already created.
 
         Args:
-                environment: Name for the new environment. Ignore if dependencies are already installed in the main environment and forceExternal is False. Can also be a pathlib.Path to an existing Conda environment (or the folder containing the pixi.toml or pyproject.toml when using Pixi). If environment is a string, it will be considered as a name; if it is a pathlib.Path, it will be considered as a path to an existing environment (will raise an exception if the environment does not exist).
+                name: Name for the new environment.
                 dependencies: Dependencies to install. Can be one of:
                     - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
-                    - A Path/str to a config file: pixi.toml, pyproject.toml, or environment.yml
                     - None (no dependencies to install)
-                environmentName: Name of environment to extract from pixi.toml or pyproject.toml (required for pixi.toml, optional for pyproject.toml if optionalDependencies is provided)
-                optionalDependencies: List of optional dependency groups to extract from pyproject.toml (alternative to environmentName)
                 additionalInstallCommands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
                 forceExternal: force create external environment even if dependencies are met in main environment
 
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
-
-        if isinstance(environment, str) and ('/' in environment or '\\' in environment):
+        if '/' in name or '\\' in name:
             raise Exception("Environments name cannot contain any forward nor backward slash.")
-        if self.environmentExists(environment):
-            environment = str(environment)
-            if environment not in self.environments:
-                self.environments[environment] = ExternalEnvironment(environment, self)
-            return self.environments[environment]
-        if isinstance(environment, Path):
-            raise Exception(f"The environment {environment.resolve()} was not found.")
-        
-        # Parse config file if dependencies is a path
-        if isinstance(dependencies, (str, Path)):
-            dependencies = self._parseDependenciesFromConfig(
-                dependencies,
-                environmentName=environmentName,
-                optionalDependencies=optionalDependencies
-            )
-        elif dependencies is None:
+        if self.environmentExists(name):
+            if name not in self.environments:
+                self.environments[name] = ExternalEnvironment(name, self)
+            return self.environments[name]
+
+        if dependencies is None:
             dependencies = {}
         elif not isinstance(dependencies, dict):
             raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
-        
+
         self._addDebugpyInDependencies(dependencies)
         if not forceExternal and self._dependenciesAreInstalled(dependencies):
             return self.mainEnvironment
@@ -363,7 +348,7 @@ class EnvironmentManager:
         pythonRequirement = " python=" + (pythonVersion if len(pythonVersion) > 0 else platform.python_version())
         createEnvCommands = self.commandGenerator.getActivateCondaCommands()
         if self.settingsManager.usePixi:
-            manifestPath = self.settingsManager.getManifestPath(environment)
+            manifestPath = self.settingsManager.getManifestPath(name)
             if not manifestPath.exists():
                 platformArgs = f"--platform win-64" if platform.system() == "Windows" else ""
                 createEnvCommands += [
@@ -374,13 +359,75 @@ class EnvironmentManager:
             ]
         else:
             createEnvCommands += [
-                f"{self.settingsManager.condaBinConfig} create -n {environment}{pythonRequirement} -y"
+                f"{self.settingsManager.condaBinConfig} create -n {name}{pythonRequirement} -y"
             ]
-        createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
+        createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(name, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         self.commandExecutor.executeCommandsAndGetOutput(createEnvCommands)
-        self.environments[environment] = ExternalEnvironment(environment, self)
-        return self.environments[environment]
+        self.environments[name] = ExternalEnvironment(name, self)
+        return self.environments[name]
+
+    def createFromConfig(
+        self,
+        name: str,
+        configPath: str | Path,
+        optionalDependencies: list[str] | None = None,
+        additionalInstallCommands: Commands = {},
+        forceExternal: bool = False,
+    ) -> Environment:
+        """Creates a new Conda environment from a config file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt).
+
+        Args:
+                name: Name for the new environment.
+                configPath: Path to configuration file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt).
+                optionalDependencies: List of optional dependency groups to extract from pyproject.toml.
+                additionalInstallCommands: Platform-specific commands during installation.
+                forceExternal: force create external environment even if dependencies are met in main environment
+
+        Returns:
+                The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
+        """
+        if '/' in name or '\\' in name:
+            raise Exception("Environments name cannot contain any forward nor backward slash.")
+
+        # Parse config file
+        dependencies = self._parseDependenciesFromConfig(
+            configPath,
+            environmentName=None,
+            optionalDependencies=optionalDependencies
+        )
+
+        # Use create() with parsed dependencies
+        return self.create(name, dependencies, additionalInstallCommands, forceExternal)
+
+    def load(
+        self,
+        name: str,
+        environmentPath: Path,
+        optionalDependencies: list[str] | None = None,
+        additionalInstallCommands: Commands = {},
+    ) -> Environment:
+        """Load an existing Conda environment from disk.
+
+        Args:
+                name: Name for the environment instance.
+                environmentPath: Path to an existing Conda environment (or the folder containing the pixi.toml/pyproject.toml when using Pixi).
+                optionalDependencies: (Unused, for API consistency)
+                additionalInstallCommands: (Unused, for API consistency)
+
+        Returns:
+                The loaded environment (ExternalEnvironment if using Pixi or micromamba with a path, InternalEnvironment otherwise).
+
+        Raises:
+                Exception: If the environment does not exist.
+        """
+        if not self.environmentExists(environmentPath):
+            raise Exception(f"The environment {environmentPath.resolve()} was not found.")
+
+        env_name = str(environmentPath)
+        if env_name not in self.environments:
+            self.environments[env_name] = ExternalEnvironment(env_name, self)
+        return self.environments[env_name]
 
     def install(
         self, environmentName: str | None, dependencies: Dependencies, additionalInstallCommands: Commands = {}
@@ -458,3 +505,4 @@ class EnvironmentManager:
         """
         if environment.name in self.environments:
             del self.environments[environment.name]
+
