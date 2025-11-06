@@ -1,4 +1,5 @@
 import platform
+from typing import TYPE_CHECKING
 
 from wetlands._internal.command_generator import CommandGenerator
 
@@ -8,6 +9,9 @@ except ImportError:
     from typing_extensions import NotRequired, TypedDict, Literal  # type: ignore
 
 from wetlands._internal.exceptions import IncompatibilityException
+
+if TYPE_CHECKING:
+    from wetlands.environment import Environment
 
 Platform = Literal["osx-64", "osx-arm64", "win-64", "win-arm64", "linux-64", "linux-arm64"]
 
@@ -95,7 +99,7 @@ class DependencyManager:
             len(finalDependencies) + len(finalDependenciesNoDeps) > 0,
         )
 
-    def getInstallDependenciesCommands(self, environment: str | None, dependencies: Dependencies) -> list[str]:
+    def getInstallDependenciesCommands(self, environment: "Environment", dependencies: Dependencies) -> list[str]:
         """Generates commands to install dependencies in the given environment. Note: this does not activate conda, use self.getActivateCondaCommands() first.
 
         Args:
@@ -139,16 +143,15 @@ class DependencyManager:
                 raise Exception(
                     "Use micromamba if you want to install a pip dependency without specifying a conda environment."
                 )
-            manifestPath = self.settingsManager.getManifestPath(environment)
             if hasPipDependencies:
                 installDepsCommands += [
                     f'echo "Installing pip dependencies..."',
-                    f'{self.settingsManager.condaBin} add --manifest-path "{manifestPath}" --pypi {" ".join(pipDependencies)}',
+                    f'{self.settingsManager.condaBin} add --manifest-path "{environment.path}" --pypi {" ".join(pipDependencies)}',
                 ]
             if hasCondaDependencies:
                 installDepsCommands += [
                     f'echo "Installing conda dependencies..."',
-                    f'{self.settingsManager.condaBin} add --manifest-path "{manifestPath}" {" ".join(condaDependencies)}',
+                    f'{self.settingsManager.condaBin} add --manifest-path "{environment.path}" {" ".join(condaDependencies)}',
                 ]
             if len(condaDependenciesNoDeps) > 0:
                 raise Exception(f"Use micromamba to be able to install conda packages without their dependencies.")

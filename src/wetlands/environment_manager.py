@@ -54,7 +54,7 @@ class EnvironmentManager:
                 wetlandsInstancePath: Path to the folder which will contain the state of this wetlands instance (environment process debug ports, stored in debug_ports.json). Default is condaPath / 'wetlands'.
                 debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlandsInstancePath / debug_ports.json
         """
-        self.environments: dict[str, Environment] = {}
+        self.environments: dict[str | Path, Environment] = {}
         condaPath = Path(condaPath)
         if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
             raise Exception(
@@ -120,7 +120,7 @@ class EnvironmentManager:
         """Removes channel prefix from a Conda dependency string (e.g., "channel::package" -> "package")."""
         return condaDependency.split("::")[1] if "::" in condaDependency else condaDependency
 
-    def getInstalledPackages(self, environment: str | Path) -> list[dict[str, str]]:
+    def getInstalledPackages(self, environment: Environment) -> list[dict[str, str]]:
         """Get the list of the packages installed in the environment
 
         Args:
@@ -130,19 +130,18 @@ class EnvironmentManager:
                 A list of dict containing the installed packages [{"kind":"conda|pypi", "name": "numpy", "version", "2.1.3"}, ...].
         """
         if self.settingsManager.usePixi:
-            manifestPath = self.settingsManager.getManifestPath(environment)
             commands = self.commandGenerator.getActivateCondaCommands()
-            commands += [f'{self.settingsManager.condaBin} list --json --manifest-path "{manifestPath}"']
+            commands += [f'{self.settingsManager.condaBin} list --json --manifest-path "{environment.path}"']
             return self.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
         else:
-            commands = self.commandGenerator.getActivateEnvironmentCommands(str(environment)) + [
+            commands = self.commandGenerator.getActivateEnvironmentCommands(environment) + [
                 f"{self.settingsManager.condaBin} list --json",
             ]
             packages = self.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
             for package in packages:
                 package["kind"] = "conda"
 
-            commands = self.commandGenerator.getActivateEnvironmentCommands(str(environment)) + [
+            commands = self.commandGenerator.getActivateEnvironmentCommands(environment) + [
                 f"pip freeze --all",
             ]
             output = self.commandExecutor.executeCommandsAndGetOutput(commands, log=False)
@@ -198,7 +197,7 @@ class EnvironmentManager:
             ]
 
         if self.mainEnvironment.name is not None:
-            installedPackages = self.getInstalledPackages(Path(self.mainEnvironment.name))
+            installedPackages = self.getInstalledPackages(self.mainEnvironment)
 
         condaSatisfied = all(
             [self._checkRequirement(d, "conda", installedPackages) for d in condaDependencies + condaDependenciesNoDeps]
@@ -209,24 +208,20 @@ class EnvironmentManager:
 
         return condaSatisfied and pipSatisfied
 
-    def environmentExists(self, environment: str | Path) -> bool:
+    def environmentExists(self, environmentPath: Path) -> bool:
         """Checks if a Conda environment exists.
 
         Args:
-                environment: Environment name to check. If environment is a string, it will be considered as a name; if it is a pathlib.Path, it will be considered as a path to an existing environment.
+                environmentPath: Environment name to check.
 
         Returns:
                 True if environment exists, False otherwise.
         """
         if self.settingsManager.usePixi:
-            manifestPath = self.settingsManager.getManifestPath(environment)
-            condaMeta = manifestPath.parent / ".pixi" / "envs" / "default" / "conda-meta"
-            return manifestPath.is_file() and condaMeta.is_dir()
+            condaMeta = environmentPath.parent / ".pixi" / "envs" / "default" / "conda-meta"
+            return environmentPath.is_file() and condaMeta.is_dir()
         else:
-            if isinstance(environment, Path):
-                condaMeta = environment / "conda-meta"
-            else:
-                condaMeta = Path(self.settingsManager.condaPath) / "envs" / environment / "conda-meta"
+            condaMeta = environmentPath / "conda-meta"
             return condaMeta.is_dir()
 
     def _addDebugpyInDependencies(self, dependencies: Dependencies) -> None:
@@ -327,13 +322,9 @@ class EnvironmentManager:
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
-        if "/" in name or "\\" in name:
-            raise Exception("Environments name cannot contain any forward nor backward slash.")
-        if self.environmentExists(name):
-            if name not in self.environments:
-                self.environments[name] = ExternalEnvironment(name, self)
-            return self.environments[name]
-
+        if isinstance(name, Path):
+            raise Exception("Environment name cannot be a Path, use EnvironmentManager.load() to load an existing environment.")
+        
         if dependencies is None:
             dependencies = {}
         elif not isinstance(dependencies, dict):
@@ -348,8 +339,9 @@ class EnvironmentManager:
             raise Exception("Python version must be greater than 3.8")
         pythonRequirement = " python=" + (pythonVersion if len(pythonVersion) > 0 else platform.python_version())
         createEnvCommands = self.commandGenerator.getActivateCondaCommands()
+        path = self.settingsManager.getEnvironmentPathFromName(name)
         if self.settingsManager.usePixi:
-            manifestPath = self.settingsManager.getManifestPath(name)
+            manifestPath = path
             if not manifestPath.exists():
                 platformArgs = f"--platform win-64" if platform.system() == "Windows" else ""
                 createEnvCommands += [
@@ -360,10 +352,11 @@ class EnvironmentManager:
             ]
         else:
             createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {name}{pythonRequirement} -y"]
-        createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(name, dependencies)
+        environment = ExternalEnvironment(name, path, self)
+        self.environments[name] = environment
+        createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         self.commandExecutor.executeCommandsAndGetOutput(createEnvCommands)
-        self.environments[name] = ExternalEnvironment(name, self)
         return self.environments[name]
 
     def createFromConfig(
@@ -386,8 +379,6 @@ class EnvironmentManager:
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
-        if "/" in name or "\\" in name:
-            raise Exception("Environments name cannot contain any forward nor backward slash.")
 
         # Parse config file
         dependencies = self._parseDependenciesFromConfig(
@@ -419,13 +410,12 @@ class EnvironmentManager:
         if not self.environmentExists(environmentPath):
             raise Exception(f"The environment {environmentPath} was not found.")
         
-        environment = str(environmentPath)
-        if environment not in self.environments:
-            self.environments[environment] = ExternalEnvironment(environment, self)
-        return self.environments[environment]
+        if name not in self.environments:
+            self.environments[name] = ExternalEnvironment(name, environmentPath, self)
+        return self.environments[name]
 
     def install(
-        self, environmentName: str | None, dependencies: Dependencies, additionalInstallCommands: Commands = {}
+        self, environment: Environment, dependencies: Dependencies, additionalInstallCommands: Commands = {}
     ) -> list[str]:
         """Installs dependencies.
         See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
@@ -438,13 +428,13 @@ class EnvironmentManager:
         Returns:
                 Output lines of the installation commands.
         """
-        installCommands = self.dependencyManager.getInstallDependenciesCommands(environmentName, dependencies)
+        installCommands = self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         return self.commandExecutor.executeCommandsAndGetOutput(installCommands)
 
     def executeCommands(
         self,
-        environmentName: str | None,
+        environment: Environment,
         commands: Commands,
         additionalActivateCommands: Commands = {},
         popenKwargs: dict[str, Any] = {},
@@ -453,7 +443,7 @@ class EnvironmentManager:
         """Executes the given commands in the given environment.
 
         Args:
-                environmentName: The environment in which to execute commands.
+                environment: The environment in which to execute commands.
                 commands: The commands to execute in the environment.
                 additionalActivateCommands: Platform-specific activation commands.
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
@@ -462,7 +452,7 @@ class EnvironmentManager:
                 The launched process.
         """
         activateCommands = self.commandGenerator.getActivateEnvironmentCommands(
-            environmentName, additionalActivateCommands
+            environment, additionalActivateCommands
         )
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(

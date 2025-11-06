@@ -1,6 +1,8 @@
 from pathlib import Path
 import platform
 
+from wetlands.environment import Environment
+
 
 class SettingsManager:
     usePixi = True
@@ -80,28 +82,13 @@ class SettingsManager:
         condaBinPath = f"bin/{condaName}{suffix}"
         return self.condaPath.resolve(), Path(condaBinPath)
 
-    def getWorkspacePath(self, environment: str | Path) -> Path:
-        """Returns the workspace folder of the environment"""
-        return self.condaPath / "workspaces" / environment if isinstance(environment, str) else environment
-
-    def getEnvironmentPath(self, environment: str | Path) -> Path:
+    def getEnvironmentPath(self, environment: Environment) -> Path:
         """Returns the environment folder"""
-        if self.usePixi:
-            return self.getWorkspacePath(environment) / ".pixi" / "envs" / "default"
-        else:
-            return self.condaPath / "envs" / environment if isinstance(environment, str) else environment
+        return environment.path
 
-    def getEnvironmentPythonPath(self, environment: str | Path) -> Path:
-        return (
-            self.getEnvironmentPath(environment)
-            / "bin"
-            / ("python" if platform.system() == "Windows" else "python.exe")
-        )
-
-    def getManifestPath(self, environment: str | Path) -> Path:
-        """Returns the manifest path (pixi.toml) of the workspace of the environment"""
-        return self.getWorkspacePath(environment) / "pixi.toml"
-
+    def getEnvironmentPathFromName(self, environmentName: str) -> Path:
+        return self.condaPath / "workspaces" / environmentName / "pixi.toml" if self.usePixi else self.condaPath / "envs" / environmentName
+    
     def getProxyEnvironmentVariablesCommands(self) -> list[str]:
         """Generates proxy environment variable commands.
 

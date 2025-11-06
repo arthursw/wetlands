@@ -34,8 +34,8 @@ class ExternalEnvironment(Environment):
     process: subprocess.Popen | None = None
     connection: Connection | None = None
 
-    def __init__(self, name: str, environmentManager: "EnvironmentManager") -> None:
-        super().__init__(name, environmentManager)
+    def __init__(self, name: str, path: Path, environmentManager: "EnvironmentManager") -> None:
+        super().__init__(name, path, environmentManager)
         self._lock = threading.RLock()
         self._logThread: threading.Thread | None = None
         self.loggingQueue = queue.Queue()
@@ -232,7 +232,7 @@ class ExternalEnvironment(Environment):
                 - Removes environment from environmentManager.environments dict
                 - Deletes the environment directory using appropriate conda manager
         """
-        if not self.environmentManager.environmentExists(self.name):
+        if not self.environmentManager.environmentExists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
 
         # Exit the environment if it's running
@@ -241,10 +241,9 @@ class ExternalEnvironment(Environment):
 
         # Generate delete commands based on conda manager type
         if self.environmentManager.settingsManager.usePixi:
-            environmentPath = self.environmentManager.settingsManager.getWorkspacePath(self.name)
+            send2trash(self.path.parent)
         else:
-            environmentPath = self.environmentManager.settingsManager.getEnvironmentPath(self.name)
-        send2trash(environmentPath)
+            send2trash(self.path)
 
         # Remove from environments dict
         if self.name in self.environmentManager.environments:
@@ -253,8 +252,7 @@ class ExternalEnvironment(Environment):
     @synchronized
     def update(
         self,
-        dependencies: Union[Dependencies, str, Path, None] = None,
-        optionalDependencies: list[str] | None = None,
+        dependencies: Union[Dependencies, None] = None,
         additionalInstallCommands: Commands = {},
         forceExternal: bool = False,
     ) -> "Environment":
@@ -263,9 +261,7 @@ class ExternalEnvironment(Environment):
         Args:
                 dependencies: New dependencies to install. Can be one of:
                     - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
-                    - A Path/str to a config file: pixi.toml, pyproject.toml, or environment.yml
                     - None (no dependencies to install)
-                optionalDependencies: List of optional dependency groups to extract from pyproject.toml
                 additionalInstallCommands: Platform-specific commands during installation.
                 forceExternal: Force create external environment even if dependencies are met in main environment
 
@@ -279,29 +275,16 @@ class ExternalEnvironment(Environment):
                 - Deletes the existing environment
                 - Creates a new environment with the same name but new dependencies
         """
-        if not self.environmentManager.environmentExists(self.name):
+        if not self.environmentManager.environmentExists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
-
-        env_name = self.name
 
         # Delete the existing environment
         self.delete()
 
-        # Recreate with new dependencies
-        if isinstance(dependencies, (str, Path)):
-            # Use createFromConfig for config files
-            return self.environmentManager.createFromConfig(
-                env_name,
-                configPath=dependencies,
-                optionalDependencies=optionalDependencies,
-                additionalInstallCommands=additionalInstallCommands,
-                forceExternal=forceExternal,
-            )
-        else:
-            # Use create for direct Dependencies dict
-            return self.environmentManager.create(
-                env_name,
-                dependencies=dependencies,
-                additionalInstallCommands=additionalInstallCommands,
-                forceExternal=forceExternal,
-            )
+        # Use create for direct Dependencies dict
+        return self.environmentManager.create(
+            str(self.name),
+            dependencies=dependencies,
+            additionalInstallCommands=additionalInstallCommands,
+            forceExternal=forceExternal,
+        )

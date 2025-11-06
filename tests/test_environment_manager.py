@@ -309,13 +309,14 @@ def test_dependencies_are_installed_no_main_env_pip_uses_metadata(environment_ma
 def test_create_environment_already_exists(environment_manager_fixture, monkeypatch, force_external):
     manager, mock_execute_output, _ = environment_manager_fixture
     env_name = "existing-env"
+    env_path = manager.settingsManager.getEnvironmentPathFromName(env_name)
 
     # Mock environmentExists to return True for this specific name
     mock_exists = MagicMock(return_value=True)
     monkeypatch.setattr(manager, "environmentExists", mock_exists)
 
     # Add to environments dict to simulate it was *really* created before
-    manager.environments[env_name] = ExternalEnvironment(env_name, manager)
+    manager.environments[env_name] = ExternalEnvironment(env_name, env_path, manager)
 
     env = manager.create(env_name, dependencies={}, forceExternal=force_external)
 

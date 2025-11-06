@@ -1,12 +1,14 @@
 from pathlib import Path
 import platform
+from typing import TYPE_CHECKING, Union
 
 try:
     from typing import NotRequired, TypedDict  # type: ignore
 except ImportError:
     from typing_extensions import NotRequired, TypedDict  # type: ignore
 
-from typing import Union
+if TYPE_CHECKING:
+    from wetlands.environment import Environment
 
 import yaml
 
@@ -99,7 +101,7 @@ class CommandGenerator:
         return self.getShellHookCommands()
 
     def getActivateEnvironmentCommands(
-        self, environment: str | None, additionalActivateCommands: Commands = {}, activateConda: bool = True
+        self, environment: "Environment", additionalActivateCommands: Commands = {}, activateConda: bool = True
     ) -> list[str]:
         """Generates commands to activate the given environment
 
@@ -115,20 +117,19 @@ class CommandGenerator:
             return []
         commands = self.getActivateCondaCommands() if activateConda else []
         if self.settingsManager.usePixi:
-            manifestPath = self.settingsManager.getManifestPath(environment)
             # Warning: Use `pixi shell-hook` instead of `pixi shell` since `pixi shell` creates a new shell (and we want to keep the same shell)
             if platform.system() != "Windows":
-                commands += [f'eval "$({self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}")"']
+                commands += [f'eval "$({self.settingsManager.condaBin} shell-hook --manifest-path "{environment.path}")"']
             else:
                 commands += [
-                    f'{self.settingsManager.condaBin} shell-hook --manifest-path "{manifestPath}" | Out-String | Invoke-Expression'
+                    f'{self.settingsManager.condaBin} shell-hook --manifest-path "{environment.path}" | Out-String | Invoke-Expression'
                 ]
         else:
             commands += [f"{self.settingsManager.condaBin} activate {environment}"]
         return commands + self.getCommandsForCurrentPlatform(additionalActivateCommands)
 
     def getAddChannelsCommands(
-        self, environment: str, channels: list[str], condaDependencies: list[str], activateConda: bool = True
+        self, environment: "Environment", channels: list[str], condaDependencies: list[str], activateConda: bool = True
     ) -> list[str]:
         """Add Conda channels in manifest file when using Pixi (`pixi add channelName::packageName` is not enough, channelName must be in manifest file).
         The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`.
@@ -150,10 +151,9 @@ class CommandGenerator:
         channels += set([dep.split("::")[0].replace('"', "") for dep in condaDependencies if "::" in dep])
         if len(channels) == 0:
             return []
-        manifestPath = self.settingsManager.getManifestPath(environment)
         commands = self.getActivateCondaCommands() if activateConda else []
         commands += [
-            f'{self.settingsManager.condaBin} project channel add --manifest-path "{manifestPath}" --no-progress --prepend '
+            f'{self.settingsManager.condaBin} project channel add --manifest-path "{environment.path}" --no-progress --prepend '
             + " ".join(channels)
         ]
         return commands

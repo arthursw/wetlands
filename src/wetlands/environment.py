@@ -17,8 +17,9 @@ if TYPE_CHECKING:
 class Environment:
     modules: dict[str, ModuleType] = {}
 
-    def __init__(self, name: str | None, environmentManager: "EnvironmentManager") -> None:
+    def __init__(self, name: str, path: Path, environmentManager: "EnvironmentManager") -> None:
         self.name = name
+        self.path = path
         self.environmentManager = environmentManager
 
     def _isModFunction(self, mod, func):
@@ -64,7 +65,7 @@ class Environment:
         Returns:
                 Output lines of the installation commands.
         """
-        return self.environmentManager.install(self.name, dependencies, additionalInstallCommands)
+        return self.environmentManager.install(self, dependencies, additionalInstallCommands)
 
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
         """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Do nothing when InternalEnvironment. See [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
@@ -89,7 +90,7 @@ class Environment:
                 The launched process.
         """
         return self.environmentManager.executeCommands(
-            self.name, commands, additionalActivateCommands, popenKwargs, wait=wait
+            self, commands, additionalActivateCommands, popenKwargs, wait=wait
         )
 
     @abstractmethod
@@ -116,8 +117,7 @@ class Environment:
 
     def update(
         self,
-        dependencies: Union[Dependencies, str, Path, None] = None,
-        optionalDependencies: list[str] | None = None,
+        dependencies: Union[Dependencies, None] = None,
         additionalInstallCommands: Commands = {},
         forceExternal: bool = False,
     ) -> "Environment":
