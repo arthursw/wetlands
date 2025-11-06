@@ -1,6 +1,5 @@
-import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from wetlands.main import (
     process_match,
@@ -185,9 +184,7 @@ class TestListEnvironments:
     @patch("wetlands.main.json5.load")
     @patch("builtins.open", create=True)
     @patch("wetlands.main.get_matching_processes")
-    def test_list_environments_with_running_processes(
-        self, mock_get_processes, mock_open, mock_json5_load, mock_print
-    ):
+    def test_list_environments_with_running_processes(self, mock_get_processes, mock_open, mock_json5_load, mock_print):
         """Test listing environments when processes are running"""
         args = MagicMock()
         args.wetlandsInstancePath = MagicMock()

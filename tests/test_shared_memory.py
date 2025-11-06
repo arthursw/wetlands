@@ -1,6 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
-from multiprocessing import shared_memory
+from unittest.mock import patch, MagicMock
 
 pytest.importorskip("numpy")
 
@@ -223,7 +222,7 @@ class TestGetSharedArray:
         wrapped = {"name": "test", "shape": (3,), "dtype": "int64"}
 
         with pytest.raises(ValueError):
-            with get_shared_array(wrapped) as recovered:
+            with get_shared_array(wrapped):
                 raise ValueError("Test error")
 
         # close should still be called

@@ -143,8 +143,8 @@ class CommandGenerator:
                 List of commands to add required channels
         """
         if not self.settingsManager.usePixi:
-            if len(channels)>0:
-                return [f'{self.settingsManager.condaBinConfig} config --add channels ' + " ".join(channels)]
+            if len(channels) > 0:
+                return [f"{self.settingsManager.condaBinConfig} config --add channels " + " ".join(channels)]
             else:
                 return []
         channels += set([dep.split("::")[0].replace('"', "") for dep in condaDependencies if "::" in dep])

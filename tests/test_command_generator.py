@@ -57,7 +57,9 @@ def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
     # Channels are sorted alphabetically and unique
     expected_channels = "conda-forge", "nvidia", "bioconda"
     expected_command = rf'pixi project channel add --manifest-path ".*" --no-progress --prepend'
-    commands = command_generator_pixi.getAddChannelsCommands(environment, ["bioconda"], dependencies, activateConda=True)
+    commands = command_generator_pixi.getAddChannelsCommands(
+        environment, ["bioconda"], dependencies, activateConda=True
+    )
     assert re.search(expected_command, commands[-1])
     assert all(ec in commands[-1] for ec in expected_channels)
 
@@ -68,7 +70,9 @@ def test_mixed_dependencies_with_and_without_channels_micromamba(command_generat
     dependencies = ["conda-forge::requests", "python", "nvidia::cuda-toolkit", "conda-forge::scipy"]
     # Only bioconda will be added since the others are handled by conda for each package
     expected_channels = "bioconda"
-    expected_command = rf'micromamba --rc-file ~/.mambarc config --add channels'
-    commands = command_generator_micromamba.getAddChannelsCommands(environment, ["bioconda"], dependencies, activateConda=True)
+    expected_command = rf"micromamba --rc-file ~/.mambarc config --add channels"
+    commands = command_generator_micromamba.getAddChannelsCommands(
+        environment, ["bioconda"], dependencies, activateConda=True
+    )
     assert re.search(expected_command, commands[-1])
     assert all(ec in commands[-1] for ec in expected_channels)

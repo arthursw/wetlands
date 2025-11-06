@@ -1,64 +1,71 @@
 from pathlib import Path
 import subprocess
 import argparse
-from typing import Tuple
 import json5
 import psutil
 
-def process_match(process_args_list: list[str], name:str | None=None):
+
+def process_match(process_args_list: list[str], name: str | None = None):
     # Ignore non python processes
-    if process_args_list[0] != "python": return False
+    if process_args_list[0] != "python":
+        return False
     # --wetlandsInstancePath must be given
-    if '--wetlandsInstancePath' not in process_args_list: return False
+    if "--wetlandsInstancePath" not in process_args_list:
+        return False
     # For all processes: find wetlands ones in debug mode, and matching with the name
     for i, item in enumerate(process_args_list):
-        if 'wetlands' in item and 'module_executor.py' in item:
+        if "wetlands" in item and "module_executor.py" in item:
             if i + 1 < len(process_args_list):
                 # If the process environment name is not the one we are looking for: return None
-                if name is None or name == process_args_list[i+1]:
+                if name is None or name == process_args_list[i + 1]:
                     return True
     return False
 
-def get_matching_processes(name:str | None=None):
+
+def get_matching_processes(name: str | None = None):
     processes = []
     for process in psutil.process_iter():
         try:
             process_args_list = process.cmdline()
             if process_match(process_args_list, name):
                 processes.append(dict(process=process, args=process_args_list, name=name))
-        except:
+        except Exception:
             pass
 
     return processes
 
+
 def get_wetlands_instance_paths(processes: list[dict]):
-    return  [p["args"][p["args"].index('--wetlandsInstancePath') + 1] for p in processes]
+    return [p["args"][p["args"].index("--wetlandsInstancePath") + 1] for p in processes]
+
 
 def setup_and_launch_vscode(args):
-    launch_json_path = args.sources / '.vscode' / "launch.json"
+    launch_json_path = args.sources / ".vscode" / "launch.json"
     launch_json_path.parent.mkdir(exist_ok=True, parents=True)
 
     # Check if the environment can be found in the running processes
     processes = get_matching_processes(args.name)
     wetlands_instance_paths = get_wetlands_instance_paths(processes)
-    
+
     wetlands_instance_path = args.wetlandsInstancePath.resolve()
     # If a single process matches the given environment: use it for wetlandsInstancePath
-    if len(wetlands_instance_paths)==1:
+    if len(wetlands_instance_paths) == 1:
         wetlands_instance_path = Path(wetlands_instance_paths[0])
-        print(f"Found a single process matching with environment {args.name} with wetlandsInstancePath \"{wetlands_instance_path}\".")
+        print(
+            f'Found a single process matching with environment {args.name} with wetlandsInstancePath "{wetlands_instance_path}".'
+        )
         if args.wetlandsInstancePath.resolve() != wetlands_instance_path:
             print("Ignoring {args.wetlandsInstancePath}, using {wetlands_instance_path} instead.")
-    
+
     # Read the debug port for the given environment
-    debug_ports_path = wetlands_instance_path / 'debug_ports.json'
+    debug_ports_path = wetlands_instance_path / "debug_ports.json"
     if not debug_ports_path.exists():
         print(f"The file {debug_ports_path} does not exist.")
         return
 
-    with open(debug_ports_path, 'r') as f:
+    with open(debug_ports_path, "r") as f:
         debug_ports = json5.load(f)
-    
+
     port = None
     moduleExecutorPath = None
 
@@ -67,7 +74,7 @@ def setup_and_launch_vscode(args):
             port = detail["debugPort"]
             moduleExecutorPath = Path(detail["moduleExecutorPath"])
             break
-    
+
     if port is None or moduleExecutorPath is None:
         print(f"Error, debug port not found in {debug_ports_path} for environment {args.name}.")
         return
@@ -79,21 +86,10 @@ def setup_and_launch_vscode(args):
         "type": "debugpy",
         "request": "attach",
         "justMyCode": args.justMyCode,
-        "connect": {
-            "host": "localhost",
-            "port": port
-        },
-        "pathMappings": [
-            {
-                "localRoot": str(moduleExecutorPath.parent),
-                "remoteRoot": str(moduleExecutorPath.parent)
-            }
-        ]
+        "connect": {"host": "localhost", "port": port},
+        "pathMappings": [{"localRoot": str(moduleExecutorPath.parent), "remoteRoot": str(moduleExecutorPath.parent)}],
     }
-    launch_configs = {
-        "version": "0.2.0",
-        "configurations": [ new_config ]
-    }
+    launch_configs = {"version": "0.2.0", "configurations": [new_config]}
 
     # If the vscode launch.json exists: update it with the new config
     if launch_json_path.exists():
@@ -101,7 +97,9 @@ def setup_and_launch_vscode(args):
             try:
                 existing_launch_configs = json5.load(f)
             except Exception as e:
-                e.add_note(f"The launch config file {launch_json_path} cannot be read. Try deleting or fixing it before debugging.")
+                e.add_note(
+                    f"The launch config file {launch_json_path} cannot be read. Try deleting or fixing it before debugging."
+                )
                 raise e
             # Find the config "Python Debugger: Remote Attach Wetlands" and replace it
             # If the config does not exist: append it to the configs
@@ -123,7 +121,7 @@ def setup_and_launch_vscode(args):
 
     # Open VS Code in new window
     subprocess.run(["code", "--new-window", str(args.sources), str(moduleExecutorPath)])
-    
+
     # # Wait for VS Code to start
     # time.sleep(1)
 
@@ -137,46 +135,48 @@ def setup_and_launch_vscode(args):
     # '''
     # subprocess.run(["osascript", "-e", apple_script])
 
+
 def list_environments(args):
     processes = get_matching_processes()
     process_strings = []
     for process in processes:
         pa = " ".join(process["args"])
-        process_strings.append(f"{pa} | {process["process"].pid} | {process["process"].ppid()}")
-    
+        process_strings.append(f"{pa} | {process['process'].pid} | {process['process'].ppid()}")
+
     if len(processes) == 0:
         print("No running wetlands environment process found.")
     else:
-        print(f'Running wetlands environments (for all wetlands instance):\n')
-        print('Command line | Process ID | Parent process ID')
-        print('---')
+        print(f"Running wetlands environments (for all wetlands instance):\n")
+        print("Command line | Process ID | Parent process ID")
+        print("---")
         for ps in process_strings:
             print(ps)
-    
-    debug_ports_path = args.wetlandsInstancePath.resolve() / 'debug_ports.json'
+
+    debug_ports_path = args.wetlandsInstancePath.resolve() / "debug_ports.json"
     if not debug_ports_path.exists():
         print(f"The file {debug_ports_path} does not exist.")
         return
-    
-    with open(debug_ports_path, 'r') as f:
+
+    with open(debug_ports_path, "r") as f:
         debug_ports = json5.load(f)
     if len(debug_ports) == 0:
         print(f"No environments for instance {args.wetlandsInstancePath.resolve()} ({debug_ports_path} is empty).")
         return
-    print(f'\n\nEnvironments of the wetlands instance {args.wetlandsInstancePath.resolve()}:\n')
-    print('Environment | Debug Port | Path')
-    print('---')
+    print(f"\n\nEnvironments of the wetlands instance {args.wetlandsInstancePath.resolve()}:\n")
+    print("Environment | Debug Port | Path")
+    print("---")
     new_debug_ports = {}
     for environment, detail in debug_ports.items():
         # Only keep environments matching with the running processes
         if process_match(processes, environment):
-            print(environment, '|', detail["debugPort"], '|', detail["moduleExecutorPath"])
+            print(environment, "|", detail["debugPort"], "|", detail["moduleExecutorPath"])
             new_debug_ports[environment] = detail
     # Update the debug_ports.json to only keep running environments
-    with open(debug_ports_path, 'w') as f:
+    with open(debug_ports_path, "w") as f:
         json5.dump(new_debug_ports, f, indent=4)
 
     return
+
 
 def kill_environment(args):
     processes = get_matching_processes(args.name)
@@ -190,9 +190,11 @@ def kill_environment(args):
                 process = processes[i]["process"]
                 break
     if process is None:
-        print(f"No wetlands process with environment name {args.name} for instance {args.wetlandsInstancePath.resolve()} found.")
+        print(
+            f"No wetlands process with environment name {args.name} for instance {args.wetlandsInstancePath.resolve()} found."
+        )
         return
-    
+
     parent = psutil.Process(process.pid)
     for child in parent.children(recursive=True):  # Get all child processes
         if child.is_running():
@@ -201,22 +203,42 @@ def kill_environment(args):
         parent.kill()
     return
 
+
 def main():
-    main_parser = argparse.ArgumentParser("wetlands", description="List and debug Wetlands environments.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    main_parser.add_argument("-wip", "--wetlandsInstancePath", help="The Wetlands instance folder path. Required only when multiple wetlands instances are running and two environments have the same name.", default=Path("pixi/wetlands"), type=Path)
+    main_parser = argparse.ArgumentParser(
+        "wetlands",
+        description="List and debug Wetlands environments.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    main_parser.add_argument(
+        "-wip",
+        "--wetlandsInstancePath",
+        help="The Wetlands instance folder path. Required only when multiple wetlands instances are running and two environments have the same name.",
+        default=Path("pixi/wetlands"),
+        type=Path,
+    )
     subparsers = main_parser.add_subparsers()
-    debug_parser = subparsers.add_parser('debug', help="Debug Wetlands environments: opens VS Code at the given path to debug the environment at the given port")
-    debug_parser.add_argument("-s","--sources", help="Path of the sources to debug", type=Path, required=True)
+    debug_parser = subparsers.add_parser(
+        "debug",
+        help="Debug Wetlands environments: opens VS Code at the given path to debug the environment at the given port",
+    )
+    debug_parser.add_argument("-s", "--sources", help="Path of the sources to debug", type=Path, required=True)
     debug_parser.add_argument("-n", "--name", help="Name of the environment to debug.", type=str, required=True)
-    debug_parser.add_argument("-jmc", "--justMyCode", help="Only debug the given sources files, not used libraries. Sets the justMyCode property to true in the VS Code launch.json configuration.", action="store_true")
+    debug_parser.add_argument(
+        "-jmc",
+        "--justMyCode",
+        help="Only debug the given sources files, not used libraries. Sets the justMyCode property to true in the VS Code launch.json configuration.",
+        action="store_true",
+    )
     debug_parser.set_defaults(func=setup_and_launch_vscode)
-    list_parser = subparsers.add_parser('list', help="List the running Wetlands environments and their debug ports.")
+    list_parser = subparsers.add_parser("list", help="List the running Wetlands environments and their debug ports.")
     list_parser.set_defaults(func=list_environments)
-    kill_parser = subparsers.add_parser('kill', help="Kill a running Wetlands environment.")
+    kill_parser = subparsers.add_parser("kill", help="Kill a running Wetlands environment.")
     kill_parser.add_argument("-n", "--name", help="Name of the environment to kill.", type=str, required=True)
     kill_parser.set_defaults(func=kill_environment)
     args = main_parser.parse_args()
     return args.func(args)
+
 
 if __name__ == "__main__":
     main()

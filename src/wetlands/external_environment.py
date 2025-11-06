@@ -17,13 +17,17 @@ from wetlands._internal.command_executor import CommandExecutor
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
 
+
 def synchronized(method):
     """Decorator to wrap a method call with self._lock."""
+
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         with self._lock:
             return method(self, *args, **kwargs)
+
     return wrapper
+
 
 class ExternalEnvironment(Environment):
     port: int | None = None
@@ -65,13 +69,15 @@ class ExternalEnvironment(Environment):
 
         if self.launched():
             return
-            
+
         moduleExecutorFile = "module_executor.py"
         moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / moduleExecutorFile
 
-        debugArgs = f' --debugPort 0' if self.environmentManager.debug else ''
-        commands = [f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}']
-        
+        debugArgs = f" --debugPort 0" if self.environmentManager.debug else ""
+        commands = [
+            f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}'
+        ]
+
         self.process = self.executeCommands(commands, additionalActivateCommands)
 
         if self.process.stdout is not None:
@@ -98,7 +104,7 @@ class ExternalEnvironment(Environment):
         self.connection = Client(("localhost", self.port))
 
         if logOutputInThread:
-            self._logThread = threading.Thread(target=self.logOutput)
+            self._logThread = threading.Thread(target=self.logOutput, daemon=True)
             self._logThread.start()
 
     def _sendAndWait(self, payload: dict) -> Any:
@@ -160,7 +166,7 @@ class ExternalEnvironment(Environment):
             kwargs=kwargs,
         )
         return self._sendAndWait(payload)
-    
+
     @synchronized
     def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
         """
@@ -182,7 +188,7 @@ class ExternalEnvironment(Environment):
             run_name=run_name,
         )
         return self._sendAndWait(payload)
-    
+
     @synchronized
     def launched(self) -> bool:
         """Return true if the environment server process is launched and the connection is open."""
@@ -205,12 +211,12 @@ class ExternalEnvironment(Environment):
                 if e.args[0] == "handle is closed":
                     pass
             self.connection.close()
-            
-            if self._logThread:
-                self._logThread.join(timeout=2)
-    
+
         if self.process and self.process.stdout:
             self.process.stdout.close()
+
+        if self._logThread:
+            self._logThread.join(timeout=2)
 
         CommandExecutor.killProcess(self.process)
 

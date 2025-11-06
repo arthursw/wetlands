@@ -71,7 +71,11 @@ class Environment:
         return
 
     def executeCommands(
-        self, commands: Commands, additionalActivateCommands: Commands = {}, popenKwargs: dict[str, Any] = {}, wait: bool = False
+        self,
+        commands: Commands,
+        additionalActivateCommands: Commands = {},
+        popenKwargs: dict[str, Any] = {},
+        wait: bool = False,
     ) -> subprocess.Popen:
         """Executes the given commands in this environment.
 
@@ -84,7 +88,9 @@ class Environment:
         Returns:
                 The launched process.
         """
-        return self.environmentManager.executeCommands(self.name, commands, additionalActivateCommands, popenKwargs, wait=wait)
+        return self.environmentManager.executeCommands(
+            self.name, commands, additionalActivateCommands, popenKwargs, wait=wait
+        )
 
     @abstractmethod
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:

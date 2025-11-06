@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import threading
 import pytest
 
@@ -47,7 +47,7 @@ class TestExecuteFunction:
             "modulePath": "/path/to/module.py",
             "function": "test_func",
             "args": [1, 2],
-            "kwargs": {"key": "value"}
+            "kwargs": {"key": "value"},
         }
 
         with patch("sys.path"):
@@ -92,34 +92,21 @@ class TestRunScript:
     @patch("wetlands._internal.module_executor.runpy.run_path")
     def test_run_script_success(self, mock_run_path):
         """Test running a script with runpy"""
-        message = {
-            "scriptPath": "/path/to/script.py",
-            "args": ["arg1", "arg2"],
-            "run_name": "__main__"
-        }
+        message = {"scriptPath": "/path/to/script.py", "args": ["arg1", "arg2"], "run_name": "__main__"}
 
         result = module_executor.runScript(message)
 
         assert result is None
-        mock_run_path.assert_called_once_with(
-            "/path/to/script.py",
-            run_name="__main__"
-        )
+        mock_run_path.assert_called_once_with("/path/to/script.py", run_name="__main__")
 
     @patch("wetlands._internal.module_executor.runpy.run_path")
     def test_run_script_default_run_name(self, mock_run_path):
         """Test running script with default run_name"""
-        message = {
-            "scriptPath": "/path/to/script.py",
-            "args": []
-        }
+        message = {"scriptPath": "/path/to/script.py", "args": []}
 
         module_executor.runScript(message)
 
-        mock_run_path.assert_called_once_with(
-            "/path/to/script.py",
-            run_name="__main__"
-        )
+        mock_run_path.assert_called_once_with("/path/to/script.py", run_name="__main__")
 
 
 class TestExecutionWorker:
@@ -192,10 +179,10 @@ class TestLaunchListener:
         """Test listener handles execute action"""
         with (
             patch("wetlands._internal.module_executor.Listener") as MockListener,
-            patch("wetlands._internal.module_executor.getMessage", side_effect=[
-                {"action": "execute", "modulePath": "/path/to/module.py"},
-                {"action": "exit"}
-            ]),
+            patch(
+                "wetlands._internal.module_executor.getMessage",
+                side_effect=[{"action": "execute", "modulePath": "/path/to/module.py"}, {"action": "exit"}],
+            ),
             patch("wetlands._internal.module_executor.executionWorker"),
         ):
             mock_listener = MockListener.return_value.__enter__.return_value

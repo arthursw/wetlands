@@ -7,6 +7,7 @@ from wetlands._internal.install import (
     downloadAndVerify,
 )
 
+
 class TestDownloadFile:
     @patch("urllib.request.urlopen")
     @patch("urllib.request.install_opener")
@@ -39,7 +40,9 @@ class TestDownloadFile:
     @patch("urllib.request.urlopen")
     @patch("urllib.request.install_opener")
     @patch("urllib.request.build_opener")
-    def test_download_file_creates_parent_directory(self, mock_build_opener, mock_install_opener, mock_urlopen, tmp_path):
+    def test_download_file_creates_parent_directory(
+        self, mock_build_opener, mock_install_opener, mock_urlopen, tmp_path
+    ):
         """Test that parent directory is created"""
         dest_file = tmp_path / "subdir1" / "subdir2" / "file.bin"
         mock_response = MagicMock()
@@ -51,6 +54,7 @@ class TestDownloadFile:
             with patch("shutil.copyfileobj"):
                 downloadFile("http://example.com/file.bin", dest_file)
                 assert dest_file.parent.exists()
+
 
 class TestDownloadAndVerify:
     @patch("wetlands._internal.install.downloadFile")

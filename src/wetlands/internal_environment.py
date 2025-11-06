@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from wetlands._internal.command_generator import Commands
 from wetlands.environment import Environment
 
 if TYPE_CHECKING:

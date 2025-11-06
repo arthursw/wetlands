@@ -129,7 +129,7 @@ class DependencyManager:
                 environment, activateConda=False
             )
             installDepsCommands += self.commandGenerator.getAddChannelsCommands(
-                environment, dependencies.get('channels', []), condaDependencies, activateConda=False
+                environment, dependencies.get("channels", []), condaDependencies, activateConda=False
             )
 
         proxyString = self.settingsManager.getProxyString()

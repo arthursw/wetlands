@@ -97,14 +97,14 @@ class ConfigParser:
 
         Args:
             pixi_path: Path to pixi.toml file
-            environmentName: Name of environment to extract (required)
+            environmentName: Name of environment to extract (optional - falls back to default)
 
         Returns:
             Dependencies dict
 
         Raises:
             FileNotFoundError: If file doesn't exist
-            ValueError: If environmentName not provided or environment not found
+            ValueError: If no valid environment found
             Exception: If TOML parsing fails
         """
         pixi_path = Path(pixi_path)
@@ -112,22 +112,27 @@ class ConfigParser:
         if not pixi_path.exists():
             raise FileNotFoundError(f"pixi.toml not found: {pixi_path}")
 
-        if not environmentName:
-            raise ValueError("environmentName is required for pixi.toml files")
-
         with open(pixi_path, "rb") as f:
             config = tomllib.load(f)
 
         # Get environment configuration
         environments = config.get("tool", {}).get("pixi", {}).get("environments", {})
-        if environmentName not in environments:
-            available = list(environments.keys())
-            raise ValueError(
-                f"Environment '{environmentName}' not found in pixi.toml. "
-                f"Available environments: {available}"
-            )
 
-        env_config = environments[environmentName]
+        # Determine which environment to use
+        env_to_use = environmentName
+        if env_to_use and env_to_use not in environments:
+            # Fall back to default if requested environment doesn't exist
+            env_to_use = "default"
+
+        if not env_to_use:
+            # No environmentName provided, use default
+            env_to_use = "default"
+
+        if env_to_use not in environments:
+            available = list(environments.keys())
+            raise ValueError(f"Environment '{env_to_use}' not found in pixi.toml. Available environments: {available}")
+
+        env_config = environments[env_to_use]
         features = env_config.get("features", [])
 
         # Start with base dependencies
@@ -199,17 +204,27 @@ class ConfigParser:
 
         # If pixi config exists, use it (like pixi.toml)
         if pixi_config:
-            if environmentName:
-                # Use pixi environment
+            if environmentName or not optionalDependencies:
+                # Use pixi environment if environmentName provided, or if no optionalDependencies
                 environments = pixi_config.get("environments", {})
-                if environmentName not in environments:
+
+                # Determine which environment to use
+                env_to_use = environmentName
+                if env_to_use and env_to_use not in environments:
+                    # Fall back to default if requested environment doesn't exist
+                    env_to_use = "default"
+
+                if not env_to_use:
+                    # No environmentName provided, use default
+                    env_to_use = "default"
+
+                if env_to_use not in environments:
                     available = list(environments.keys())
                     raise ValueError(
-                        f"Environment '{environmentName}' not found in pyproject.toml. "
-                        f"Available environments: {available}"
+                        f"Environment '{env_to_use}' not found in pyproject.toml. Available environments: {available}"
                     )
 
-                env_config = environments[environmentName]
+                env_config = environments[env_to_use]
                 features = env_config.get("features", [])
 
                 # Extract python version
@@ -251,8 +266,7 @@ class ConfigParser:
                     if feature_name not in features_config:
                         available = list(features_config.keys())
                         raise ValueError(
-                            f"Feature '{feature_name}' not found in pyproject.toml. "
-                            f"Available features: {available}"
+                            f"Feature '{feature_name}' not found in pyproject.toml. Available features: {available}"
                         )
 
                     feature = features_config[feature_name]
@@ -269,8 +283,7 @@ class ConfigParser:
                     dependencies["pip"] = pip_deps
             else:
                 raise ValueError(
-                    "For pyproject.toml with pixi config, provide either "
-                    "environmentName or optionalDependencies"
+                    "For pyproject.toml with pixi config, provide either environmentName or optionalDependencies"
                 )
         else:
             # Standard PEP 621 pyproject.toml (no pixi config)
@@ -290,8 +303,7 @@ class ConfigParser:
                     if group_name not in optional_deps:
                         available = list(optional_deps.keys())
                         raise ValueError(
-                            f"Optional dependency group '{group_name}' not found. "
-                            f"Available groups: {available}"
+                            f"Optional dependency group '{group_name}' not found. Available groups: {available}"
                         )
 
                     pip_deps.extend(optional_deps[group_name])

@@ -10,7 +10,12 @@
 
 **Wetlands** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
 
+For example, if your application needs to use both [Stardist](https://github.com/stardist/stardist) and [Cellpose](https://www.cellpose.org/), installing them in the same environment may not work due to conflicting dependencies. With Wetlands, you can create a dedicated environment for each library and run them both as needed from your main script.
+
 The name ***Wetlands*** comes from the tropical *environments* where anacondas thrive.
+
+[Appose Python](https://github.com/apposed/appose-python) is a great alternative to Wetlands. It even provides the ability to run Java environments (see [Appose Java](https://github.com/apposed/appose-java)) and share memory between the Python world and the Java world.
+There are other minor differences between the two libraries. For example, Wetlands provide a tool to debug external environments.
 
 ---
 

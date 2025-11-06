@@ -5,7 +5,6 @@ from importlib import metadata
 from pathlib import Path
 import subprocess
 import sys
-from send2trash import send2trash
 from typing import Any, Literal, cast, Union
 
 from wetlands._internal.install import installMicromamba, installPixi
@@ -35,7 +34,6 @@ class EnvironmentManager:
     mainEnvironment: InternalEnvironment
     wetlandsInstancePath: Path
     debug: bool
-    environments: dict[str, Environment] = {}
 
     def __init__(
         self,
@@ -43,8 +41,8 @@ class EnvironmentManager:
         usePixi=True,
         mainCondaEnvironmentPath: Path | None = None,
         acceptAllCondaPaths=False,
-        wetlandsInstancePath:Path | None = None,
-        debug: bool = False
+        wetlandsInstancePath: Path | None = None,
+        debug: bool = False,
     ) -> None:
         """Initializes the EnvironmentManager with a micromamba path.
 
@@ -56,6 +54,7 @@ class EnvironmentManager:
                 wetlandsInstancePath: Path to the folder which will contain the state of this wetlands instance (environment process debug ports, stored in debug_ports.json). Default is condaPath / 'wetlands'.
                 debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlandsInstancePath / debug_ports.json
         """
+        self.environments: dict[str, Environment] = {}
         condaPath = Path(condaPath)
         if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
             raise Exception(
@@ -70,7 +69,7 @@ class EnvironmentManager:
         self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath, usePixi)
         if wetlandsInstancePath is None:
-            self.wetlandsInstancePath = self.settingsManager.condaPath / 'wetlands'
+            self.wetlandsInstancePath = self.settingsManager.condaPath / "wetlands"
         else:
             self.wetlandsInstancePath = cast(Path, wetlandsInstancePath).resolve()
         self.debug = debug
@@ -230,23 +229,25 @@ class EnvironmentManager:
                 condaMeta = Path(self.settingsManager.condaPath) / "envs" / environment / "conda-meta"
             return condaMeta.is_dir()
 
-    def _addDebugpyInDependencies(self, dependencies: Dependencies)-> None:
+    def _addDebugpyInDependencies(self, dependencies: Dependencies) -> None:
         """Add debugpy in the dependencies to be able to debug in debug mode. Does nothing when not in debug mode.
-        
+
         Args:
                 dependencies: Dependencies to install.
         """
-        if not self.debug: return
+        if not self.debug:
+            return
         # Check that debugpy is not already in dependencies
-        for packageManager in ["pip", "conda"]:    
+        for packageManager in ["pip", "conda"]:
             if packageManager in dependencies:
                 for dep in dependencies[packageManager]:
                     import re
+
                     pattern = r"debugpy(?==|$)"
                     if isinstance(dep, str):
                         if bool(re.search(pattern, dep)):
                             return
-                    elif dep['name'] == 'debugpy':
+                    elif dep["name"] == "debugpy":
                         return
         # Add debugpy without version because we need one compatible with the required python version
         # Use conda (conda forge) since there are more versions available (especially for python 3.9 on macOS arm64)
@@ -326,7 +327,7 @@ class EnvironmentManager:
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
-        if '/' in name or '\\' in name:
+        if "/" in name or "\\" in name:
             raise Exception("Environments name cannot contain any forward nor backward slash.")
         if self.environmentExists(name):
             if name not in self.environments:
@@ -358,9 +359,7 @@ class EnvironmentManager:
                 f'{self.settingsManager.condaBin} add --no-progress --manifest-path "{manifestPath}" {pythonRequirement}'
             ]
         else:
-            createEnvCommands += [
-                f"{self.settingsManager.condaBinConfig} create -n {name}{pythonRequirement} -y"
-            ]
+            createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {name}{pythonRequirement} -y"]
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(name, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         self.commandExecutor.executeCommandsAndGetOutput(createEnvCommands)
@@ -387,14 +386,12 @@ class EnvironmentManager:
         Returns:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
-        if '/' in name or '\\' in name:
+        if "/" in name or "\\" in name:
             raise Exception("Environments name cannot contain any forward nor backward slash.")
 
         # Parse config file
         dependencies = self._parseDependenciesFromConfig(
-            configPath,
-            environmentName=None,
-            optionalDependencies=optionalDependencies
+            configPath, environmentName=name, optionalDependencies=optionalDependencies
         )
 
         # Use create() with parsed dependencies
@@ -404,16 +401,12 @@ class EnvironmentManager:
         self,
         name: str,
         environmentPath: Path,
-        optionalDependencies: list[str] | None = None,
-        additionalInstallCommands: Commands = {},
     ) -> Environment:
         """Load an existing Conda environment from disk.
 
         Args:
                 name: Name for the environment instance.
-                environmentPath: Path to an existing Conda environment (or the folder containing the pixi.toml/pyproject.toml when using Pixi).
-                optionalDependencies: (Unused, for API consistency)
-                additionalInstallCommands: (Unused, for API consistency)
+                environmentPath: Path to an existing Conda environment, or the folder containing the pixi.toml/pyproject.toml when using Pixi.
 
         Returns:
                 The loaded environment (ExternalEnvironment if using Pixi or micromamba with a path, InternalEnvironment otherwise).
@@ -421,13 +414,14 @@ class EnvironmentManager:
         Raises:
                 Exception: If the environment does not exist.
         """
-        if not self.environmentExists(environmentPath):
-            raise Exception(f"The environment {environmentPath.resolve()} was not found.")
+        environmentPath = environmentPath.resolve()
 
-        env_name = str(environmentPath)
-        if env_name not in self.environments:
-            self.environments[env_name] = ExternalEnvironment(env_name, self)
-        return self.environments[env_name]
+        if not self.environmentExists(environmentPath):
+            raise Exception(f"The environment {environmentPath} was not found.")
+
+        if environmentPath not in self.environments:
+            self.environments[environmentPath] = ExternalEnvironment(environmentPath, self)
+        return self.environments[environmentPath]
 
     def install(
         self, environmentName: str | None, dependencies: Dependencies, additionalInstallCommands: Commands = {}
@@ -470,9 +464,11 @@ class EnvironmentManager:
             environmentName, additionalActivateCommands
         )
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
-        return self.commandExecutor.executeCommands(activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait)
+        return self.commandExecutor.executeCommands(
+            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait
+        )
 
-    def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path)-> None:
+    def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path) -> None:
         """
         Register the environment (save its debug port to `wetlandsInstancePath / debug_ports.json`) so that it can be debugged later.
 
@@ -482,21 +478,23 @@ class EnvironmentManager:
         """
         if environment.process is None:
             return
-        wetlands_debug_ports_path = self.wetlandsInstancePath / 'debug_ports.json'
+        wetlands_debug_ports_path = self.wetlandsInstancePath / "debug_ports.json"
         wetlands_debug_ports_path.parent.mkdir(exist_ok=True, parents=True)
         wetlands_debug_ports = {}
         try:
             if wetlands_debug_ports_path.exists():
-                with open(wetlands_debug_ports_path, 'r') as f:
+                with open(wetlands_debug_ports_path, "r") as f:
                     wetlands_debug_ports = json.load(f)
-            wetlands_debug_ports[environment.name] = dict(debugPort=debugPort, moduleExecutorPath=str(moduleExecutorPath))
-            with open(wetlands_debug_ports_path, 'w') as f:
+            wetlands_debug_ports[environment.name] = dict(
+                debugPort=debugPort, moduleExecutorPath=str(moduleExecutorPath)
+            )
+            with open(wetlands_debug_ports_path, "w") as f:
                 json.dump(wetlands_debug_ports, f)
         except Exception as e:
-            e.add_note(f'Error while updating the debug ports file {wetlands_debug_ports_path}.')
+            e.add_note(f"Error while updating the debug ports file {wetlands_debug_ports_path}.")
             raise e
         return
-    
+
     def _removeEnvironment(self, environment: Environment) -> None:
         """Remove an environment.
 
@@ -505,4 +503,3 @@ class EnvironmentManager:
         """
         if environment.name in self.environments:
             del self.environments[environment.name]
-

@@ -60,14 +60,14 @@ def test_dependency_installation(env_manager):
     env_name = "test_env_deps"
     logger.info(f"Testing dependency installation: {env_name}")
     env = cast(ExternalEnvironment, env_manager.create(env_name, forceExternal=True))
-    dependencies = Dependencies({"pip": ["munch==4.0.0"], "conda": ["bioimageit::noise2self==1.0"]})
+    dependencies = Dependencies({"pip": ["munch==4.0.0"], "conda": ["fastai::fastprogress==1.0.3"]})
 
     env.install(dependencies)
 
     # Verify that 'numpy' and 'noise2self' is installed
     installedPackages = env_manager.getInstalledPackages(env_name)
     assert any(
-        icp["name"] == "noise2self" and icp["version"].startswith("1.0") and icp["kind"] == "conda"
+        icp["name"] == "fastprogress" and icp["version"].startswith("1.0.3") and icp["kind"] == "conda"
         for icp in installedPackages
     )
     assert any(
@@ -292,8 +292,7 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     - Verifying the dependency is detected regardless of access method
     """
     import subprocess
-    import json
-    
+
     # Setup temporary conda root
     temp_root = tmp_path_factory.mktemp("micromamba_root")
     logger.info(f"Creating test directory {temp_root}")
@@ -305,14 +304,14 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
 
     # Get the conda root path
     conda_root = Path(env_manager.settingsManager.condaPath)
-    env_path = conda_root / "envs" / env_name
+
+    env_path = tmp_path_factory.mktemp("test_envs") / "test_env"
     conda_bin = env_manager.settingsManager.condaBin
 
     # Step 1: Create environment directly with micromamba via subprocess
     logger.info(f"Creating environment at {env_path} using subprocess")
     # Need to activate micromamba first
     import os
-    import shlex
 
     env_vars = os.environ.copy()
     env_vars["MAMBA_ROOT_PREFIX"] = str(conda_root)
@@ -322,7 +321,7 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     cd "{conda_root}"
     export MAMBA_ROOT_PREFIX="{conda_root}"
     eval "$({str(conda_bin)} shell hook -s posix)"
-    {str(conda_bin)} create -n {env_name} python=3.11 requests -y
+    {str(conda_bin)} create -p {env_path} python=3.11 requests -y
     """
 
     result = subprocess.run(shell_cmd, capture_output=True, text=True, shell=True, env=env_vars)
@@ -330,15 +329,8 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     assert env_path.exists(), f"Environment path not created: {env_path}"
     logger.info(f"Successfully created environment at {env_path}")
 
-    # Step 2: Verify environment is recognized by name
-    env_by_name = env_manager.create(env_name)
-    installed_by_name = env_manager.getInstalledPackages(env_name)
-    assert any(pkg["name"] == "requests" for pkg in installed_by_name), \
-        f"'requests' not found when accessing by name: {[p['name'] for p in installed_by_name]}"
-    logger.info(f"Verified 'requests' is installed when accessing by name")
-
     # Step 3: Access the same environment using Path object
-    env_by_path = env_manager.create(env_path)
+    env_by_path = env_manager.load(env_name, env_path)
     logger.info(f"Successfully accessed environment via Path: {env_path}")
 
     # Verify we got a valid environment back
@@ -346,16 +338,11 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
 
     # Step 4: Verify dependency is still detected when accessed by path
     installed_by_path = env_manager.getInstalledPackages(env_path)
-    assert any(pkg["name"] == "requests" for pkg in installed_by_path), \
+    assert any(pkg["name"] == "requests" for pkg in installed_by_path), (
         f"'requests' not found when accessing by path: {[p['name'] for p in installed_by_path]}"
+    )
     logger.info(f"Verified 'requests' is installed when accessing by path")
 
-    # Step 5: Verify package lists are consistent
-    assert len(installed_by_name) == len(installed_by_path), \
-        f"Package count mismatch: {len(installed_by_name)} vs {len(installed_by_path)}"
-    logger.info(f"Package counts match between name and path access")
-
-    env_by_name.exit()
     env_by_path.exit()
     logger.info(f"Test complete for {env_name}")
 
@@ -381,7 +368,7 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
 
     # Get paths
     pixi_bin = env_manager.settingsManager.condaBin
-    workspace_root = Path(env_manager.settingsManager.condaPath) / "workspaces"
+    workspace_root = tmp_path_factory.mktemp("external_env")
     workspace_path = workspace_root / env_name
     manifest_path = workspace_path / "pixi.toml"
 
@@ -405,15 +392,8 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     assert result.returncode == 0, f"Failed to add requests: {result.stderr}\nstdout: {result.stdout}"
     logger.info(f"Successfully added python and requests to pixi environment")
 
-    # Step 3: Verify environment is recognized by name
-    env_by_name = env_manager.create(env_name)
-    installed_by_name = env_manager.getInstalledPackages(env_name)
-    assert any(pkg["name"] == "requests" for pkg in installed_by_name), \
-        f"'requests' not found when accessing by name: {[p['name'] for p in installed_by_name]}"
-    logger.info(f"Verified 'requests' is installed when accessing by name")
-
     # Step 4: Access the environment using workspace Path
-    env_by_path = env_manager.create(workspace_path)
+    env_by_path = env_manager.load(env_name, workspace_path)
     logger.info(f"Successfully accessed pixi environment via workspace path")
 
     # Verify we got a valid environment back
@@ -421,12 +401,10 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
 
     # Step 5: Verify dependencies are consistent
     installed_by_path = env_manager.getInstalledPackages(workspace_path)
-    assert any(pkg["name"] == "requests" for pkg in installed_by_path), \
+    assert any(pkg["name"] == "requests" for pkg in installed_by_path), (
         f"'requests' not found when accessing via path: {[p['name'] for p in installed_by_path]}"
-    assert len(installed_by_name) == len(installed_by_path)
-    logger.info(f"Verified dependencies are consistent between name and path access")
+    )
 
-    env_by_name.exit()
     env_by_path.exit()
     logger.info(f"Test complete for {env_name}")
 
@@ -447,5 +425,5 @@ def test_nonexistent_environment_path_raises_error(env_manager):
 
     # Attempting to use a nonexistent path should raise an error
     with pytest.raises(Exception, match="was not found"):
-        env_manager.create(nonexistent_env_path)
+        env_manager.load("unexisting_env", nonexistent_env_path)
     logger.info("Verified error raised for nonexistent environment path")

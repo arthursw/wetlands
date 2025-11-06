@@ -627,7 +627,7 @@ class TestRegisterEnvironment:
         debug_ports_file = tmp_path / "wetlands" / "debug_ports.json"
         assert debug_ports_file.exists()
 
-        with open(debug_ports_file, 'r') as f:
+        with open(debug_ports_file, "r") as f:
             content = json.load(f)
 
         assert "test_env" in content
@@ -645,7 +645,7 @@ class TestRegisterEnvironment:
         debug_ports_file = debug_ports_dir / "debug_ports.json"
 
         existing_data = {"env1": {"debugPort": 1111, "moduleExecutorPath": "/path/to/exec1"}}
-        with open(debug_ports_file, 'w') as f:
+        with open(debug_ports_file, "w") as f:
             json.dump(existing_data, f)
 
         # Register new environment
@@ -656,7 +656,7 @@ class TestRegisterEnvironment:
         manager.registerEnvironment(env, 2222, Path("/path/to/exec2"))
 
         # Verify both envs are in file
-        with open(debug_ports_file, 'r') as f:
+        with open(debug_ports_file, "r") as f:
             content = json.load(f)
 
         assert len(content) == 2
@@ -674,7 +674,7 @@ class TestRegisterEnvironment:
 
         # Create file with old data
         old_data = {"test_env": {"debugPort": 9999, "moduleExecutorPath": "/old/path"}}
-        with open(debug_ports_file, 'w') as f:
+        with open(debug_ports_file, "w") as f:
             json.dump(old_data, f)
 
         # Register with new data
@@ -684,7 +684,7 @@ class TestRegisterEnvironment:
 
         manager.registerEnvironment(env, 5555, Path("/new/path"))
 
-        with open(debug_ports_file, 'r') as f:
+        with open(debug_ports_file, "r") as f:
             content = json.load(f)
 
         assert content["test_env"]["debugPort"] == 5555
@@ -787,13 +787,10 @@ class TestAddDebugpyInDependencies:
     def test_add_debugpy_in_debug_mode(self, environment_manager_fixture):
         """Test that debugpy is added when debug mode is enabled"""
         manager = EnvironmentManager(
-            condaPath=Path("/tmp/test_conda"),
-            usePixi=False,
-            debug=True,
-            acceptAllCondaPaths=True
+            condaPath=Path("/tmp/test_conda"), usePixi=False, debug=True, acceptAllCondaPaths=True
         )
 
-        with patch.object(manager, 'installConda'):
+        with patch.object(manager, "installConda"):
             dependencies: Dependencies = {"pip": ["numpy"]}
             manager._addDebugpyInDependencies(dependencies)
 
@@ -803,13 +800,10 @@ class TestAddDebugpyInDependencies:
     def test_add_debugpy_not_in_debug_mode(self, environment_manager_fixture):
         """Test that debugpy is not added when debug mode is disabled"""
         manager = EnvironmentManager(
-            condaPath=Path("/tmp/test_conda"),
-            usePixi=False,
-            debug=False,
-            acceptAllCondaPaths=True
+            condaPath=Path("/tmp/test_conda"), usePixi=False, debug=False, acceptAllCondaPaths=True
         )
 
-        with patch.object(manager, 'installConda'):
+        with patch.object(manager, "installConda"):
             dependencies: Dependencies = {"pip": ["numpy"]}
             manager._addDebugpyInDependencies(dependencies)
 
@@ -820,13 +814,10 @@ class TestAddDebugpyInDependencies:
     def test_add_debugpy_already_present(self, environment_manager_fixture):
         """Test that debugpy is not added twice if already present"""
         manager = EnvironmentManager(
-            condaPath=Path("/tmp/test_conda"),
-            usePixi=False,
-            debug=True,
-            acceptAllCondaPaths=True
+            condaPath=Path("/tmp/test_conda"), usePixi=False, debug=True, acceptAllCondaPaths=True
         )
 
-        with patch.object(manager, 'installConda'):
+        with patch.object(manager, "installConda"):
             dependencies: Dependencies = {"conda": ["debugpy==1.0.0"]}
             manager._addDebugpyInDependencies(dependencies)
 
@@ -924,6 +915,7 @@ class TestExistingEnvironmentAccess:
 
 
 # ---- delete Tests ----
+
 
 class TestDeleteEnvironment:
     """Tests for deleting environments."""
@@ -1030,6 +1022,7 @@ class TestDeleteEnvironment:
 
 
 # ---- update Tests ----
+
 
 class TestUpdateEnvironment:
     """Tests for updating environments."""

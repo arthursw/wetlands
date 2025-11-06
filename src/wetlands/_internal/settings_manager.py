@@ -1,4 +1,3 @@
-from os import system
 from pathlib import Path
 import platform
 
@@ -93,8 +92,12 @@ class SettingsManager:
             return self.condaPath / "envs" / environment if isinstance(environment, str) else environment
 
     def getEnvironmentPythonPath(self, environment: str | Path) -> Path:
-        return self.getEnvironmentPath(environment) / "bin" / ("python" if platform.system() == "Windows" else "python.exe")
-    
+        return (
+            self.getEnvironmentPath(environment)
+            / "bin"
+            / ("python" if platform.system() == "Windows" else "python.exe")
+        )
+
     def getManifestPath(self, environment: str | Path) -> Path:
         """Returns the manifest path (pixi.toml) of the workspace of the environment"""
         return self.getWorkspacePath(environment) / "pixi.toml"

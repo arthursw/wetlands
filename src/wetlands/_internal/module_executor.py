@@ -23,7 +23,7 @@ from multiprocessing.connection import Listener, Connection
 # Configure logging to both file and console
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s',
+    format="%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s",
     handlers=[
         logging.FileHandler("environments.log", encoding="utf-8"),
         logging.StreamHandler(),
@@ -39,8 +39,16 @@ if __name__ == "__main__":
     )
     parser.add_argument("environment", help="The name of the execution environment.")
     parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
-    parser.add_argument("-dp", "--debugPort", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int)
-    parser.add_argument("-wip", "--wetlandsInstancePath", help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.", default=None, type=Path)
+    parser.add_argument(
+        "-dp", "--debugPort", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int
+    )
+    parser.add_argument(
+        "-wip",
+        "--wetlandsInstancePath",
+        help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.",
+        default=None,
+        type=Path,
+    )
     args = parser.parse_args()
     port = args.port
     logger = logging.getLogger(args.environment)
@@ -48,6 +56,7 @@ if __name__ == "__main__":
         logger.setLevel(logging.DEBUG)
         logger.debug(f"Starting {args.environment} with python {sys.version}")
         import debugpy
+
         _, debugPort = debugpy.listen(args.debugPort)
         print(f"Listening debug port {debugPort}")
 else:
@@ -68,11 +77,15 @@ def handleExecutionError(lock: threading.Lock, connection: Connection, e: Except
     for line in tbftb:
         logger.error(line)
     sys.stderr.flush()
-    sendMessage(lock, connection, dict(
-        action="error",
-        exception=str(e),
-        traceback=tbftb,
-    ))
+    sendMessage(
+        lock,
+        connection,
+        dict(
+            action="error",
+            exception=str(e),
+            traceback=tbftb,
+        ),
+    )
     logger.debug("Error sent")
 
 
@@ -121,11 +134,15 @@ def executionWorker(lock: threading.Lock, connection: Connection, message: dict)
         else:
             raise Exception(f"Unknown action: {action}")
 
-        sendMessage(lock, connection, dict(
-            action="execution finished",
-            message=f"{action} completed",
-            result=result,
-        ))
+        sendMessage(
+            lock,
+            connection,
+            dict(
+                action="execution finished",
+                message=f"{action} completed",
+                result=result,
+            ),
+        )
     except Exception as e:
         handleExecutionError(lock, connection, e)
 
