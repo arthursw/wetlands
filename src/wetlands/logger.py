@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 from collections.abc import Callable
 
-_logger = None
-_log_file_path = None
+_logger: logging.Logger | None = None
+_log_file_path: Path | None = None
 
 
 def _initializeLogger(log_file_path=None):
@@ -37,9 +37,10 @@ def _initializeLogger(log_file_path=None):
     _logger = logging.getLogger("wetlands")
 
 
-def getLogger():
+def getLogger() -> logging.Logger:
     if _logger is None:
         _initializeLogger()
+    assert _logger is not None
     return _logger
 
 
@@ -70,7 +71,7 @@ def setLogFilePath(log_file_path):
     _initializeLogger(log_file_path)
 
 
-logger = getLogger()
+logger: logging.Logger = getLogger()
 
 
 class CustomHandler(logging.Handler):
