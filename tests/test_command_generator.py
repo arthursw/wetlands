@@ -1,5 +1,6 @@
 import re
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 import pytest
 
 from wetlands._internal.command_generator import CommandGenerator
@@ -52,7 +53,9 @@ def test_get_commands_for_current_platform(mock_platform, command_generator_pixi
 
 def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
     """Test a mix of dependencies, some with channels and some without."""
-    environment = "base"
+    environment = MagicMock()
+    environment.name = "base"
+    environment.path = Path("/tmp/base")
     dependencies = ["conda-forge::requests", "python", "nvidia::cuda-toolkit", "conda-forge::scipy"]
     # Channels are sorted alphabetically and unique
     expected_channels = "conda-forge", "nvidia", "bioconda"
@@ -66,7 +69,9 @@ def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
 
 def test_mixed_dependencies_with_and_without_channels_micromamba(command_generator_micromamba):
     """Test a mix of dependencies, some with channels and some without."""
-    environment = "base"
+    environment = MagicMock()
+    environment.name = "base"
+    environment.path = Path("/tmp/base")
     dependencies = ["conda-forge::requests", "python", "nvidia::cuda-toolkit", "conda-forge::scipy"]
     # Only bioconda will be added since the others are handled by conda for each package
     expected_channels = "bioconda"

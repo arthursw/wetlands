@@ -1,9 +1,9 @@
 from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager
-# Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
-# otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
-environmentManager = EnvironmentManager("pixi/")
+# Wetlands will store logs and state in the wetlandsInstancePath (defaults to "wetlands/")
+# Pixi/Micromamba will be installed in wetlandsInstancePath/pixi by default
+environmentManager = EnvironmentManager()
 
 # Create and launch an isolated Conda environment named "numpy"
 env = environmentManager.create("numpy", {"pip": ["numpy==2.2.4"]})

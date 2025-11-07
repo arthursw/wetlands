@@ -24,13 +24,15 @@ def tool_available(tool_name: str) -> bool:
     return shutil.which(tool_name) is not None
 
 
+@pytest.mark.integration
 @pytest.fixture(scope="module", params=["micromamba_root/", "pixi_root/"])
 def env_manager(request, tmp_path_factory):
     # Setup temporary conda root
     temp_root = tmp_path_factory.mktemp(request.param)
+    wetlands_instance_path = temp_root / "wetlands"
     logger.info(f"Creating test directory {temp_root}")
     # Basic environment configuration
-    manager = EnvironmentManager(temp_root, usePixi="pixi" in request.param)
+    manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=temp_root)
     yield manager
 
     for env_name, env in manager.environments.copy().items():
@@ -41,6 +43,7 @@ def env_manager(request, tmp_path_factory):
     print(f"Removing {temp_root}")
 
 
+@pytest.mark.integration
 def test_environment_creation(env_manager):
     """Test that EnvironmentManager.create() correctly create an environment and installs dependencies."""
     env_name = "test_env_deps"
@@ -49,7 +52,7 @@ def test_environment_creation(env_manager):
     env = env_manager.create(env_name, dependencies)
 
     # Verify that 'requests' is installed
-    installedPackages = env_manager.getInstalledPackages(env_name)
+    installedPackages = env_manager.getInstalledPackages(env)
     assert any(icp["name"] == "requests" for icp in installedPackages)
 
     # Verify that recreating the same env returns it
@@ -61,6 +64,7 @@ def test_environment_creation(env_manager):
     other_env.exit()
 
 
+@pytest.mark.integration
 def test_dependency_installation(env_manager):
     """Test that EnvironmentManager.install() correctly installs dependencies (in existing env)."""
     env_name = "test_env_deps"
@@ -71,7 +75,7 @@ def test_dependency_installation(env_manager):
     env.install(dependencies)
 
     # Verify that 'numpy' and 'noise2self' is installed
-    installedPackages = env_manager.getInstalledPackages(env_name)
+    installedPackages = env_manager.getInstalledPackages(env)
     assert any(
         icp["name"] == "fastprogress" and icp["version"].startswith("1.0.3") and icp["kind"] == "conda"
         for icp in installedPackages
@@ -84,6 +88,7 @@ def test_dependency_installation(env_manager):
     env.exit()
 
 
+@pytest.mark.integration
 def test_internal_external_environment(env_manager):
     """Test that EnvironmentManager.create() correctly creates internal/external environments."""
 
@@ -106,6 +111,7 @@ def test_internal_external_environment(env_manager):
     env_external_forced.exit()
 
 
+@pytest.mark.integration
 def test_incompatible_dependencies(env_manager):
     """Test that IncompatibilityException is raised for incompatible dependencies."""
     env_name = "test_env_incompatible"
@@ -120,6 +126,7 @@ def test_incompatible_dependencies(env_manager):
         env_manager.create(env_name, incompatible_dependency)
 
 
+@pytest.mark.integration
 def test_invalid_python_version(env_manager):
     """Test that an exception is raised for invalid Python versions."""
     env_name = "test_env_invalid_python"
@@ -129,6 +136,7 @@ def test_invalid_python_version(env_manager):
     assert "Python version must be greater than 3.8" in str(excinfo.value)
 
 
+@pytest.mark.integration
 def test_mambarc_modification(env_manager, tmp_path):
     """Test that proxy settings are correctly written to the .mambarc file."""
     logger.info("Testing .mambarc modification")
@@ -156,6 +164,7 @@ def test_mambarc_modification(env_manager, tmp_path):
         assert "https: https://proxy.example.com" not in content
 
 
+@pytest.mark.integration
 def test_code_execution(env_manager, tmp_path):
     """Test that Environment.execute() correctly executes code within an environment."""
     env_name = "test_env_code_exec"
@@ -197,6 +206,7 @@ def prod(x=[], y=1):
     env.exit()
 
 
+@pytest.mark.integration
 def test_non_existent_function(env_manager, tmp_path):
     """Test that an exception is raised when executing a non-existent function."""
     env_name = "test_env_non_existent_function"
@@ -227,6 +237,7 @@ def double(x):
     env.exit()
 
 
+@pytest.mark.integration
 def test_non_existent_module(env_manager):
     """Test that an exception is raised when importing a non-existent module."""
     env_name = "test_env_non_existent_module"
@@ -242,6 +253,7 @@ def test_non_existent_module(env_manager):
     env.exit()
 
 
+@pytest.mark.integration
 def test_advanced_execution(env_manager, tmp_path):
     env = env_manager.create("advanced_test", Dependencies(conda=["numpy"]))
 
@@ -288,6 +300,7 @@ with Listener(("localhost", 0)) as listener:
     assert result["action"] == "exited"
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not tool_available("micromamba"), reason="micromamba not available")
 def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     """Test that users can reference existing environments using Path objects.
@@ -302,9 +315,10 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
 
     # Setup temporary conda root
     temp_root = tmp_path_factory.mktemp("micromamba_root")
+    wetlands_instance_path = temp_root / "wetlands"
     logger.info(f"Creating test directory {temp_root}")
     # Basic environment configuration
-    env_manager = EnvironmentManager(temp_root, usePixi=False)
+    env_manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=temp_root)
 
     env_name = "test_env_access_via_path"
     logger.info(f"Testing existing environment access via Path: {env_name}")
@@ -344,7 +358,7 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     assert isinstance(env_by_path, ExternalEnvironment)
 
     # Step 4: Verify dependency is still detected when accessed by path
-    installed_by_path = env_manager.getInstalledPackages(env_path)
+    installed_by_path = env_manager.getInstalledPackages(env_by_path)
     assert any(pkg["name"] == "requests" for pkg in installed_by_path), (
         f"'requests' not found when accessing by path: {[p['name'] for p in installed_by_path]}"
     )
@@ -354,6 +368,7 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     logger.info(f"Test complete for {env_name}")
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not tool_available("pixi"), reason="pixi not available")
 def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     """Test that users can reference existing pixi environments using workspace Path.
@@ -368,8 +383,9 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
 
     # Setup temporary pixi root
     temp_root = tmp_path_factory.mktemp("pixi_root")
+    wetlands_instance_path = temp_root / "wetlands"
     logger.info(f"Creating test directory {temp_root}")
-    env_manager = EnvironmentManager(temp_root, usePixi=True)
+    env_manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=temp_root)
 
     env_name = "test_pixi_access_via_path"
     logger.info(f"Testing pixi environment access via Path: {env_name}")
@@ -401,14 +417,14 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     logger.info(f"Successfully added python and requests to pixi environment")
 
     # Step 4: Access the environment using workspace Path
-    env_by_path = env_manager.load(env_name, workspace_path)
+    env_by_path = env_manager.load(env_name, manifest_path)
     logger.info(f"Successfully accessed pixi environment via workspace path")
 
     # Verify we got a valid environment back
     assert isinstance(env_by_path, ExternalEnvironment)
 
     # Step 5: Verify dependencies are consistent
-    installed_by_path = env_manager.getInstalledPackages(workspace_path)
+    installed_by_path = env_manager.getInstalledPackages(env_by_path)
     assert any(pkg["name"] == "requests" for pkg in installed_by_path), (
         f"'requests' not found when accessing via path: {[p['name'] for p in installed_by_path]}"
     )
@@ -417,6 +433,7 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     logger.info(f"Test complete for {env_name}")
 
 
+@pytest.mark.integration
 def test_nonexistent_environment_path_raises_error(env_manager):
     """Test that attempting to use a nonexistent Path as environment raises an error.
 

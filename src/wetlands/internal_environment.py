@@ -8,10 +8,9 @@ if TYPE_CHECKING:
 
 
 class InternalEnvironment(Environment):
-    def __init__(self, path: Path | None, environmentManager: "EnvironmentManager") -> None:
+    def __init__(self, name: str, path: Path | None, environmentManager: "EnvironmentManager") -> None:
         """Use absolute path as name for micromamba to consider the activation from a folder path, not from a name"""
-        name = str(path.resolve()) if isinstance(path, Path) else path
-        super().__init__(name, environmentManager)
+        super().__init__(name, path, environmentManager)
 
     def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
         """Executes a function in the given module

@@ -101,6 +101,7 @@ class TestRunScript:
         assert result is None
         # Normalize path for cross-platform comparison
         from pathlib import Path
+
         actual_path = mock_run_path.call_args[0][0]
         assert Path(actual_path).as_posix() == "/path/to/script.py"
         assert mock_run_path.call_args[1] == {"run_name": "__main__"}
@@ -114,6 +115,7 @@ class TestRunScript:
 
         # Normalize path for cross-platform comparison
         from pathlib import Path
+
         actual_path = mock_run_path.call_args[0][0]
         assert Path(actual_path).as_posix() == "/path/to/script.py"
         assert mock_run_path.call_args[1] == {"run_name": "__main__"}

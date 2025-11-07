@@ -15,17 +15,24 @@ segmentationPath = imagePath.parent / f"{imagePath.stem}_segmentation.png"
 
 #### 1. Initialize the Environment Manager
 
-We start by initializing the [EnvironmentManager][wetlands.environment_manager.EnvironmentManager]. We provide a path (`"pixi/"`, but it could be `"micromamba/"`) where Wetlands should look for an existing Pixi (or Micromamba) installation or where it should download and set up a new one if it's not found.
+We start by initializing the [EnvironmentManager][wetlands.environment_manager.EnvironmentManager]. We provide:
+- A `wetlandsInstancePath` where Wetlands stores logs and debug information (defaults to `"wetlands/"`).
+- Optionally, a `condaPath` where Wetlands should look for an existing Pixi (or Micromamba) installation or where it should download and set up a new one. If not provided, it defaults to `wetlandsInstancePath / "pixi"`.
 
 ```python
 from wetlands.environment_manager import EnvironmentManager
 
-environmentManager = EnvironmentManager("pixi/")
+environmentManager = EnvironmentManager()
+# Or with explicit paths:
+# environmentManager = EnvironmentManager(
+#     wetlandsInstancePath="wetlands_state",
+#     condaPath="path/to/pixi/"
+# )
 ```
 
 !!! note
-    
-    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument, useful if Wetlands is used in a conda environment (e.g. `environmentManager = EnvironmentManager("micromamba/", False, "/path/to/project/environment/")`). Wetlands will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Wetlands communication server.
+
+    EnvironmentManager also accepts a `mainCondaEnvironmentPath` argument, useful if Wetlands is used in a conda environment (e.g. `environmentManager = EnvironmentManager(mainCondaEnvironmentPath="/path/to/project/environment/")`). Wetlands will activate this main environment and check if the installed packages satisfy the requirements when creating new environments. If the required dependencies are already installed in the main environment, EnvironmentManager.create() will return the main enviroment instead of creating a new one. The modules will be called directly, bypassing the Wetlands communication server.
 
 !!! warning
 
@@ -49,6 +56,11 @@ env = environmentManager.create(
 !!! note "Specifying dependencies"
 
     See the [dependencies page](dependencies.md) to learn more on specifying dependencies.
+    You can also use [`EnvironmentManager.createFromConfig()`][wetlands.environment_manager.EnvironmentManager.createFromConfig] and provide a `requirements.txt`, `environment.yml`, `pyproject.toml` or `pixi.toml` file for your dependencies.
+
+!!! note "Load an existing environment"
+
+    You can also load an existing environment with `environment.load("env_name", Path("Path/to/existing/environment/pyproject.toml"))`. See [`EnvironmentManager.load()`][wetlands.environment_manager.EnvironmentManager.load].
 
 
 #### 3. Launch the Environment's Communication Server

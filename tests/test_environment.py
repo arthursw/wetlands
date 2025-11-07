@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from types import ModuleType
 from wetlands.environment import Environment
@@ -19,7 +20,7 @@ def mock_environment_manager():
 
 @pytest.fixture
 def dummy_env(mock_environment_manager):
-    return DummyEnvironment("test_env", mock_environment_manager)
+    return DummyEnvironment("test_env", Path("/tmp/test_env"), mock_environment_manager)
 
 
 @patch("sys.path", new=[])

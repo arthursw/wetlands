@@ -1,5 +1,6 @@
 import logging
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
 from wetlands.external_environment import ExternalEnvironment
@@ -19,7 +20,7 @@ def test_launch(mock_popen):
     mock_popen.return_value = mock_process
 
     with patch("wetlands.external_environment.Client") as mock_client:
-        env = ExternalEnvironment("test_env", MagicMock())
+        env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
         env.executeCommands = MagicMock(return_value=mock_process)
         env.launch()
 
@@ -29,7 +30,7 @@ def test_launch(mock_popen):
 
 @patch("multiprocessing.connection.Client")
 def test_execute(mock_client):
-    env = ExternalEnvironment("test_env", MagicMock())
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
     env.connection = MagicMock()
     env.connection.closed = False
     env.connection.recv.side_effect = [{"action": "execution finished", "result": "success"}]
@@ -44,7 +45,7 @@ def test_execute(mock_client):
 
 @patch("multiprocessing.connection.Client")
 def test_execute_with_kwargs(mock_client):
-    env = ExternalEnvironment("test_env", MagicMock())
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
     env.connection = MagicMock()
     env.connection.closed = False
     env.connection.recv.side_effect = [{"action": "execution finished", "result": "success"}]
@@ -65,7 +66,7 @@ def test_execute_with_kwargs(mock_client):
 
 @patch("multiprocessing.connection.Client")
 def test_execute_error(mock_client, caplog):
-    env = ExternalEnvironment("test_env", MagicMock())
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
     env.connection = MagicMock()
     env.connection.closed = False
     env.connection.recv.side_effect = [
@@ -84,7 +85,7 @@ def test_execute_error(mock_client, caplog):
 
 @patch("wetlands._internal.command_executor.CommandExecutor.killProcess")
 def test_exit(mock_kill):
-    env = ExternalEnvironment("test_env", MagicMock())
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
     env.connection = MagicMock()
     env.process = MagicMock()
 

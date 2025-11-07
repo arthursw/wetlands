@@ -1,6 +1,7 @@
 import pytest
 import re
 import platform
+from pathlib import Path
 from unittest.mock import MagicMock
 from wetlands._internal.exceptions import IncompatibilityException
 from wetlands._internal.dependency_manager import DependencyManager, Dependencies
@@ -74,7 +75,11 @@ def test_get_install_dependencies_commands_micromamba(mock_command_generator_mic
     platform_mock.return_value = "linux-64"
     dependency_manager._platformCondaFormat = platform_mock
 
-    commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.getInstallDependenciesCommands(environment, dependencies)
 
     assert any(
         re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install "numpy" -y', cmd) for cmd in commands
@@ -99,7 +104,11 @@ def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
     platform_mock.return_value = "linux-64"
     dependency_manager._platformCondaFormat = platform_mock
 
-    commands = dependency_manager.getInstallDependenciesCommands("envName", dependencies)
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.getInstallDependenciesCommands(environment, dependencies)
 
     assert any("pixi add" in cmd and '"numpy"' in cmd for cmd in commands)
     assert any("pixi add" in cmd and '--pypi "requests"' in cmd for cmd in commands)

@@ -1,8 +1,6 @@
 from pathlib import Path
 import platform
 
-from wetlands.environment import Environment
-
 
 class SettingsManager:
     usePixi = True
@@ -82,13 +80,13 @@ class SettingsManager:
         condaBinPath = f"bin/{condaName}{suffix}"
         return self.condaPath.resolve(), Path(condaBinPath)
 
-    def getEnvironmentPath(self, environment: Environment) -> Path:
-        """Returns the environment folder"""
-        return environment.path
-
     def getEnvironmentPathFromName(self, environmentName: str) -> Path:
-        return self.condaPath / "workspaces" / environmentName / "pixi.toml" if self.usePixi else self.condaPath / "envs" / environmentName
-    
+        return (
+            self.condaPath / "workspaces" / environmentName / "pixi.toml"
+            if self.usePixi
+            else self.condaPath / "envs" / environmentName
+        )
+
     def getProxyEnvironmentVariablesCommands(self) -> list[str]:
         """Generates proxy environment variable commands.
 

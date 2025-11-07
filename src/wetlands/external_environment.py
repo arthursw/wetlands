@@ -232,6 +232,9 @@ class ExternalEnvironment(Environment):
                 - Removes environment from environmentManager.environments dict
                 - Deletes the environment directory using appropriate conda manager
         """
+        if self.path is None:
+            raise Exception("Cannot delete an environment with no path.")
+
         if not self.environmentManager.environmentExists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
 
@@ -275,6 +278,9 @@ class ExternalEnvironment(Environment):
                 - Deletes the existing environment
                 - Creates a new environment with the same name but new dependencies
         """
+        if not self.path:
+            raise Exception("Cannot update an environment with no path.")
+
         if not self.environmentManager.environmentExists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
 

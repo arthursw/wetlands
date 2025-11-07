@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import Any, Literal, cast, Union
+from venv import logger
 
 from wetlands._internal.install import installMicromamba, installPixi
 from wetlands.internal_environment import InternalEnvironment
@@ -37,46 +38,72 @@ class EnvironmentManager:
 
     def __init__(
         self,
-        condaPath: str | Path = Path("pixi"),
-        usePixi=True,
+        wetlandsInstancePath: Path = Path("wetlands"),
+        condaPath: str | Path | None = None,
         mainCondaEnvironmentPath: Path | None = None,
-        acceptAllCondaPaths=False,
-        wetlandsInstancePath: Path | None = None,
         debug: bool = False,
+        manager="auto",
     ) -> None:
-        """Initializes the EnvironmentManager with a micromamba path.
+        """Initializes the EnvironmentManager.
+
+        The wetlandsInstancePath directory will contain:
+        - logs (managed by logger.py)
+        - debug_ports.json (for debug port tracking)
+        - conda installation (by default at wetlandsInstancePath / "pixi" or "micromamba")
 
         Args:
-                condaPath: Path to the micromamba binary. Defaults to "micromamba". Warning: cannot contain any space character on Windows.
-                usePixi: Whether to use Pixi as the conda manager.
-                mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the folder containing the pixi.toml (or pyproject.toml) file.
-                acceptAllCondaPaths: Whether to accept Conda path containing "pixi" when using micromamba or "micromamba" when using pixi.
-                wetlandsInstancePath: Path to the folder which will contain the state of this wetlands instance (environment process debug ports, stored in debug_ports.json). Default is condaPath / 'wetlands'.
+                wetlandsInstancePath: Path to the folder which will contain the state of this wetlands instance (logs, debug ports stored in debug_ports.json, and conda installation). Defaults to "wetlands".
+                condaPath: Path to the micromamba or pixi installation path. If None, defaults to wetlandsInstancePath / "pixi". Warning: cannot contain any space character on Windows when using micromamba.
+                mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the pixi.toml or pyproject.toml file.
                 debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlandsInstancePath / debug_ports.json
+                manager: Use "pixi" to use Pixi as the conda manager, "micromamba" to use Micromamba and "auto" to infer from condaPath (will look for "pixi" or "micromamba" in the path).
         """
+        from wetlands.logger import setLogFilePath
+
         self.environments: dict[str | Path, Environment] = {}
+        self.wetlandsInstancePath = cast(Path, wetlandsInstancePath).resolve()
+
+        # Set default condaPath if not provided
+        if condaPath is None:
+            condaPath = self.wetlandsInstancePath / "pixi"
+
         condaPath = Path(condaPath)
+
+        # Initialize logger to use the wetlandsInstancePath for logs
+        setLogFilePath(self.wetlandsInstancePath / "wetlands.log")
+
+        usePixi = self._initManager(manager, condaPath)
+
         if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
             raise Exception(
                 f'The Micromamba path cannot contain any space character on Windows (given path is "{condaPath}").'
             )
-        condaName = "pixi" if usePixi else "micromamba"
-        otherName = "micromamba" if usePixi else "pixi"
-        if (not acceptAllCondaPaths) and otherName in str(condaPath):
-            raise Exception(
-                f'You provided the condaPath "{condaPath}" which contains "{otherName}", but you asked to use {condaName}. Use acceptAllCondaPaths to use this path anyway.'
-            )
-        self.mainEnvironment = InternalEnvironment(mainCondaEnvironmentPath, self)
+
+        self.mainEnvironment = InternalEnvironment("wetlands_main", mainCondaEnvironmentPath, self)
         self.settingsManager = SettingsManager(condaPath, usePixi)
-        if wetlandsInstancePath is None:
-            self.wetlandsInstancePath = self.settingsManager.condaPath / "wetlands"
-        else:
-            self.wetlandsInstancePath = cast(Path, wetlandsInstancePath).resolve()
         self.debug = debug
         self.installConda()
         self.commandGenerator = CommandGenerator(self.settingsManager)
         self.dependencyManager = DependencyManager(self.commandGenerator)
         self.commandExecutor = CommandExecutor()
+
+    def _initManager(self, manager: str, condaPath: Path) -> bool:
+        if manager not in ["auto", "pixi", "micromamba"]:
+            raise Exception(f'Invalid manager "{manager}", must be "auto", "pixi" or "micromamba".')
+        if manager == "auto":
+            if "pixi" in str(condaPath).lower():
+                usePixi = True
+            elif "micromamba" in str(condaPath).lower():
+                usePixi = False
+            else:
+                raise Exception(
+                    'When using manager="auto", the condaPath must contain either "pixi" or "micromamba" to infer the manager to use.'
+                )
+        elif manager == "pixi":
+            usePixi = True
+        else:
+            usePixi = False
+        return usePixi
 
     def installConda(self):
         """Install Pixi or Micromamba (depending on settingsManager.usePixi)"""
@@ -187,16 +214,16 @@ class EnvironmentManager:
         )
         if not hasPipDependencies and not hasCondaDependencies:
             return True
-        if hasCondaDependencies and self.mainEnvironment.name is None:
+        if hasCondaDependencies and self.mainEnvironment.path is None:
             return False
         installedPackages = []
-        if hasPipDependencies and self.mainEnvironment.name is None:
+        if hasPipDependencies and self.mainEnvironment.path is None:
             installedPackages = [
                 {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi"}
                 for dist in metadata.distributions()
             ]
 
-        if self.mainEnvironment.name is not None:
+        if self.mainEnvironment.path is not None:
             installedPackages = self.getInstalledPackages(self.mainEnvironment)
 
         condaSatisfied = all(
@@ -323,8 +350,14 @@ class EnvironmentManager:
                 The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
         """
         if isinstance(name, Path):
-            raise Exception("Environment name cannot be a Path, use EnvironmentManager.load() to load an existing environment.")
-        
+            raise Exception(
+                "Environment name cannot be a Path, use EnvironmentManager.load() to load an existing environment."
+            )
+
+        if name in self.environments:
+            logger.debug(f"Environment '{name}' already exists, returning existing instance.")
+            return self.environments[name]
+
         if dependencies is None:
             dependencies = {}
         elif not isinstance(dependencies, dict):
@@ -409,7 +442,7 @@ class EnvironmentManager:
 
         if not self.environmentExists(environmentPath):
             raise Exception(f"The environment {environmentPath} was not found.")
-        
+
         if name not in self.environments:
             self.environments[name] = ExternalEnvironment(name, environmentPath, self)
         return self.environments[name]
@@ -451,9 +484,7 @@ class EnvironmentManager:
         Returns:
                 The launched process.
         """
-        activateCommands = self.commandGenerator.getActivateEnvironmentCommands(
-            environment, additionalActivateCommands
-        )
+        activateCommands = self.commandGenerator.getActivateEnvironmentCommands(environment, additionalActivateCommands)
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(
             activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait

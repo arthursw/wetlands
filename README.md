@@ -15,7 +15,7 @@ For example, if your application needs to use both [Stardist](https://github.com
 The name ***Wetlands*** comes from the tropical *environments* where anacondas thrive.
 
 [Appose Python](https://github.com/apposed/appose-python) is a great alternative to Wetlands. It even provides the ability to run Java environments (see [Appose Java](https://github.com/apposed/appose-java)) and share memory between the Python world and the Java world.
-There are other minor differences between the two libraries. For example, Wetlands provide a tool to debug external environments.
+There are other minor differences between the two libraries. For example, Wetlands provides integrated debugging tools to attach VS Code or PyCharm to isolated environments for step-through debugging with breakpoints. See the [Debugging guide](https://arthursw.github.io/wetlands/latest/debugging/) for more information.
 
 ---
 
@@ -30,6 +30,7 @@ There are other minor differences between the two libraries. For example, Wetlan
 - **Automatic Environment Management**: Create and configure environments on demand.
 - **Dependency Isolation**: Install dependencies without conflicts.
 - **Embedded Execution**: Run Python functions inside isolated environments.
+- **Integrated Debugging**: Debug code running in isolated environments using VS Code or PyCharm with breakpoints and step-through execution.
 - **Micromamba**: Wetlands uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
 
 ## 📦 Installation
@@ -48,10 +49,11 @@ If the user doesn't have pixi or micromamba installed, Wetlands will download an
 
 from wetlands.environment_manager import EnvironmentManager
 
-# Initialize the environment manager
-# Wetlands will use the existing Pixi or Micromamba installation at the specified path (e.g., "pixi/" or "micromamba/") if available;
+# Initialize the environment manager with a wetlands instance path
+# The wetlandsInstancePath will contain logs, debug information, and by default the conda installation
+# Wetlands will use the existing Pixi or Micromamba installation if available;
 # otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
-environmentManager = EnvironmentManager("pixi/")
+environmentManager = EnvironmentManager()
 
 # Create and launch an isolated Conda environment named "numpy"
 env = environmentManager.create("numpy", {"pip":["numpy==2.2.4"]})
@@ -79,6 +81,28 @@ def sum(x):
 ```
 
 See the `examples/` folder for more detailed examples.
+
+## 🐛 Debugging
+
+Wetlands includes tools to debug code running in isolated environments using VS Code or PyCharm. You can set breakpoints, step through code, and inspect variables in real-time.
+
+### Quick Debugging Example
+
+```bash
+# List all running environments and their debug ports
+wetlands list
+
+# Attach VS Code to an environment for debugging
+wetlands debug -s /path/to/my/project -n my_env
+
+# Or use PyCharm instead
+wetlands debug -s /path/to/my/project -n my_env -ide pycharm
+
+# Kill an environment when done
+wetlands kill -n my_env
+```
+
+For detailed debugging instructions and workflows, see the [Debugging guide](https://arthursw.github.io/wetlands/latest/debugging/).
 
 ## 🔗 Related Projects
 
@@ -122,8 +146,6 @@ The script `scripts/gen_ref_pages.py` is used by mkdocs to generate the API refe
 
 - Handle general [dependency specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#dependency-specifiers) (handle version specifiers like '>=', '~=' etc.).
 - Use Pixi features and environment instead of creating one workspace per environment.
-- Accept `environment.yml` files for environment creation.
-- Enable to change the logs paths.
 - Update doc for windows
 
 ## 📜 License

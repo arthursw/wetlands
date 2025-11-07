@@ -1,9 +1,112 @@
 from pathlib import Path
 from unittest.mock import MagicMock
+import sys
 import pytest
 from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.command_generator import CommandGenerator
 from wetlands._internal.dependency_manager import DependencyManager
+import wetlands._internal.install as install_module
+import wetlands.environment_manager as env_mgr_module
+
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "integration: mark test as an integration test that should not be mocked")
+
+
+# Store original functions before mocking
+
+_original_install_micromamba_env = env_mgr_module.installMicromamba
+_original_install_pixi_env = env_mgr_module.installPixi
+_original_install_micromamba = install_module.installMicromamba
+_original_install_pixi = install_module.installPixi
+
+# Store originals for test_installer module if it's imported
+try:
+    import tests.test_installer as test_installer_module
+
+    _original_install_micromamba_test = test_installer_module.installMicromamba
+    _original_install_pixi_test = test_installer_module.installPixi
+except (ImportError, AttributeError):
+    _original_install_micromamba_test = None
+    _original_install_pixi_test = None
+
+
+def create_mock_micromamba():
+    """Create a mock installMicromamba function."""
+
+    def mock_install_micromamba(install_path: Path, version: str = "2.3.0-1", proxies=None):
+        """Mock installation - creates a fake micromamba binary without downloading."""
+        install_path.mkdir(exist_ok=True, parents=True)
+        bin_path = install_path / "bin" / "micromamba"
+        bin_path.parent.mkdir(exist_ok=True, parents=True)
+        # Create a fake executable file that mimics the real binary
+        bin_path.write_text("#!/bin/bash\necho 'micromamba version 2.3.0'\n")
+        bin_path.chmod(0o755)
+        return bin_path
+
+    return mock_install_micromamba
+
+
+def create_mock_pixi():
+    """Create a mock installPixi function."""
+
+    def mock_install_pixi(install_path: Path, version: str = "v0.48.2", proxies=None):
+        """Mock installation - creates a fake pixi binary without downloading."""
+        install_path.mkdir(exist_ok=True, parents=True)
+        bin_path = install_path / "bin" / "pixi"
+        bin_path.parent.mkdir(exist_ok=True, parents=True)
+        # Create a fake executable file that mimics the real binary
+        bin_path.write_text("#!/bin/bash\necho 'pixi v0.48.2'\n")
+        bin_path.chmod(0o755)
+        return bin_path
+
+    return mock_install_pixi
+
+
+def pytest_runtest_setup(item):
+    """Mock download functions before each test, unless marked as integration."""
+    # Check if test is marked with integration marker
+    if "integration" in item.keywords:
+        return
+
+    # Create mock functions
+    mock_micromamba = create_mock_micromamba()
+    mock_pixi = create_mock_pixi()
+
+    # Apply mocks in all places where the functions are imported
+    install_module.installMicromamba = mock_micromamba
+    install_module.installPixi = mock_pixi
+    env_mgr_module.installMicromamba = mock_micromamba
+    env_mgr_module.installPixi = mock_pixi
+
+    # Also mock in test_installer module if it has been imported using sys.modules
+    for module_name in ["test_installer", "tests.test_installer"]:
+        if module_name in sys.modules:
+            test_installer_module = sys.modules[module_name]
+            if hasattr(test_installer_module, "installMicromamba"):
+                test_installer_module.installMicromamba = mock_micromamba
+            if hasattr(test_installer_module, "installPixi"):
+                test_installer_module.installPixi = mock_pixi
+
+
+def pytest_runtest_teardown(item):
+    """Restore original functions after each test."""
+    # Restore original functions in all modules
+    install_module.installMicromamba = _original_install_micromamba
+    install_module.installPixi = _original_install_pixi
+    env_mgr_module.installMicromamba = _original_install_micromamba_env
+    env_mgr_module.installPixi = _original_install_pixi_env
+
+    # Restore in test_installer module if it was imported
+    if _original_install_micromamba_test is not None:
+        for module_name in ["test_installer", "tests.test_installer"]:
+            if module_name in sys.modules:
+                test_installer_module = sys.modules[module_name]
+                if hasattr(test_installer_module, "installMicromamba"):
+                    test_installer_module.installMicromamba = _original_install_micromamba_test
+                if hasattr(test_installer_module, "installPixi"):
+                    test_installer_module.installPixi = _original_install_pixi_test
 
 
 @pytest.fixture

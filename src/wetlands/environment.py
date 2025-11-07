@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 class Environment:
     modules: dict[str, ModuleType] = {}
 
-    def __init__(self, name: str, path: Path, environmentManager: "EnvironmentManager") -> None:
+    def __init__(self, name: str, path: Path | None, environmentManager: "EnvironmentManager") -> None:
         self.name = name
-        self.path = path
+        self.path = path.resolve() if isinstance(path, Path) else path
         self.environmentManager = environmentManager
 
     def _isModFunction(self, mod, func):

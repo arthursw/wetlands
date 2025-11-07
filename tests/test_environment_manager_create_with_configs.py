@@ -37,12 +37,18 @@ def mock_command_executor(monkeypatch):
 def environment_manager_for_config_tests(tmp_path_factory, mock_command_executor, monkeypatch):
     """Provides an EnvironmentManager instance with mocked CommandExecutor."""
     dummy_micromamba_path = tmp_path_factory.mktemp("conda_root")
+    wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance")
     main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
     # Mock installConda to prevent downloads
     monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
 
-    manager = EnvironmentManager(condaPath=dummy_micromamba_path, usePixi=False, mainCondaEnvironmentPath=main_env_path)
+    manager = EnvironmentManager(
+        wetlandsInstancePath=wetlands_instance_path,
+        condaPath=dummy_micromamba_path,
+        manager="micromamba",
+        mainCondaEnvironmentPath=main_env_path,
+    )
 
     # Apply the mocks to the specific instance's commandExecutor
     monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])

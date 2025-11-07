@@ -10,7 +10,10 @@ from wetlands import logger
 
 logger.setLogLevel(logging.DEBUG)
 
-environmentManager = EnvironmentManager("pixi")
+# Initialize the environment manager
+# Wetlands will store logs and state in the wetlandsInstancePath (defaults to "wetlands/")
+# Pixi/Micromamba will be installed in wetlandsInstancePath/pixi by default
+environmentManager = EnvironmentManager()
 
 env = environmentManager.create("advanced_cellpose", {"conda": ["cellpose==3.1.0"]})
 

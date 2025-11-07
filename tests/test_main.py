@@ -6,6 +6,7 @@ from wetlands.main import (
     get_matching_processes,
     get_wetlands_instance_paths,
     setup_and_launch_vscode,
+    setup_and_launch_pycharm,
     list_environments,
     kill_environment,
 )
@@ -271,4 +272,122 @@ class TestKillEnvironment:
 
         with patch("builtins.print"):
             result = kill_environment(args)
+            assert result is None
+
+
+class TestSetupAndLaunchPycharm:
+    @patch("wetlands.main.subprocess.run")
+    @patch("builtins.print")
+    @patch("wetlands.main.get_matching_processes")
+    @patch("wetlands.main.get_wetlands_instance_paths")
+    def test_setup_and_launch_pycharm_debug_ports_not_found(
+        self, mock_get_paths, mock_get_processes, mock_print, mock_subprocess
+    ):
+        """Test PyCharm setup when debug ports file is missing"""
+        args = MagicMock()
+        args.sources = Path("/tmp/sources")
+        args.name = "test_env"
+        args.wetlandsInstancePath = Path("/nonexistent/path")
+
+        mock_get_processes.return_value = []
+        mock_get_paths.return_value = []
+
+        with patch("builtins.open", side_effect=FileNotFoundError()):
+            with patch.object(Path, "mkdir"):
+                result = setup_and_launch_pycharm(args)
+                assert result is None
+
+    @patch("wetlands.main.subprocess.run")
+    def test_setup_and_launch_pycharm_creates_xml_config(self, mock_subprocess):
+        """Test that PyCharm setup creates XML configuration file"""
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            sources_dir.mkdir()
+            wetlands_dir = Path(tmpdir) / "wetlands"
+            wetlands_dir.mkdir()
+
+            # Create args that work with real Path objects
+            args = MagicMock()
+            args.sources = sources_dir
+            args.name = "test_env"
+            args.wetlandsInstancePath = wetlands_dir
+
+            # Create debug_ports.json file
+            debug_ports_file = wetlands_dir / "debug_ports.json"
+            with open(debug_ports_file, "w") as f:
+                import json5
+
+                json5.dump(
+                    {
+                        "test_env": {
+                            "debugPort": 5678,
+                            "moduleExecutorPath": "/path/to/module_executor.py",
+                        }
+                    },
+                    f,
+                )
+
+            with patch("wetlands.main.get_matching_processes", return_value=[]):
+                with patch("wetlands.main.get_wetlands_instance_paths", return_value=[]):
+                    setup_and_launch_pycharm(args)
+
+            # Check that XML config file was created
+            config_file = sources_dir / ".idea" / "runConfigurations" / "Remote_Attach_Wetlands.xml"
+            assert config_file.exists()
+
+            # Check that file contains expected XML structure
+            with open(config_file, "r") as f:
+                content = f.read()
+                assert "Remote Attach Wetlands" in content
+                assert "component" in content
+                assert "configuration" in content
+
+            # Check that pycharm command was called
+            mock_subprocess.assert_called_once()
+            call_args = mock_subprocess.call_args[0][0]
+            assert call_args[0] == "pycharm"
+            assert str(sources_dir) in call_args
+
+    @patch("wetlands.main.subprocess.run")
+    @patch("builtins.print")
+    @patch("wetlands.main.get_matching_processes")
+    @patch("wetlands.main.get_wetlands_instance_paths")
+    def test_setup_and_launch_pycharm_debug_port_not_found(
+        self, mock_get_paths, mock_get_processes, mock_print, mock_subprocess
+    ):
+        """Test PyCharm setup when debug port is not found for env"""
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            sources_dir.mkdir()
+            wetlands_dir = Path(tmpdir) / "wetlands"
+            wetlands_dir.mkdir()
+
+            args = MagicMock()
+            args.sources = sources_dir
+            args.name = "unknown_env"
+            args.wetlandsInstancePath = wetlands_dir
+
+            mock_get_processes.return_value = []
+            mock_get_paths.return_value = []
+
+            # Create debug_ports.json with different env
+            debug_ports_file = wetlands_dir / "debug_ports.json"
+            with open(debug_ports_file, "w") as f:
+                import json5
+
+                json5.dump(
+                    {
+                        "other_env": {
+                            "debugPort": 5678,
+                            "moduleExecutorPath": "/path/to/executor",
+                        }
+                    },
+                    f,
+                )
+
+            result = setup_and_launch_pycharm(args)
             assert result is None

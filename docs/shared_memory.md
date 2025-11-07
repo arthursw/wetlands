@@ -5,6 +5,9 @@ The Python [`multiprocessing.shared_memory`](https://docs.python.org/3/library/m
 The `shared_memory_example.py` script demonstrate this.
 
 !!!note
+    Please see the shared memory helpers in the [`shared_memory` module][wetlands.shared_memory], even though there are not used in the examples.
+
+!!!note
 
     You need to install `numpy` to run this example, since it is used to save the resulting masks stored in the shared memory.
 
