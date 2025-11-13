@@ -1,9 +1,12 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from wetlands._internal.install import installMicromamba, installPixi
 
 
+@pytest.mark.integration
 def test_install_micromamba(tmp_path: Path):
     print(f"--- Running Micromamba install test in temporary directory: {tmp_path} ---")
 
@@ -41,6 +44,7 @@ def test_install_micromamba(tmp_path: Path):
     print(f"--- Test successful. Micromamba version output: {result.stdout.strip()} ---")
 
 
+@pytest.mark.integration
 def test_install_pixi(tmp_path: Path):
     print(f"--- Running Pixi install test in temporary directory: {tmp_path} ---")
 
