@@ -45,6 +45,10 @@ print("Executing advanced_example_module.py in environment...")
 process = env.executeCommands(["python -u advanced_example_module.py"])
 ```
 
+!!! note "Windows users"
+
+    The `python` command will be available since it will be run in the conda environment.
+
 ### Establish Manual Connection
 
 The script we just launched (`advanced_example_module.py`) is designed to start a server and print the port it's listening on to its standard output. Our main script now needs to read the `stdout` of the `process` launched by Wetlands to discover this port number. We loop through the output lines until we find the line indicating the port.

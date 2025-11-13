@@ -208,7 +208,17 @@ def installMicromamba(
     # Use the combined helper to download and verify
     downloadAndVerify(micromambaUrl, micromambaFullPath, CHECKSUMS_BASE_DIR / f"{micromambaBaseName}.sha256", proxies)
 
-    if currentOs in ["linux", "osx"]:
+    # Ensure the file is executable and properly named on Windows
+    if currentOs == "win":
+        # On Windows, verify the file exists and has the correct extension
+        if not micromambaFullPath.exists():
+            raise Exception(f"Micromamba executable not found at {micromambaFullPath}")
+        # Make sure it's readable and not locked
+        try:
+            micromambaFullPath.stat()
+        except Exception as e:
+            raise Exception(f"Failed to access micromamba executable at {micromambaFullPath}: {e}") from e
+    else:
         micromambaFullPath.chmod(0o755)  # rwxr-xr-x
         print(f"Made {micromambaFullPath} executable.")
 
@@ -292,8 +302,31 @@ def installPixi(installPath: Path, version: str = PIXI_VERSION, proxies: Optiona
     except (RuntimeError, ValueError, FileNotFoundError) as e:
         raise Exception("Pixi installation failed") from e
 
-    executable = binDir / "pixi"
-    return executable.with_suffix(".exe") if platform.system() == "Windows" else executable
+    # Find the actual executable - it may be named 'pixi' or 'pixi.exe' depending on the zip contents
+    # and the platform
+    is_windows = platform.system() == "Windows"
+
+    # On Windows, the executable might be named just 'pixi' in the zip, so we need to rename it to 'pixi.exe'
+    # to ensure it can be executed properly
+    pixi_without_ext = binDir / "pixi"
+    pixi_with_ext = binDir / "pixi.exe"
+
+    if pixi_without_ext.is_file():
+        if is_windows:
+            # Rename to add .exe extension if it doesn't have one
+            if not pixi_with_ext.exists():
+                pixi_without_ext.rename(pixi_with_ext)
+            else:
+                pixi_without_ext.unlink()  # Remove the non-.exe version
+            return pixi_with_ext
+        else:
+            pixi_without_ext.chmod(0o755)  # Make executable on Unix-like systems
+            return pixi_without_ext
+
+    if pixi_with_ext.is_file():
+        return pixi_with_ext
+
+    raise Exception(f"Pixi executable not found. Checked locations: {pixi_without_ext}, {pixi_with_ext}")
 
 
 # --- Main Execution ---
