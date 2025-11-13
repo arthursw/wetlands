@@ -1197,6 +1197,10 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Executing advanced_example_module.py in environment...&quot;</span><span class="p">)</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">process</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">executeCommands</span><span class="p">([</span><span class="s2">&quot;python -u advanced_example_module.py&quot;</span><span class="p">])</span>
 </span></code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Windows users</p>
+<p>The <code>python</code> command will be available since it will be run in the conda environment.</p>
+</div>
 <h3 id="establish-manual-connection">Establish Manual Connection</h3>
 <p>The script we just launched (<code>advanced_example_module.py</code>) is designed to start a server and print the port it's listening on to its standard output. Our main script now needs to read the <code>stdout</code> of the <code>process</code> launched by Wetlands to discover this port number. We loop through the output lines until we find the line indicating the port.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">port</span> <span class="o">=</span> <span class="kc">None</span>
