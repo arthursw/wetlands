@@ -1362,7 +1362,7 @@
               </td>
             </tr>
             <tr class="doc-section-item">
-              <td><code><a class="autorefs autorefs-internal" title="            update(dependencies=None, additionalInstallCommands={}, forceExternal=False) (wetlands.environment.Environment.update)" href="#wetlands.environment.Environment.update">update</a></code></td>
+              <td><code><a class="autorefs autorefs-internal" title="            update(dependencies=None, additionalInstallCommands={}, useExisting=False) (wetlands.environment.Environment.update)" href="#wetlands.environment.Environment.update">update</a></code></td>
               <td>
                 <div class="doc-md-description">
                   <p>Update this environment with new dependencies. Only available in ExternalEnvironment.</p>
@@ -1588,10 +1588,10 @@
 </span><span id="__span-0-119"><a id="__codelineno-0-119" name="__codelineno-0-119"></a>        <span class="bp">self</span><span class="p">,</span>
 </span><span id="__span-0-120"><a id="__codelineno-0-120" name="__codelineno-0-120"></a>        <span class="n">dependencies</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dependencies</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-121"><a id="__codelineno-0-121" name="__codelineno-0-121"></a>        <span class="n">additionalInstallCommands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">=</span> <span class="p">{},</span>
-</span><span id="__span-0-122"><a id="__codelineno-0-122" name="__codelineno-0-122"></a>        <span class="n">forceExternal</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-122"><a id="__codelineno-0-122" name="__codelineno-0-122"></a>        <span class="n">useExisting</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
 </span><span id="__span-0-123"><a id="__codelineno-0-123" name="__codelineno-0-123"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Environment&quot;</span><span class="p">:</span>
 </span><span id="__span-0-124"><a id="__codelineno-0-124" name="__codelineno-0-124"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Update this environment with new dependencies. Only available in ExternalEnvironment.&quot;&quot;&quot;</span>
-</span><span id="__span-0-125"><a id="__codelineno-0-125" name="__codelineno-0-125"></a>        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() is only available in ExternalEnvironment&quot;</span><span class="p">)</span>
+</span><span id="__span-0-125"><a id="__codelineno-0-125" name="__codelineno-0-125"></a>        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() in ExternalEnvironment&quot;</span><span class="p">)</span>
 </span></code></pre></div></td></tr></table></div>
               </details>
 
@@ -1672,7 +1672,7 @@ that contains the same methods of the module which will be executed within the e
     <div class="doc doc-contents ">
 
         <p>Installs dependencies.
-See <a class="autorefs autorefs-internal" title="            create(name, dependencies=None, additionalInstallCommands={}, forceExternal=False)" href="../environment_manager/#wetlands.environment_manager.EnvironmentManager.create"><code>EnvironmentManager.create</code></a> for more details on the <code>dependencies</code> and <code>additionalInstallCommands</code> parameters.</p>
+See <a class="autorefs autorefs-internal" title="            create(name, dependencies=None, additionalInstallCommands={}, useExisting=False)" href="../environment_manager/#wetlands.environment_manager.EnvironmentManager.create"><code>EnvironmentManager.create</code></a> for more details on the <code>dependencies</code> and <code>additionalInstallCommands</code> parameters.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2065,7 +2065,7 @@ See <a class="autorefs autorefs-internal" title="            create(name, depend
 
 
 <h3 id="wetlands.environment.Environment.update" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">update</span><span class="p">(</span><span class="n">dependencies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">additionalInstallCommands</span><span class="o">=</span><span class="p">{},</span> <span class="n">forceExternal</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">update</span><span class="p">(</span><span class="n">dependencies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">additionalInstallCommands</span><span class="o">=</span><span class="p">{},</span> <span class="n">useExisting</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
 </h3>
 
@@ -2088,10 +2088,10 @@ See <a class="autorefs autorefs-internal" title="            create(name, depend
 </span><span id="__span-0-119"><a id="__codelineno-0-119" name="__codelineno-0-119"></a>    <span class="bp">self</span><span class="p">,</span>
 </span><span id="__span-0-120"><a id="__codelineno-0-120" name="__codelineno-0-120"></a>    <span class="n">dependencies</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dependencies</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-121"><a id="__codelineno-0-121" name="__codelineno-0-121"></a>    <span class="n">additionalInstallCommands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">=</span> <span class="p">{},</span>
-</span><span id="__span-0-122"><a id="__codelineno-0-122" name="__codelineno-0-122"></a>    <span class="n">forceExternal</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-122"><a id="__codelineno-0-122" name="__codelineno-0-122"></a>    <span class="n">useExisting</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
 </span><span id="__span-0-123"><a id="__codelineno-0-123" name="__codelineno-0-123"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Environment&quot;</span><span class="p">:</span>
 </span><span id="__span-0-124"><a id="__codelineno-0-124" name="__codelineno-0-124"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Update this environment with new dependencies. Only available in ExternalEnvironment.&quot;&quot;&quot;</span>
-</span><span id="__span-0-125"><a id="__codelineno-0-125" name="__codelineno-0-125"></a>    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() is only available in ExternalEnvironment&quot;</span><span class="p">)</span>
+</span><span id="__span-0-125"><a id="__codelineno-0-125" name="__codelineno-0-125"></a>    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() in ExternalEnvironment&quot;</span><span class="p">)</span>
 </span></code></pre></div></td></tr></table></div>
             </details>
     </div>

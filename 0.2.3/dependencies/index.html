@@ -1176,7 +1176,7 @@ Defines supported operating systems and architectures.</p>
 </span></code></pre></div>
 <p>Represents an individual dependency with additional metadata:</p>
 <ul>
-<li><strong>name</strong> <em>(str)</em>: The name of the package (e.g., <code>"numpy"</code>) with an optional channel specification (for conda specification) and a version specifier, in the format <code>channel::package==version.number</code>.</li>
+<li><strong>name</strong> <em>(str)</em>: The name of the package (e.g., <code>"numpy"</code>) with an optional channel specification (for conda specification) and a version specifier. Format: <code>channel::package==version.number</code>. Supports <a href="https://packaging.python.org/en/latest/specifications/dependency-specifiers/#version-specifiers">PEP 440 version specifiers</a> like <code>&gt;=1.20,&lt;2.0</code>, <code>~=1.5.0</code>, <code>!=1.0.0</code>, etc.</li>
 <li><strong>platforms</strong> <em>(optional)</em>: A list of platforms on which this package should be installed.</li>
 <li><strong>optional</strong> <em>(optional)</em>: Marks the dependency as optional (e.g., for extra features like enabling computation on GPU).</li>
 <li><strong>dependencies</strong> <em>(optional)</em>: Indicates whether to install sub-dependencies.</li>
