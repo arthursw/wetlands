@@ -78,7 +78,7 @@ class TestAddDebugpyInDependencies:
             manager._addDebugpyInDependencies(dependencies)
 
             # Check debugpy appears only once
-            count = sum(1 for dep in dependencies["conda"] if "debugpy" in str(dep)) # type: ignore
+            count = sum(1 for dep in dependencies["conda"] if "debugpy" in str(dep))  # type: ignore
             assert count == 1
 
 

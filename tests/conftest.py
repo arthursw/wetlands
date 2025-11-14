@@ -115,9 +115,9 @@ def pytest_runtest_setup(item):
         if module_name in sys.modules:
             test_installer_module = sys.modules[module_name]
             if hasattr(test_installer_module, "installMicromamba"):
-                test_installer_module.installMicromamba = mock_micromamba    # type: ignore
+                test_installer_module.installMicromamba = mock_micromamba  # type: ignore
             if hasattr(test_installer_module, "installPixi"):
-                test_installer_module.installPixi = mock_pixi                # type: ignore
+                test_installer_module.installPixi = mock_pixi  # type: ignore
 
 
 def pytest_runtest_teardown(item):
@@ -134,9 +134,9 @@ def pytest_runtest_teardown(item):
             if module_name in sys.modules:
                 test_installer_module = sys.modules[module_name]
                 if hasattr(test_installer_module, "installMicromamba"):
-                    test_installer_module.installMicromamba = _original_install_micromamba_test    # type: ignore
+                    test_installer_module.installMicromamba = _original_install_micromamba_test  # type: ignore
                 if hasattr(test_installer_module, "installPixi"):
-                    test_installer_module.installPixi = _original_install_pixi_test                # type: ignore
+                    test_installer_module.installPixi = _original_install_pixi_test  # type: ignore
 
 
 @pytest.fixture

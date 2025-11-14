@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from wetlands.environment import Commands, Dependencies, Environment
+from wetlands.environment import Environment
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager

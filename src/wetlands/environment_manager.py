@@ -1,4 +1,3 @@
-import itertools
 import json
 import re
 import platform
@@ -527,7 +526,7 @@ class EnvironmentManager:
             raise Exception("Cannot install packages in an InternalEnvironment when using Pixi.")
         if environment == self.mainEnvironment and environment.path is None:
             raise Exception("Cannot install packages in an InternalEnvironment with no conda path.")
-        
+
         installCommands = self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         return self.commandExecutor.executeCommandsAndGetOutput(installCommands)
