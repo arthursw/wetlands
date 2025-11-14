@@ -53,9 +53,23 @@ env = environmentManager.create(
 
     If a `mainCondaEnvironmentPath` was provided when instanciating the `EnvironmentManager`, Wetlands will check if `cellpose==3.1.0` is already installed in the main environment and return it if it is the case. If `mainCondaEnvironmentPath` is not provided but the required dependencies are only pip packages, Wetlands will check if the dependencies are installed in the current python environment and return it if it is the case.
 
+!!! note "Reusing existing environments with `useExisting=True`"
+
+    You can pass `useExisting=True` to `create()` to search for and reuse an existing environment that satisfies the dependencies. This includes the main environment. If no environment satisfies the requirements, a new one will be created. By default, `useExisting=False`, which always creates a new environment.
+
+    ```python
+    # Return main or existing environment if it satisfies the dependencies
+    env = environmentManager.create(
+        "cellpose_env",
+        {"conda": ["cellpose==3.1.0"]},
+        useExisting=True  # Check if any existing env satisfies the dependencies
+    )
+    ```
+
 !!! note "Specifying dependencies"
 
     See the [dependencies page](dependencies.md) to learn more on specifying dependencies.
+    Wetlands supports [PEP 440 version specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#version-specifiers), so you can use flexible version constraints like `"numpy>=1.20,<2.0"`, `"scipy~=1.5"`, or `"pandas!=1.0.0"`.
     You can also use [`EnvironmentManager.createFromConfig()`][wetlands.environment_manager.EnvironmentManager.createFromConfig] and provide a `requirements.txt`, `environment.yml`, `pyproject.toml` or `pixi.toml` file for your dependencies.
 
 !!! note "Load an existing environment"

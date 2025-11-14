@@ -82,6 +82,7 @@ class EnvironmentManager:
             )
 
         self.mainEnvironment = InternalEnvironment("wetlands_main", mainCondaEnvironmentPath, self)
+        self.environments["wetlands_main"] = self.mainEnvironment
         self.settingsManager = SettingsManager(condaPath, usePixi)
         self.debug = debug
         self.installConda()
@@ -197,7 +198,7 @@ class EnvironmentManager:
 
         # Parse dependency string to extract package name and version specifier
         # Package name is followed by optional version specifier (starts with ==, >=, <=, >, <, !=, ~=)
-        match = re.match(r'^([a-zA-Z0-9._-]+)((?:[<>=!~].*)?)', dependency)
+        match = re.match(r"^([a-zA-Z0-9._-]+)((?:[<>=!~].*)?)", dependency)
         if not match:
             return False
 
@@ -225,16 +226,18 @@ class EnvironmentManager:
 
         return False
 
-    def _dependenciesAreInstalled(self, dependencies: Dependencies) -> bool:
-        """Verifies if all specified dependencies are installed in the main environment.
+    def _environmentValidatesRequirements(self, environment: Environment, dependencies: Dependencies) -> bool:
+        """Verifies if all specified dependencies are installed in the given environment.
+
+        Applies special handling for main environment with None path (uses metadata.distributions() for pip packages).
 
         Args:
-                dependencies: Dependencies to check.
+                environment: The environment to check.
+                dependencies: Dependencies to verify.
 
         Returns:
                 True if all dependencies are installed, False otherwise.
         """
-
         if not sys.version.startswith(dependencies.get("python", "").replace("=", "")):
             return False
 
@@ -246,23 +249,37 @@ class EnvironmentManager:
         )
         if not hasPipDependencies and not hasCondaDependencies:
             return True
-        if hasCondaDependencies and self.mainEnvironment.path is None:
-            return False
-        installedPackages = []
-        if hasPipDependencies and self.mainEnvironment.path is None:
-            installedPackages = [
-                {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi"}
-                for dist in metadata.distributions()
-            ]
 
-        if self.mainEnvironment.path is not None:
-            installedPackages = self.getInstalledPackages(self.mainEnvironment)
+        # Special handling for main environment with None path
+        isMainEnvironment = environment == self.mainEnvironment
+        if isMainEnvironment and environment.path is None:
+            if hasCondaDependencies:
+                return False
+            if hasPipDependencies:
+                installedPackages = [
+                    {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi"}
+                    for dist in metadata.distributions()
+                ]
+            else:
+                return True
+        else:
+            # Get installed packages for the environment
+            installedPackages = self.getInstalledPackages(environment)
 
-        condaSatisfied = all(
-            [self._checkRequirement(d, "conda", installedPackages) for d in condaDependencies + condaDependenciesNoDeps]
+        condaSatisfied = (
+            all(
+                [
+                    self._checkRequirement(d, "conda", installedPackages)
+                    for d in condaDependencies + condaDependenciesNoDeps
+                ]
+            )
+            if hasCondaDependencies
+            else True
         )
-        pipSatisfied = all(
-            [self._checkRequirement(d, "pip", installedPackages) for d in pipDependencies + pipDependenciesNoDeps]
+        pipSatisfied = (
+            all([self._checkRequirement(d, "pip", installedPackages) for d in pipDependencies + pipDependenciesNoDeps])
+            if hasPipDependencies
+            else True
         )
 
         return condaSatisfied and pipSatisfied
@@ -366,9 +383,9 @@ class EnvironmentManager:
         name: str,
         dependencies: Union[Dependencies, None] = None,
         additionalInstallCommands: Commands = {},
-        forceExternal: bool = False,
+        useExisting: bool = False,
     ) -> Environment:
-        """Creates a new Conda environment with specified dependencies or the main environment if dependencies are met in the main environment and forceExternal is False (in which case additional install commands will not be called). Return the existing environment if it was already created.
+        """Creates a new Conda environment with specified dependencies or returns an existing one.
 
         Args:
                 name: Name for the new environment.
@@ -376,10 +393,10 @@ class EnvironmentManager:
                     - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
                     - None (no dependencies to install)
                 additionalInstallCommands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
-                forceExternal: force create external environment even if dependencies are met in main environment
+                useExisting: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
 
         Returns:
-                The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
+                The created or existing environment (ExternalEnvironment if created, or an existing environment if useExisting=True and match found).
         """
         if isinstance(name, Path):
             raise Exception(
@@ -396,8 +413,19 @@ class EnvironmentManager:
             raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
 
         self._addDebugpyInDependencies(dependencies)
-        if not forceExternal and self._dependenciesAreInstalled(dependencies):
-            return self.mainEnvironment
+
+        # Try to find existing environment if useExisting=True
+        if useExisting:
+            for env_name, env in self.environments.items():
+                try:
+                    if self._environmentValidatesRequirements(env, dependencies):
+                        logger.debug(f"Environment '{env_name}' satisfies dependencies for '{name}', returning it.")
+                        return env
+                except Exception as e:
+                    logger.debug(f"Error checking environment '{env_name}': {e}")
+                    continue
+
+        # Create new environment
         pythonVersion = dependencies.get("python", "").replace("=", "")
         match = re.search(r"(\d+)\.(\d+)", pythonVersion)
         if match and (int(match.group(1)) < 3 or int(match.group(2)) < 9):
@@ -430,19 +458,19 @@ class EnvironmentManager:
         configPath: str | Path,
         optionalDependencies: list[str] | None = None,
         additionalInstallCommands: Commands = {},
-        forceExternal: bool = False,
+        useExisting: bool = False,
     ) -> Environment:
-        """Creates a new Conda environment from a config file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt).
+        """Creates a new Conda environment from a config file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt) or returns an existing one.
 
         Args:
                 name: Name for the new environment.
                 configPath: Path to configuration file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt).
                 optionalDependencies: List of optional dependency groups to extract from pyproject.toml.
                 additionalInstallCommands: Platform-specific commands during installation.
-                forceExternal: force create external environment even if dependencies are met in main environment
+                useExisting: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
 
         Returns:
-                The created environment (InternalEnvironment if dependencies are met in the main environment and not forceExternal, ExternalEnvironment otherwise).
+                The created or existing environment (ExternalEnvironment if created, or an existing environment if useExisting=True and match found).
         """
 
         # Parse config file
@@ -451,7 +479,7 @@ class EnvironmentManager:
         )
 
         # Use create() with parsed dependencies
-        return self.create(name, dependencies, additionalInstallCommands, forceExternal)
+        return self.create(name, dependencies, additionalInstallCommands, useExisting)
 
     def load(
         self,

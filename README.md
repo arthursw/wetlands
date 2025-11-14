@@ -144,7 +144,6 @@ The script `scripts/gen_ref_pages.py` is used by mkdocs to generate the API refe
 
 ## 📋 Todo
 
-- Handle general [dependency specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#dependency-specifiers) (handle version specifiers like '>=', '~=' etc.).
 - Use Pixi features and environment instead of creating one workspace per environment.
 
 ## 📜 License

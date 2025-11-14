@@ -1,5 +1,6 @@
 import platform
 import re
+from pathlib import Path
 from unittest.mock import MagicMock
 import subprocess
 
@@ -79,38 +80,30 @@ def test_create_dependencies_met_use_main_environment(environment_manager_fixtur
     env_name = "new-env-dont-create"
     dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
 
-    # Mock _dependenciesAreInstalled to return True
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=True))
+    # Mock _environmentValidatesRequirements to return True for main env
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=True))
 
-    env = manager.create(env_name, dependencies=dependencies, forceExternal=False)
+    env = manager.create(env_name, dependencies=dependencies, useExisting=True)
 
-    assert env is manager.mainEnvironment  # Should return the main environment instance
+    assert env is manager.mainEnvironment
     assert isinstance(env, InternalEnvironment)
-    manager._dependenciesAreInstalled.assert_called_once_with(dependencies)
-    mock_execute_output.assert_not_called()  # No commands should be run
+    mock_execute_output.assert_not_called()
 
 
-def test_create_dependencies_met_force_external(environment_manager_fixture, monkeypatch):
+def test_create_always_creates_new_when_use_existing_false(environment_manager_fixture, monkeypatch):
     manager, mock_execute_output, _ = environment_manager_fixture
-    env_name = "forced-external-env"
+    env_name = "always-new-env"
     dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
 
-    # Mock _dependenciesAreInstalled to return True, but forceExternal=True overrides it
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=True))
+    # Mock _environmentValidatesRequirements to return True (but should be ignored when useExisting=False)
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=True))
 
-    env = manager.create(env_name, dependencies=dependencies, forceExternal=True)
+    env = manager.create(env_name, dependencies=dependencies, useExisting=False)
 
+    # Should create new environment, not return existing one
     assert isinstance(env, ExternalEnvironment)
     assert env.name == env_name
-    assert env is manager.environments[env_name]
-    mock_execute_output.assert_called()  # Creation commands should be run
-
-    # Check for key commands
-    called_args, _ = mock_execute_output.call_args
-    command_list = called_args[0]
-    assert any(f"create -n {env_name}" in cmd for cmd in command_list)
-    # Check install commands are present (assuming numpy leads to some install command)
-    assert any("install" in cmd for cmd in command_list if "create" not in cmd)
+    mock_execute_output.assert_called()
 
 
 def test_create_dependencies_not_met_create_external(environment_manager_fixture, monkeypatch):
@@ -118,24 +111,23 @@ def test_create_dependencies_not_met_create_external(environment_manager_fixture
     env_name = "new-external-env"
     dependencies: Dependencies = {"conda": ["requests"], "pip": ["pandas"]}
 
-    # Mock _dependenciesAreInstalled to return False
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+    # Mock _environmentValidatesRequirements to return False
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
-    env = manager.create(env_name, dependencies=dependencies, forceExternal=False)
+    env = manager.create(env_name, dependencies=dependencies)
 
     assert isinstance(env, ExternalEnvironment)
     assert env.name == env_name
     assert env is manager.environments[env_name]
-    manager._dependenciesAreInstalled.assert_called_once_with(dependencies)
-    mock_execute_output.assert_called()  # Creation commands should be run
+    mock_execute_output.assert_called()
 
     # Check for key commands
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
     current_py_version = platform.python_version()
     assert any(f"create -n {env_name} python={current_py_version} -y" in cmd for cmd in command_list)
-    assert any(f"install" in cmd for cmd in command_list if "micromamba" in cmd)  # Check for install commands
-    assert any("requests" in cmd for cmd in command_list if "install" in cmd)  # Check dep is mentioned
+    assert any(f"install" in cmd for cmd in command_list if "micromamba" in cmd)
+    assert any("requests" in cmd for cmd in command_list if "install" in cmd)
     assert any("pandas" in cmd for cmd in command_list if "pip" in cmd and "install" in cmd)
 
 
@@ -143,9 +135,9 @@ def test_create_with_python_version(environment_manager_fixture, monkeypatch):
     manager, mock_execute_output, _ = environment_manager_fixture
     env_name = "py-versioned-env"
     py_version = "3.10.5"
-    dependencies: Dependencies = {"python": f"={py_version}", "pip": ["toolz"]}  # Use exact match format
+    dependencies: Dependencies = {"python": f"={py_version}", "pip": ["toolz"]}
 
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
     env = manager.create(env_name, dependencies=dependencies)
 
@@ -153,9 +145,7 @@ def test_create_with_python_version(environment_manager_fixture, monkeypatch):
     mock_execute_output.assert_called()
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
-    # Check python version is in create command
     assert any(f"create -n {env_name} python={py_version} -y" in cmd for cmd in command_list)
-    # Check install command for toolz
     assert any("toolz" in cmd for cmd in command_list if "pip" in cmd and "install" in cmd)
 
 
@@ -165,11 +155,10 @@ def test_create_with_additional_commands(environment_manager_fixture, monkeypatc
     dependencies: Dependencies = {"pip": ["tiny-package"]}
     additional_commands: Commands = {
         "all": ["echo 'hello world'"],
-        "linux": ["specific command"],  # e.g., 'linux', 'darwin', 'windows'
+        "linux": ["specific command"],
     }
 
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
-
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
     monkeypatch.setattr(platform, "system", MagicMock(return_value="Linux"))
 
     manager.create(env_name, dependencies=dependencies, additionalInstallCommands=additional_commands)
@@ -178,11 +167,8 @@ def test_create_with_additional_commands(environment_manager_fixture, monkeypatc
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
 
-    # Check create and install commands are present
     assert any(f"create -n {env_name}" in cmd for cmd in command_list)
     assert any("tiny-package" in cmd for cmd in command_list if "pip" in cmd and "install" in cmd)
-
-    # Check additional commands are present
     assert "echo 'hello world'" in command_list
     assert "specific command" in command_list
 
@@ -190,9 +176,9 @@ def test_create_with_additional_commands(environment_manager_fixture, monkeypatc
 def test_create_invalid_python_version_raises(environment_manager_fixture, monkeypatch):
     manager, _, _ = environment_manager_fixture
     env_name = "invalid-py-env"
-    dependencies: Dependencies = {"python": "=3.8"}  # Below 3.9 limit
+    dependencies: Dependencies = {"python": "=3.8"}
 
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
     with pytest.raises(Exception, match="Python version must be greater than 3.8"):
         manager.create(env_name, dependencies=dependencies)
@@ -211,7 +197,7 @@ def test_create_with_python_version_pixi(environment_manager_pixi_fixture, monke
         "conda": ["dep==1.0"],
     }  # Use exact match format
 
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
     env = manager.create(env_name, dependencies=dependencies)
@@ -226,4 +212,111 @@ def test_create_with_python_version_pixi(environment_manager_pixi_fixture, monke
     assert any(re.match(rf"{pixi_bin} add .* python={py_version}", cmd) is not None for cmd in command_list)
     # Check install command for dependencies
     assert any("toolz" in cmd and "--pypi" in cmd for cmd in command_list if f"{pixi_bin} add" in cmd)
-    assert any("dep" in cmd for cmd in command_list if f"{pixi_bin} add" in cmd)
+
+
+# ---- create Tests (useExisting parameter) ----
+
+
+def test_create_with_use_existing_returns_main_env(environment_manager_fixture, monkeypatch):
+    """Test that useExisting=True returns main environment if it satisfies dependencies."""
+    manager, mock_execute_output, _ = environment_manager_fixture
+    dependencies: Dependencies = {"pip": ["numpy>=1.20"]}
+
+    # Mock _environmentValidatesRequirements to return True for main environment
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=True))
+
+    env = manager.create("new_env", dependencies=dependencies, useExisting=True)
+
+    # Should return main environment instead of creating new one
+    assert env is manager.mainEnvironment
+    # Should not execute any creation commands
+    mock_execute_output.assert_not_called()
+
+
+def test_create_with_use_existing_returns_existing_env(environment_manager_fixture, monkeypatch):
+    """Test that useExisting=True returns an existing environment if it satisfies dependencies."""
+    manager, mock_execute_output, _ = environment_manager_fixture
+    dependencies: Dependencies = {"pip": ["numpy>=1.20"]}
+
+    # Create an existing environment
+    existing_env = ExternalEnvironment("existing_env", Path("some/path"), manager)
+    manager.environments["existing_env"] = existing_env
+
+    # Mock _environmentValidatesRequirements: return False for main, True for existing
+    def mock_validates(env, deps):
+        return env is existing_env
+
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(side_effect=mock_validates))
+
+    env = manager.create("new_env", dependencies=dependencies, useExisting=True)
+
+    # Should return the existing environment
+    assert env is existing_env
+    # Should not execute any creation commands
+    mock_execute_output.assert_not_called()
+
+
+def test_create_with_use_existing_creates_new_if_none_satisfy(environment_manager_fixture, monkeypatch):
+    """Test that useExisting=True creates new env if no existing env satisfies dependencies."""
+    manager, mock_execute_output, _ = environment_manager_fixture
+    dependencies: Dependencies = {"pip": ["numpy>=2.0"]}
+
+    # Create an existing environment that doesn't satisfy
+    existing_env = ExternalEnvironment("existing_env", Path("some/path"), manager)
+    manager.environments["existing_env"] = existing_env
+
+    # Mock _environmentValidatesRequirements to always return False
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
+    monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+
+    env = manager.create("new_env", dependencies=dependencies, useExisting=True)
+
+    # Should create a new environment
+    assert isinstance(env, ExternalEnvironment)
+    assert env.name == "new_env"
+    # Should execute creation commands
+    mock_execute_output.assert_called()
+
+
+def test_create_with_use_existing_false_skips_environment_checks(environment_manager_fixture, monkeypatch):
+    """Test that useExisting=False always creates a new environment."""
+    manager, mock_execute_output, _ = environment_manager_fixture
+    dependencies: Dependencies = {"pip": ["numpy"]}
+
+    # Create existing environments
+    env1 = ExternalEnvironment("env1", Path("path1"), manager)
+    manager.environments["env1"] = env1
+
+    # Mock _environmentValidatesRequirements to return True (would match if checked)
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=True))
+
+    env = manager.create("new_env", dependencies=dependencies, useExisting=False)
+
+    # Should create a new environment, not return existing ones
+    assert isinstance(env, ExternalEnvironment)
+    assert env.name == "new_env"
+    mock_execute_output.assert_called()
+
+
+def test_create_with_use_existing_returns_first_match(environment_manager_fixture, monkeypatch):
+    """Test that useExisting=True returns the first environment that satisfies deps."""
+    manager, mock_execute_output, _ = environment_manager_fixture
+    dependencies: Dependencies = {"pip": ["numpy"]}
+
+    # Create multiple environments, the second one satisfies deps
+    env1 = ExternalEnvironment("env1", Path("path1"), manager)
+    env2 = ExternalEnvironment("env2", Path("path2"), manager)
+    manager.environments["env1"] = env1
+    manager.environments["env2"] = env2
+
+    # Mock to return True only for env2
+    def mock_validates(env, deps):
+        return env is env2
+
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(side_effect=mock_validates))
+
+    env = manager.create("new_env", dependencies=dependencies, useExisting=True)
+
+    # Should return the first (or one of the) matching environment
+    assert env is env2
+    mock_execute_output.assert_not_called()

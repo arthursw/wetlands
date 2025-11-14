@@ -89,163 +89,58 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 # ---- _dependenciesAreInstalled Tests ----
 
 
-def test_dependencies_are_installed_python_mismatch(environment_manager_fixture):
+def test_environment_validates_requirements_main_env_python_mismatch(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
     # Ensure the version string format causes a mismatch
     different_py_version = "99.99"
     assert not sys.version.startswith(different_py_version)
 
-    dependencies: Dependencies = {"python": f"={different_py_version}"}  # Exact match required by logic
+    dependencies: Dependencies = {"python": f"={different_py_version}"}
 
-    installed = manager._dependenciesAreInstalled(dependencies)
+    result = manager._environmentValidatesRequirements(manager.mainEnvironment, dependencies)
 
-    assert not installed
-    mock_execute_output.assert_not_called()  # Should return False before checking packages
+    assert result is False
+    mock_execute_output.assert_not_called()
 
 
-def test_dependencies_are_installed_empty_deps(environment_manager_fixture):
+def test_environment_validates_requirements_main_env_empty_deps(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
-    dependencies: Dependencies = {}  # Python version check passes by default
+    dependencies: Dependencies = {}
 
-    installed = manager._dependenciesAreInstalled(dependencies)
+    result = manager._environmentValidatesRequirements(manager.mainEnvironment, dependencies)
 
-    assert installed is True  # Empty deps means nothing to fail
-    mock_execute_output.assert_not_called()  # No packages to check
+    assert result is True
+    mock_execute_output.assert_not_called()
 
 
-def test_dependencies_are_installed_conda_only_installed(environment_manager_fixture):
+def test_environment_validates_requirements_main_env_no_path_conda_fails(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = Path("some/valid/path")  # Ensure mainEnv path is not None
-    dependencies: Dependencies = {"conda": ["conda-forge::zlib==1.2.13", "zstandard"]}
-    # Mock output for 'conda list'
-    mock_execute_output.return_value = conda_list_json
-
-    installed = manager._dependenciesAreInstalled(dependencies)
-
-    assert installed is True
-    # Check if conda list command was executed within the main env context
-    assert mock_execute_output.call_count >= 1
-    called_args, _ = mock_execute_output.call_args
-    command_list = called_args[0]
-    assert any(f"activate {manager.mainEnvironment.path}" in cmd for cmd in command_list)
-    assert any("freeze --all" in cmd for cmd in command_list)
-
-
-def test_dependencies_are_installed_conda_only_not_installed(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = str(Path("some/valid/path"))
-    dependencies: Dependencies = {"conda": ["package1", "missing_package"]}
-    mock_execute_output.return_value = conda_list_json
-
-    installed = manager._dependenciesAreInstalled(dependencies)
-
-    assert installed is False
-
-
-def test_dependencies_are_installed_pip_only_installed(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = Path("some/valid/path")
-    dependencies: Dependencies = {"pip": ["package1==1.0", "package2"]}
-    # Mock output for 'pip freeze'
-    pip_freeze_output = """
-package1==1.0
-package2==2.5
-otherpackage==3.0
-    """.splitlines()
-
-    # Mock outputs for both commands, called sequentially
-    mock_execute_output.side_effect = [
-        conda_list_json,
-        pip_freeze_output,
-    ]
-
-    installed = manager._dependenciesAreInstalled(dependencies)
-
-    assert installed is True
-    # Check if pip freeze command was executed
-    assert mock_execute_output.call_count >= 1
-    called_args, _ = mock_execute_output.call_args
-    command_list = called_args[0]
-    assert any(f"activate {manager.mainEnvironment.path}" in cmd for cmd in command_list)
-    assert any("pip freeze --all" in cmd for cmd in command_list)
-
-
-def test_dependencies_are_installed_pip_only_not_installed(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = Path("some/valid/path")
-    dependencies: Dependencies = {"pip": ["package1==1.0", "missing_package==3.3"]}
-    mock_execute_output.return_value = "[]"
-
-    installed = manager._dependenciesAreInstalled(dependencies)
-
-    assert installed is False
-
-
-def test_dependencies_are_installed_conda_and_pip_installed(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = Path("some/valid/path")
-    dependencies: Dependencies = {"conda": ["zlib"], "pip": ["p_package==2"]}
-    # Mock outputs for both commands, called sequentially
-    mock_execute_output.side_effect = [
-        conda_list_json,
-        ["p_package==2.0"],  # pip freeze output
-    ]
-
-    installed = manager._dependenciesAreInstalled(dependencies)
-
-    assert installed is True
-    assert mock_execute_output.call_count >= 1
-    # Check first call (conda list)
-    call1_args, _ = mock_execute_output.call_args_list[0]
-    assert any("list --json" in cmd for cmd in call1_args[0])
-    # Check second call (pip freeze)
-    call2_args, _ = mock_execute_output.call_args_list[1]
-    assert any("pip freeze --all" in cmd for cmd in call2_args[0])
-
-
-def test_dependencies_are_installed_conda_ok_pip_missing(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = Path("some/valid/path")
-    dependencies: Dependencies = {"conda": ["conda-forge::zlib==1.2.13"], "pip": ["p_package==2", "missing_pip==3"]}
-    mock_execute_output.side_effect = [
-        conda_list_json,
-        ["p_package==2.0"],  # pip freeze output (missing one)
-    ]
-
-    installed = manager._dependenciesAreInstalled(dependencies)
-
-    assert installed is False
-    assert mock_execute_output.call_count >= 1
-
-
-def test_dependencies_are_installed_no_main_env_conda_fails(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = None  # No main environment path
+    manager.mainEnvironment.path = None
     dependencies: Dependencies = {"conda": ["some_package"]}
 
-    installed = manager._dependenciesAreInstalled(dependencies)
+    result = manager._environmentValidatesRequirements(manager.mainEnvironment, dependencies)
 
-    assert installed is False
-    mock_execute_output.assert_not_called()  # Should fail before calling conda list
+    assert result is False
+    mock_execute_output.assert_not_called()
 
 
-def test_dependencies_are_installed_no_main_env_pip_uses_metadata(environment_manager_fixture):
+def test_environment_validates_requirements_main_env_no_path_pip_uses_metadata(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
-    manager.mainEnvironment.path = None  # No main environment path, should use metadata.distributions()
-    dependencies: Dependencies = {"pip": ["pytest"]}  # Assume pytest is installed in test runner env
+    manager.mainEnvironment.path = None
+    dependencies: Dependencies = {"pip": ["pytest"]}
 
-    installed = manager._dependenciesAreInstalled(dependencies)
+    result = manager._environmentValidatesRequirements(manager.mainEnvironment, dependencies)
 
     # This depends on whether 'pytest' is ACTUALLY available via metadata in the test env
     import importlib.metadata
 
     try:
         importlib.metadata.version("pytest")
-        assert installed is True
+        assert result is True
     except importlib.metadata.PackageNotFoundError:
-        assert installed is False  # Or assert False if you know it won't be found
+        assert result is False
 
-    mock_execute_output.assert_not_called()  # Should use metadata, not run pip freeze
+    mock_execute_output.assert_not_called()
 
 
 # ---- _checkRequirement Tests ----
@@ -385,3 +280,98 @@ def test_check_requirement_invalid_version_format(environment_manager_fixture):
     result = manager._checkRequirement("numpy>=1.0", "pip", installed_packages)
 
     assert result is False
+
+
+# ---- _environmentValidatesRequirements Tests ----
+
+
+def test_environment_validates_requirements_conda_only(environment_manager_fixture, monkeypatch):
+    """Test that _environmentValidatesRequirements works for conda packages."""
+    manager, mock_execute_output, _ = environment_manager_fixture
+    from unittest.mock import MagicMock
+    from wetlands.external_environment import ExternalEnvironment
+
+    # Create a test environment
+    test_env = ExternalEnvironment("test_env", Path("some/path"), manager)
+    dependencies: Dependencies = {"conda": ["zlib==1.2.13"]}
+
+    # Create conda packages with the proper format (including "kind" field)
+    conda_packages = [
+        {"name": "zlib", "version": "1.2.13", "kind": "conda"},
+        {"name": "zstandard", "version": "0.22.0", "kind": "conda"},
+    ]
+
+    # Mock getInstalledPackages to return conda packages
+    monkeypatch.setattr(manager, "getInstalledPackages", MagicMock(return_value=conda_packages))
+
+    result = manager._environmentValidatesRequirements(test_env, dependencies)
+
+    assert result is True
+
+
+def test_environment_validates_requirements_pip_only(environment_manager_fixture, monkeypatch):
+    """Test that _environmentValidatesRequirements works for pip packages."""
+    manager, _, _ = environment_manager_fixture
+    from unittest.mock import MagicMock
+    from wetlands.external_environment import ExternalEnvironment
+
+    # Create a test environment
+    test_env = ExternalEnvironment("test_env", Path("some/path"), manager)
+    dependencies: Dependencies = {"pip": ["numpy>=1.20.0"]}
+
+    pip_packages = [
+        {"name": "numpy", "version": "1.21.0", "kind": "pypi"},
+        {"name": "scipy", "version": "1.7.0", "kind": "pypi"},
+    ]
+
+    # Mock getInstalledPackages
+    monkeypatch.setattr(manager, "getInstalledPackages", MagicMock(return_value=pip_packages))
+
+    result = manager._environmentValidatesRequirements(test_env, dependencies)
+
+    assert result is True
+
+
+def test_environment_validates_requirements_not_satisfied(environment_manager_fixture, monkeypatch):
+    """Test that _environmentValidatesRequirements returns False when dependencies are not satisfied."""
+    manager, _, _ = environment_manager_fixture
+    from unittest.mock import MagicMock
+    from wetlands.external_environment import ExternalEnvironment
+
+    # Create a test environment
+    test_env = ExternalEnvironment("test_env", Path("some/path"), manager)
+    dependencies: Dependencies = {"pip": ["numpy>=2.0.0"]}
+
+    pip_packages = [
+        {"name": "numpy", "version": "1.20.0", "kind": "pypi"},  # Too old
+    ]
+
+    # Mock getInstalledPackages
+    monkeypatch.setattr(manager, "getInstalledPackages", MagicMock(return_value=pip_packages))
+
+    result = manager._environmentValidatesRequirements(test_env, dependencies)
+
+    assert result is False
+
+
+def test_environment_validates_requirements_mixed_deps(environment_manager_fixture, monkeypatch):
+    """Test _environmentValidatesRequirements with both conda and pip dependencies."""
+    manager, _, _ = environment_manager_fixture
+    from unittest.mock import MagicMock
+    from wetlands.external_environment import ExternalEnvironment
+
+    # Create a test environment
+    test_env = ExternalEnvironment("test_env", Path("some/path"), manager)
+    dependencies: Dependencies = {"conda": ["zlib>=1.2.0"], "pip": ["numpy>=1.20"]}
+
+    mixed_packages = [
+        {"name": "zlib", "version": "1.2.13", "kind": "conda"},
+        {"name": "numpy", "version": "1.21.0", "kind": "pypi"},
+    ]
+
+    # Mock getInstalledPackages
+    monkeypatch.setattr(manager, "getInstalledPackages", MagicMock(return_value=mixed_packages))
+
+    result = manager._environmentValidatesRequirements(test_env, dependencies)
+
+    assert result is True

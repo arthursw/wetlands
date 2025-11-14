@@ -21,7 +21,7 @@ class Dependency(TypedDict):
 
 Represents an individual dependency with additional metadata:
 
-- **name** *(str)*: The name of the package (e.g., `"numpy"`) with an optional channel specification (for conda specification) and a version specifier, in the format `channel::package==version.number`.
+- **name** *(str)*: The name of the package (e.g., `"numpy"`) with an optional channel specification (for conda specification) and a version specifier. Format: `channel::package==version.number`. Supports [PEP 440 version specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/#version-specifiers) like `>=1.20,<2.0`, `~=1.5.0`, `!=1.0.0`, etc.
 - **platforms** *(optional)*: A list of platforms on which this package should be installed.
 - **optional** *(optional)*: Marks the dependency as optional (e.g., for extra features like enabling computation on GPU).
 - **dependencies** *(optional)*: Indicates whether to install sub-dependencies.

@@ -59,8 +59,8 @@ def environment_manager_for_config_tests(tmp_path_factory, mock_command_executor
     # Mock environmentExists to simplify create tests
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
-    # Mock _dependenciesAreInstalled to return False so dependencies are not checked
-    monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+    # Mock _environmentValidatesRequirements to return False so dependencies are not checked
+    monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
     return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
 
@@ -226,8 +226,8 @@ class TestCreateWithPyprojectToml:
         """Test creating environment from pyproject.toml with optional dependencies."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False so environment is created
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False so environment is created
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
             mock_parser = MagicMock()
@@ -248,8 +248,8 @@ class TestCreateWithPyprojectToml:
         """Test that a non-existent environmentName falls back to default environment."""
         manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
             mock_parser = MagicMock()
@@ -272,8 +272,8 @@ class TestCreateWithEnvironmentYml:
         """Test creating environment from environment.yml."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
             mock_parser = MagicMock()
@@ -290,8 +290,8 @@ class TestCreateWithEnvironmentYml:
         """Test environment.yml doesn't require environmentName or optionalDependencies."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
             mock_parser = MagicMock()
@@ -313,8 +313,8 @@ class TestCreateWithRequirementsTxt:
         """Test creating environment from requirements.txt."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
             mock_parser = MagicMock()
@@ -332,8 +332,8 @@ class TestCreateWithRequirementsTxt:
         """Test requirements.txt doesn't require environmentName or optionalDependencies."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
             mock_parser = MagicMock()
@@ -366,8 +366,8 @@ class TestCreateBackwardsCompatibility:
         """Test creating environment with no dependencies."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False so environment is created
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False so environment is created
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         env = manager.create(name="test_env")
 
@@ -401,8 +401,8 @@ class TestCreateParameterValidation:
         """Test that providing optionalDependencies with createFromConfig is allowed."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
             mock_parser = MagicMock()
@@ -426,8 +426,8 @@ class TestCreateIntegrationWithDependencyManager:
         """Test that parsed dependencies are passed to DependencyManager."""
         manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
 
-        # Mock _dependenciesAreInstalled to return False
-        monkeypatch.setattr(manager, "_dependenciesAreInstalled", MagicMock(return_value=False))
+        # Mock _environmentValidatesRequirements to return False
+        monkeypatch.setattr(manager, "_environmentValidatesRequirements", MagicMock(return_value=False))
 
         parsed_deps = {"conda": ["python=3.11", "numpy>=1.20"], "pip": ["requests>=2.25"]}
 
