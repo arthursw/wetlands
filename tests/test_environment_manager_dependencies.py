@@ -246,3 +246,142 @@ def test_dependencies_are_installed_no_main_env_pip_uses_metadata(environment_ma
         assert installed is False  # Or assert False if you know it won't be found
 
     mock_execute_output.assert_not_called()  # Should use metadata, not run pip freeze
+
+
+# ---- _checkRequirement Tests ----
+
+
+def test_check_requirement_no_version_specified(environment_manager_fixture):
+    """Test matching package without version constraint."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.0", "kind": "pypi"}]
+
+    result = manager._checkRequirement("numpy", "pip", installed_packages)
+
+    assert result is True
+
+
+def test_check_requirement_exact_version_match(environment_manager_fixture):
+    """Test exact version matching with ==."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.0", "kind": "pypi"}]
+
+    result = manager._checkRequirement("numpy==1.20.0", "pip", installed_packages)
+
+    assert result is True
+
+
+def test_check_requirement_exact_version_no_match(environment_manager_fixture):
+    """Test exact version not matching."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.0", "kind": "pypi"}]
+
+    result = manager._checkRequirement("numpy==1.21.0", "pip", installed_packages)
+
+    assert result is False
+
+
+def test_check_requirement_greater_than_or_equal(environment_manager_fixture):
+    """Test >= version specifier."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.0", "kind": "pypi"}]
+
+    result_true = manager._checkRequirement("numpy>=1.20.0", "pip", installed_packages)
+    result_false = manager._checkRequirement("numpy>=1.21.0", "pip", installed_packages)
+
+    assert result_true is True
+    assert result_false is False
+
+
+def test_check_requirement_less_than(environment_manager_fixture):
+    """Test < version specifier."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.0", "kind": "pypi"}]
+
+    result_true = manager._checkRequirement("numpy<1.21.0", "pip", installed_packages)
+    result_false = manager._checkRequirement("numpy<1.20.0", "pip", installed_packages)
+
+    assert result_true is True
+    assert result_false is False
+
+
+def test_check_requirement_version_range(environment_manager_fixture):
+    """Test version range with multiple specifiers."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.5", "kind": "pypi"}]
+
+    result_true = manager._checkRequirement("numpy>=1.20.0,<1.21.0", "pip", installed_packages)
+    result_false = manager._checkRequirement("numpy>=1.20.6,<1.21.0", "pip", installed_packages)
+
+    assert result_true is True
+    assert result_false is False
+
+
+def test_check_requirement_compatible_release(environment_manager_fixture):
+    """Test ~= (compatible release) specifier.
+
+    ~=2.28 means >= 2.28 and == 2.*
+    ~=3.0 means >= 3.0 and == 3.*
+    """
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "package", "version": "2.28.5", "kind": "pypi"}]
+
+    result_true = manager._checkRequirement("package~=2.28", "pip", installed_packages)
+    result_false = manager._checkRequirement("package~=3.0", "pip", installed_packages)
+
+    assert result_true is True
+    assert result_false is False
+
+
+def test_check_requirement_not_equal(environment_manager_fixture):
+    """Test != version specifier."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "package", "version": "1.5.2", "kind": "pypi"}]
+
+    result_true = manager._checkRequirement("package!=1.5.0", "pip", installed_packages)
+    result_false = manager._checkRequirement("package!=1.5.2", "pip", installed_packages)
+
+    assert result_true is True
+    assert result_false is False
+
+
+def test_check_requirement_conda_with_channel(environment_manager_fixture):
+    """Test conda package with channel prefix."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "zlib", "version": "1.2.13", "kind": "conda"}]
+
+    result = manager._checkRequirement("conda-forge::zlib==1.2.13", "conda", installed_packages)
+
+    assert result is True
+
+
+def test_check_requirement_package_not_found(environment_manager_fixture):
+    """Test when package is not in installed list."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.0", "kind": "pypi"}]
+
+    result = manager._checkRequirement("scipy>=1.0", "pip", installed_packages)
+
+    assert result is False
+
+
+def test_check_requirement_wrong_package_manager(environment_manager_fixture):
+    """Test when package manager type doesn't match."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "1.20.0", "kind": "pypi"}]
+
+    # Try to check as conda when it's pip
+    result = manager._checkRequirement("numpy==1.20.0", "conda", installed_packages)
+
+    assert result is False
+
+
+def test_check_requirement_invalid_version_format(environment_manager_fixture):
+    """Test handling of invalid version format in installed packages."""
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "numpy", "version": "not-a-version", "kind": "pypi"}]
+
+    # Should not crash, just return False
+    result = manager._checkRequirement("numpy>=1.0", "pip", installed_packages)
+
+    assert result is False

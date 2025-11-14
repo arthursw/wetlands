@@ -7,6 +7,8 @@ import subprocess
 import sys
 from typing import Any, Literal, cast, Union
 from venv import logger
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version, InvalidVersion
 
 from wetlands._internal.install import installMicromamba, installPixi
 from wetlands.internal_environment import InternalEnvironment
@@ -179,19 +181,49 @@ class EnvironmentManager:
     def _checkRequirement(
         self, dependency: str, packageManager: Literal["pip", "conda"], installedPackages: list[dict[str, str]]
     ) -> bool:
-        """Check if dependency is installed (exists in installedPackages)"""
+        """Check if dependency is installed (exists in installedPackages).
+
+        Supports PEP 440 version specifiers like:
+        - "numpy" (any version)
+        - "numpy==1.20.0" (exact version)
+        - "numpy>=1.20,<2.0" (version range)
+        - "numpy~=2.28" (compatible release)
+        - "numpy!=1.5.0" (any except specific version)
+        """
         if packageManager == "conda":
             dependency = self._removeChannel(dependency)
-        nameVersion = dependency.split("==")
+
         packageManagerName = "conda" if packageManager == "conda" else "pypi"
-        return any(
-            [
-                nameVersion[0] == package["name"]
-                and (len(nameVersion) == 1 or package["version"].startswith(nameVersion[1]))
-                and packageManagerName == package["kind"]
-                for package in installedPackages
-            ]
-        )
+
+        # Parse dependency string to extract package name and version specifier
+        # Package name is followed by optional version specifier (starts with ==, >=, <=, >, <, !=, ~=)
+        match = re.match(r'^([a-zA-Z0-9._-]+)((?:[<>=!~].*)?)', dependency)
+        if not match:
+            return False
+
+        package_name = match.group(1)
+        version_spec = match.group(2).strip()
+
+        # Find matching package
+        for package in installedPackages:
+            if package_name != package["name"] or packageManagerName != package["kind"]:
+                continue
+
+            # If no version specified, just match on name
+            if not version_spec:
+                return True
+
+            # Check version against specifier using packaging library
+            try:
+                installed_version = Version(package["version"])
+                specifier_set = SpecifierSet(version_spec)
+                if installed_version in specifier_set:
+                    return True
+            except InvalidVersion:
+                # If version parsing fails, continue to next package
+                continue
+
+        return False
 
     def _dependenciesAreInstalled(self, dependencies: Dependencies) -> bool:
         """Verifies if all specified dependencies are installed in the main environment.
