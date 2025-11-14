@@ -1,6 +1,5 @@
 import platform
 import re
-from pathlib import Path
 from unittest.mock import MagicMock
 import subprocess
 
@@ -60,9 +59,7 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
 
     monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
 
-    manager = EnvironmentManager(
-        wetlandsInstancePath=wetlands_instance_path, condaPath=dummy_pixi_path, manager="pixi"
-    )
+    manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=dummy_pixi_path, manager="pixi")
 
     monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])
     monkeypatch.setattr(

@@ -128,7 +128,7 @@ class DependencyManager:
         installDepsCommands = self.settingsManager.getProxyEnvironmentVariablesCommands()
 
         installDepsCommands += self.commandGenerator.getActivateCondaCommands()
-        
+
         if environment:
             installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(
                 environment, activateConda=False

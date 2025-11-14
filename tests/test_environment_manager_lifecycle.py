@@ -48,9 +48,7 @@ def environment_manager_pixi_fixture(tmp_path_factory, monkeypatch):
 
     monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
 
-    manager = EnvironmentManager(
-        wetlandsInstancePath=wetlands_instance_path, condaPath=dummy_pixi_path, manager="pixi"
-    )
+    manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=dummy_pixi_path, manager="pixi")
 
     mock_execute = MagicMock(spec=subprocess.Popen)
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
@@ -451,7 +449,9 @@ class TestExistingEnvironmentAccess:
     def test_environment_exists_with_path_not_found(self, tmp_path):
         """Test that environmentExists() returns False for nonexistent Path."""
         nonexistent = tmp_path / "nonexistent"
-        manager = EnvironmentManager(wetlandsInstancePath=tmp_path / "wetlands", condaPath=tmp_path, manager="micromamba")
+        manager = EnvironmentManager(
+            wetlandsInstancePath=tmp_path / "wetlands", condaPath=tmp_path, manager="micromamba"
+        )
         assert not manager.environmentExists(nonexistent)
 
     def test_load_nonexistent_path_raises_error(self, tmp_path_factory):

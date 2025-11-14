@@ -49,6 +49,7 @@ conda_list_json = """
 def mock_command_executor(monkeypatch):
     """Mocks the CommandExecutor methods."""
     import subprocess
+
     mock_execute = MagicMock(spec=subprocess.Popen)
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
 
