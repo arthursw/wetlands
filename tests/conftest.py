@@ -9,9 +9,39 @@ import wetlands._internal.install as install_module
 import wetlands.environment_manager as env_mgr_module
 
 
+def pytest_addoption(parser):
+    """Add custom pytest command-line options."""
+    parser.addoption(
+        "--skip-micromamba",
+        action="store_true",
+        default=False,
+        help="Skip micromamba tests to speed up development (run pixi tests only)",
+    )
+
+
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "integration: mark test as an integration test that should not be mocked")
+    config.addinivalue_line("markers", "micromamba: mark test as micromamba-specific")
+
+
+def pytest_generate_tests(metafunc):
+    """Filter parametrized tests based on --skip-micromamba flag."""
+    if metafunc.config.getoption("--skip-micromamba"):
+        # If test uses env_manager fixture with micromamba parameter, skip micromamba variants
+        if "env_manager" in metafunc.fixturenames:
+            # This marks that we should skip micromamba for this test
+            metafunc.config._skip_micromamba_tests = True
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip tests that use micromamba parameter when --skip-micromamba is set."""
+    if config.getoption("--skip-micromamba"):
+        skip_micromamba = pytest.mark.skip(reason="Skipped with --skip-micromamba flag")
+        for item in items:
+            # Check if the test is parametrized with micromamba
+            if "micromamba_root/" in item.nodeid:
+                item.add_marker(skip_micromamba)
 
 
 # Store original functions before mocking
@@ -85,9 +115,9 @@ def pytest_runtest_setup(item):
         if module_name in sys.modules:
             test_installer_module = sys.modules[module_name]
             if hasattr(test_installer_module, "installMicromamba"):
-                test_installer_module.installMicromamba = mock_micromamba
+                test_installer_module.installMicromamba = mock_micromamba    # type: ignore
             if hasattr(test_installer_module, "installPixi"):
-                test_installer_module.installPixi = mock_pixi
+                test_installer_module.installPixi = mock_pixi                # type: ignore
 
 
 def pytest_runtest_teardown(item):
@@ -104,9 +134,9 @@ def pytest_runtest_teardown(item):
             if module_name in sys.modules:
                 test_installer_module = sys.modules[module_name]
                 if hasattr(test_installer_module, "installMicromamba"):
-                    test_installer_module.installMicromamba = _original_install_micromamba_test
+                    test_installer_module.installMicromamba = _original_install_micromamba_test    # type: ignore
                 if hasattr(test_installer_module, "installPixi"):
-                    test_installer_module.installPixi = _original_install_pixi_test
+                    test_installer_module.installPixi = _original_install_pixi_test                # type: ignore
 
 
 @pytest.fixture

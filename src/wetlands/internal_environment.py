@@ -1,7 +1,9 @@
+import runpy
+import sys
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from wetlands.environment import Environment
+from wetlands.environment import Commands, Dependencies, Environment
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
@@ -28,3 +30,21 @@ class InternalEnvironment(Environment):
         if not self._isModFunction(module, function):
             raise Exception(f"Module {modulePath} has no function {function}.")
         return getattr(module, function)(*args)
+
+    def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
+        """
+        Runs a Python script locally using runpy.run_path(), simulating
+        'python script.py arg1 arg2 ...'
+
+        Args:
+            scriptPath: Path to the script to execute.
+            args: List of arguments to pass (becomes sys.argv[1:] locally).
+            run_name: Value for runpy.run_path(run_name=...); defaults to "__main__".
+
+        Returns:
+            The resulting globals dict from the executed script, or None on failure.
+        """
+        scriptPath = str(scriptPath)
+        sys.argv = [scriptPath] + list(args)
+        runpy.run_path(scriptPath, run_name=run_name)
+        return None

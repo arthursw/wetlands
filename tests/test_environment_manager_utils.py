@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from wetlands._internal.dependency_manager import Dependencies
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 
@@ -40,7 +41,7 @@ class TestAddDebugpyInDependencies:
         )
 
         with patch.object(manager, "installConda"):
-            dependencies = {"pip": ["numpy"]}
+            dependencies = Dependencies({"pip": ["numpy"]})
             manager._addDebugpyInDependencies(dependencies)
 
             assert "conda" in dependencies
@@ -56,7 +57,7 @@ class TestAddDebugpyInDependencies:
         )
 
         with patch.object(manager, "installConda"):
-            dependencies = {"pip": ["numpy"]}
+            dependencies = Dependencies({"pip": ["numpy"]})
             manager._addDebugpyInDependencies(dependencies)
 
             # Conda deps should not be added if not in debug mode
@@ -73,11 +74,11 @@ class TestAddDebugpyInDependencies:
         )
 
         with patch.object(manager, "installConda"):
-            dependencies = {"conda": ["debugpy==1.0.0"]}
+            dependencies = Dependencies({"conda": ["debugpy==1.0.0"]})
             manager._addDebugpyInDependencies(dependencies)
 
             # Check debugpy appears only once
-            count = sum(1 for dep in dependencies["conda"] if "debugpy" in str(dep))
+            count = sum(1 for dep in dependencies["conda"] if "debugpy" in str(dep)) # type: ignore
             assert count == 1
 
 

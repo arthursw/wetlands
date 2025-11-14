@@ -1,5 +1,6 @@
 from pathlib import Path
 import pytest
+import sys
 from unittest.mock import MagicMock, patch
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.internal_environment import InternalEnvironment
@@ -40,3 +41,43 @@ def test_execute_raises_exception_for_missing_function():
     ):
         with pytest.raises(Exception, match=f"Module {module_path} has no function {function_name}."):
             internal_env.execute(module_path, function_name, ())
+
+
+def test_run_script_success():
+    env_manager = MagicMock(spec=EnvironmentManager)
+    internal_env = InternalEnvironment("main_env", Path("test_env"), env_manager)
+    script_path = "/path/to/script.py"
+
+    with patch("runpy.run_path") as mock_run_path:
+        result = internal_env.runScript(script_path)
+
+    mock_run_path.assert_called_once_with(script_path, run_name="__main__")
+    assert result is None
+    assert sys.argv[0] == script_path
+
+
+def test_run_script_with_arguments():
+    env_manager = MagicMock(spec=EnvironmentManager)
+    internal_env = InternalEnvironment("main_env", Path("test_env"), env_manager)
+    script_path = "/path/to/script.py"
+    args = ("arg1", "arg2", "arg3")
+
+    with patch("runpy.run_path") as mock_run_path:
+        result = internal_env.runScript(script_path, args=args)
+
+    mock_run_path.assert_called_once_with(script_path, run_name="__main__")
+    assert result is None
+    assert sys.argv == [script_path, "arg1", "arg2", "arg3"]
+
+
+def test_run_script_with_custom_run_name():
+    env_manager = MagicMock(spec=EnvironmentManager)
+    internal_env = InternalEnvironment("main_env", Path("test_env"), env_manager)
+    script_path = "/path/to/script.py"
+    run_name = "custom_name"
+
+    with patch("runpy.run_path") as mock_run_path:
+        result = internal_env.runScript(script_path, run_name=run_name)
+
+    mock_run_path.assert_called_once_with(script_path, run_name=run_name)
+    assert result is None

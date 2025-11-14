@@ -1,3 +1,4 @@
+import itertools
 import json
 import re
 import platform
@@ -416,13 +417,14 @@ class EnvironmentManager:
 
         # Try to find existing environment if useExisting=True
         if useExisting:
-            for env_name, env in self.environments.items():
+            envs = [self.mainEnvironment] + [env for env in self.environments.values() if env != self.mainEnvironment]
+            for env in envs:
                 try:
                     if self._environmentValidatesRequirements(env, dependencies):
-                        logger.debug(f"Environment '{env_name}' satisfies dependencies for '{name}', returning it.")
+                        logger.debug(f"Environment '{env.name}' satisfies dependencies for '{name}', returning it.")
                         return env
                 except Exception as e:
-                    logger.debug(f"Error checking environment '{env_name}': {e}")
+                    logger.debug(f"Error checking environment '{env.name}': {e}")
                     continue
 
         # Create new environment
@@ -521,6 +523,11 @@ class EnvironmentManager:
         Returns:
                 Output lines of the installation commands.
         """
+        if environment == self.mainEnvironment and self.settingsManager.usePixi:
+            raise Exception("Cannot install packages in an InternalEnvironment when using Pixi.")
+        if environment == self.mainEnvironment and environment.path is None:
+            raise Exception("Cannot install packages in an InternalEnvironment with no conda path.")
+        
         installCommands = self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
         return self.commandExecutor.executeCommandsAndGetOutput(installCommands)

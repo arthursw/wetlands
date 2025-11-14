@@ -24,7 +24,6 @@ def tool_available(tool_name: str) -> bool:
     return shutil.which(tool_name) is not None
 
 
-@pytest.mark.integration
 @pytest.fixture(scope="module", params=["micromamba_root/", "pixi_root/"])
 def env_manager(request, tmp_path_factory):
     # Setup temporary conda root
@@ -69,7 +68,7 @@ def test_dependency_installation(env_manager):
     """Test that EnvironmentManager.install() correctly installs dependencies (in existing env)."""
     env_name = "test_env_deps"
     logger.info(f"Testing dependency installation: {env_name}")
-    env = cast(ExternalEnvironment, env_manager.create(env_name, forceExternal=True))
+    env = env_manager.create(env_name, useExisting=False)
     dependencies = Dependencies({"pip": ["munch==4.0.0"], "conda": ["fastai::fastprogress==1.0.3"]})
 
     env.install(dependencies)
@@ -94,7 +93,7 @@ def test_internal_external_environment(env_manager):
 
     logger.info("Testing internal/external environment creation")
     # No dependencies: InternalEnvironment
-    env_internal = env_manager.create("test_env_internal", {})
+    env_internal = env_manager.create("test_env_internal", {}, useExisting=True)
     assert isinstance(env_internal, InternalEnvironment)
     assert env_internal == env_manager.mainEnvironment
 
@@ -102,8 +101,7 @@ def test_internal_external_environment(env_manager):
     env_external = env_manager.create("test_env_external", {"conda": ["requests"]})
     assert isinstance(env_external, ExternalEnvironment)
 
-    # force_external=True: ExternalEnvironment
-    env_external_forced = env_manager.create("test_env_external_forced", {}, forceExternal=True)
+    env_external_forced = env_manager.create("test_env_external_forced", {}, useExisting=False)
     assert isinstance(env_external_forced, ExternalEnvironment)
 
     env_internal.exit()
@@ -222,7 +220,8 @@ def double(x):
 """
         )
 
-    env = env_manager.create(env_name, {})  # No dependencies needed
+    env = env_manager.create(env_name, {}, useExisting=True)  # No dependencies needed
+    # env.launch()
 
     with pytest.raises(Exception) as excinfo:
         env.execute(str(module_path), "non_existent_function", [1])
@@ -241,7 +240,8 @@ def double(x):
 def test_non_existent_module(env_manager):
     """Test that an exception is raised when importing a non-existent module."""
     env_name = "test_env_non_existent_module"
-    env = env_manager.create(env_name, {})
+    env = env_manager.create(env_name, {}, useExisting=True)
+    # env.launch()
     logger.info(f"Testing non-existent module: {env_name}")
 
     with pytest.raises(ModuleNotFoundError):

@@ -29,7 +29,7 @@ There are other minor differences between the two libraries. For example, Wetlan
 
 - **Automatic Environment Management**: Create and configure environments on demand.
 - **Dependency Isolation**: Install dependencies without conflicts.
-- **Embedded Execution**: Run Python functions inside isolated environments.
+- **Embedded Execution**: Run Python functions or scripts inside isolated environments.
 - **Integrated Debugging**: Debug code running in isolated environments using VS Code or PyCharm with breakpoints and step-through execution.
 - **Micromamba**: Wetlands uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
 
@@ -66,6 +66,9 @@ array = [1,2,3]
 result = minimal_module.sum(array)
 
 print(f"Sum of {array} is {result}.")
+
+# You can also run Python scripts directly using runScript()
+# env.runScript("script.py", args=("arg1", "arg2"))
 
 # Clean up and exit the environment
 env.exit()

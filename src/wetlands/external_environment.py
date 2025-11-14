@@ -111,8 +111,7 @@ class ExternalEnvironment(Environment):
         """Send a payload to the remote environment and wait for its response."""
         connection = self.connection
         if connection is None or connection.closed:
-            logger.warning(f"Connection not ready. Skipping {payload.get('action')} request.")
-            return None
+            raise ExecutionException("Connection not ready.")
 
         try:
             connection.send(payload)
@@ -257,7 +256,7 @@ class ExternalEnvironment(Environment):
         self,
         dependencies: Union[Dependencies, None] = None,
         additionalInstallCommands: Commands = {},
-        forceExternal: bool = False,
+        useExisting: bool = False,
     ) -> "Environment":
         """Updates this external environment by deleting it and recreating it with new dependencies.
 
@@ -266,7 +265,7 @@ class ExternalEnvironment(Environment):
                     - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
                     - None (no dependencies to install)
                 additionalInstallCommands: Platform-specific commands during installation.
-                forceExternal: Force create external environment even if dependencies are met in main environment
+                useExisting: use existing environment if it exists instead of recreating it.
 
         Returns:
                 The recreated environment.
@@ -292,5 +291,5 @@ class ExternalEnvironment(Environment):
             str(self.name),
             dependencies=dependencies,
             additionalInstallCommands=additionalInstallCommands,
-            forceExternal=forceExternal,
+            useExisting=useExisting,
         )

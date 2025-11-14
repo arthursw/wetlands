@@ -37,8 +37,11 @@ if __name__ == "__main__":
     # calling exampleModule.function_name(args) will run env.execute(module_name, function_name, args)
     diameters = exampleModule.segment(str(imagePath), str(segmentationPath))
 
-    # Or use env.execute() directly
+    # Or use env.execute() directly to call a function in a module
     # diameters = env.execute("example_module.py", "segment", (imagePath, segmentationPath))
+
+    # Alternatively, use env.runScript() to run an entire Python script
+    # env.runScript("script.py", args=(str(imagePath), str(segmentationPath)))
 
     print(f"Found diameters of {diameters} pixels.")
 

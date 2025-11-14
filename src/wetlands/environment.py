@@ -119,7 +119,7 @@ class Environment:
         self,
         dependencies: Union[Dependencies, None] = None,
         additionalInstallCommands: Commands = {},
-        forceExternal: bool = False,
+        useExisting: bool = False,
     ) -> "Environment":
         """Update this environment with new dependencies. Only available in ExternalEnvironment."""
-        raise NotImplementedError("update() is only available in ExternalEnvironment")
+        raise NotImplementedError("update() in ExternalEnvironment")
