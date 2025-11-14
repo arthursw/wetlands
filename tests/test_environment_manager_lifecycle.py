@@ -375,7 +375,7 @@ class TestUpdateEnvironment:
         assert result == new_env
 
     def test_update_with_force_external(self, environment_manager_fixture, monkeypatch):
-        """Test that update works with forceExternal flag."""
+        """Test that update works with useExisting flag to False."""
         manager = environment_manager_fixture
         env_name = "test-env"
         dependencies: Dependencies = {"pip": ["numpy>=1.20"]}
@@ -396,16 +396,16 @@ class TestUpdateEnvironment:
         create_mock = MagicMock(return_value=new_env)
         monkeypatch.setattr(manager, "create", create_mock)
 
-        result = env.update(dependencies, forceExternal=True)
+        result = env.update(dependencies, useExisting=False)
 
         # Should call delete
         delete_mock.assert_called_once()
-        # Should call create with forceExternal flag
+        # Should call create with useExisting flag
         create_mock.assert_called_once()
         call_args, call_kwargs = create_mock.call_args
         assert call_args[0] == env_name
         assert call_kwargs.get("dependencies") == dependencies
-        assert call_kwargs.get("forceExternal") is True
+        assert call_kwargs.get("useExisting") is False
         # Should return the created environment
         assert result == new_env
 
