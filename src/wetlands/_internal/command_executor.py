@@ -1,3 +1,4 @@
+from pathlib import Path
 import platform
 import json
 import subprocess
@@ -9,6 +10,10 @@ from wetlands.logger import logger
 
 class CommandExecutor:
     """Handles execution of shell commands with error checking and logging."""
+
+    def __init__(self, scriptsPath: Path | None = None) -> None:
+        """scriptsPath: Path where to create temporary script files for command execution (useful for debugging). If None, use the system default temp directory."""
+        self.scriptsPath = scriptsPath
 
     @staticmethod
     def killProcess(process) -> None:
@@ -108,6 +113,7 @@ class CommandExecutor:
         exitIfCommandError: bool = True,
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
+        removePythonEnvVars: bool = True,
     ) -> subprocess.Popen:
         """Executes shell commands in a subprocess. Warning: does not wait for completion unless ``wait`` is True.
 
@@ -116,13 +122,18 @@ class CommandExecutor:
                 exitIfCommandError: Whether to insert error checking after each command to make sure the whole command chain stops if an error occurs (otherwise the script will be executed entirely even when one command fails at the beginning).
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
                 wait: Whether to wait for the process to complete before returning.
+                removePythonEnvVars: Whether to remove PYTHONEXECUTABLE, PYTHONHOME and PYTHONPATH from the environment variables to avoid interference with conda/pixi environment activation.
 
         Returns:
                 Subprocess handle for the executed commands.
         """
+        import os
+
         commandsString = "\n\t\t".join(commands)
         logger.debug(f"Execute commands:\n\n\t\t{commandsString}\n")
-        with tempfile.NamedTemporaryFile(suffix=".ps1" if self._isWindows() else ".sh", mode="w", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            dir=self.scriptsPath, suffix=".ps1" if self._isWindows() else ".sh", mode="w", delete=False
+        ) as tmp:
             if exitIfCommandError:
                 commands = self._insertCommandErrorChecks(commands)
             tmp.write("\n".join(commands))
@@ -145,6 +156,24 @@ class CommandExecutor:
             if not self._isWindows():
                 subprocess.run(["chmod", "u+x", tmp.name])
             logger.debug(f"Script file: {tmp.name}")
+
+            if removePythonEnvVars:
+                # Remove environment variables that can interfere with conda/pixi activation
+                # These are typically set by the parent application (e.g., napari) and can cause
+                # Python to use the wrong interpreter or libraries instead of the isolated environment
+                env = popenKwargs.get("env")
+                vars_to_remove = ["PYTHONEXECUTABLE", "PYTHONHOME", "PYTHONPATH"]
+                # warn if mergedKwargs had an env variable which can cause issues with env activation
+                if env is not None and any(var in vars_to_remove for var in env):
+                    logger.warning(f"Removing variables {vars_to_remove} from env.")
+
+                if env is None:
+                    env = os.environ.copy()
+
+                for var in vars_to_remove:
+                    env.pop(var, None)
+                popenKwargs["env"] = env
+
             defaultPopenKwargs = {
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,  # Merge stderr and stdout to handle all them with a single loop

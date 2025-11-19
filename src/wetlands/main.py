@@ -322,7 +322,7 @@ def main():
         "-wip",
         "--wetlandsInstancePath",
         help="The Wetlands instance folder path. Required only when multiple wetlands instances are running and two environments have the same name.",
-        default=Path("pixi/wetlands"),
+        default=Path("wetlands/"),
         type=Path,
     )
     subparsers = main_parser.add_subparsers()

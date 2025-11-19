@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import platform
 from importlib import metadata
@@ -19,6 +20,7 @@ from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.config_parser import ConfigParser
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
+from wetlands.logger import setLogLevel
 
 
 class EnvironmentManager:
@@ -72,6 +74,7 @@ class EnvironmentManager:
         condaPath = Path(condaPath)
 
         # Initialize logger to use the wetlandsInstancePath for logs
+        setLogLevel(logging.DEBUG if debug else logging.INFO)
         setLogFilePath(self.wetlandsInstancePath / "wetlands.log")
 
         usePixi = self._initManager(manager, condaPath)
@@ -88,7 +91,7 @@ class EnvironmentManager:
         self.installConda()
         self.commandGenerator = CommandGenerator(self.settingsManager)
         self.dependencyManager = DependencyManager(self.commandGenerator)
-        self.commandExecutor = CommandExecutor()
+        self.commandExecutor = CommandExecutor(self.wetlandsInstancePath / "command_executions" if debug else None)
 
     def _initManager(self, manager: str, condaPath: Path) -> bool:
         if manager not in ["auto", "pixi", "micromamba"]:
