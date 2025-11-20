@@ -1835,7 +1835,7 @@
 </span></code></pre></div>
 <p><strong>Arguments:</strong></p>
 <ul>
-<li><code>-wip, --wetlandsInstancePath PATH</code> (optional): Path to the Wetlands instance folder (default: <code>pixi/wetlands</code>)</li>
+<li><code>-wip, --wetlandsInstancePath PATH</code> (optional): Path to the Wetlands instance folder (default: <code>wetlands</code>)</li>
 </ul>
 <p><strong>Example:</strong></p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$<span class="w"> </span>wetlands<span class="w"> </span>list
@@ -1843,20 +1843,22 @@
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>Command<span class="w"> </span>line<span class="w"> </span><span class="p">|</span><span class="w"> </span>Process<span class="w"> </span>ID<span class="w"> </span><span class="p">|</span><span class="w"> </span>Parent<span class="w"> </span>process<span class="w"> </span>ID
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>---
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>python<span class="w"> </span>/path/to/wetlands/module_executor.py<span class="w"> </span>env1<span class="w"> </span>--wetlandsInstancePath<span class="w"> </span>/tmp/wetlands<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12345</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12340</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>python<span class="w"> </span>/path/to/wetlands/module_executor.py<span class="w"> </span>env2<span class="w"> </span>--wetlandsInstancePath<span class="w"> </span>/tmp/wetlands<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12346</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12340</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>python<span class="w"> </span>/path/to/wetlands/module_executor.py<span class="w"> </span>env1<span class="w"> </span>--wetlandsInstancePath<span class="w"> </span>path/to/wetlands<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12345</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12340</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>python<span class="w"> </span>/path/to/wetlands/module_executor.py<span class="w"> </span>env2<span class="w"> </span>--wetlandsInstancePath<span class="w"> </span>path/to/wetlands<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12346</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12340</span>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>Environments<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>wetlands<span class="w"> </span>instance<span class="w"> </span>/tmp/wetlands:
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>Environments<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>wetlands<span class="w"> </span>instance<span class="w"> </span>path/to/wetlands:
 </span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
 </span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>Environment<span class="w"> </span><span class="p">|</span><span class="w"> </span>Debug<span class="w"> </span>Port<span class="w"> </span><span class="p">|</span><span class="w"> </span>Path
 </span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>---
 </span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>env1<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">5678</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>/path/to/module_executor.py
 </span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>env2<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">5679</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>/path/to/module_executor.py
 </span></code></pre></div>
-<p>This command displays:
-- <strong>Running processes</strong>: All active Wetlands environment processes with their PIDs
-- <strong>Available debug ports</strong>: The port number assigned to each environment for debugging
-- <strong>Module executor paths</strong>: Where the module executor is located for each environment</p>
+<p>This command displays:</p>
+<ul>
+<li><strong>Running processes</strong>: All active Wetlands environment processes with their PIDs</li>
+<li><strong>Available debug ports</strong>: The port number assigned to each environment for debugging</li>
+<li><strong>Module executor paths</strong>: Where the module executor is located for each environment</li>
+</ul>
 <h3 id="2-wetlands-debug-attach-debugger-to-an-environment">2. <code>wetlands debug</code> - Attach Debugger to an Environment</h3>
 <p>Attach VS Code or PyCharm to a running Wetlands environment for debugging.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>SOURCE_PATH<span class="w"> </span>-n<span class="w"> </span>ENV_NAME<span class="w"> </span><span class="o">[</span>-ide<span class="w"> </span><span class="o">{</span>vscode,pycharm<span class="o">}]</span><span class="w"> </span><span class="o">[</span>-wip<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>-jmc<span class="o">]</span>
@@ -1907,7 +1909,7 @@
 </ol>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">wetlands.environment_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvironmentManager</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">env_manager</span> <span class="o">=</span> <span class="n">EnvironmentManager</span><span class="p">(</span><span class="s2">&quot;pixi/&quot;</span><span class="p">)</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">env_manager</span> <span class="o">=</span> <span class="n">EnvironmentManager</span><span class="p">()</span>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">env_manager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="s2">&quot;my_env&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;pip&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;numpy&quot;</span><span class="p">,</span> <span class="s2">&quot;pandas&quot;</span><span class="p">]})</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
 </span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
