@@ -31,7 +31,7 @@ wetlands list [-wip PATH]
 
 **Arguments:**
 
-- `-wip, --wetlandsInstancePath PATH` (optional): Path to the Wetlands instance folder (default: `pixi/wetlands`)
+- `-wip, --wetlandsInstancePath PATH` (optional): Path to the Wetlands instance folder (default: `wetlands`)
 
 **Example:**
 
@@ -41,10 +41,10 @@ Running wetlands environments (for all wetlands instance):
 
 Command line | Process ID | Parent process ID
 ---
-python /path/to/wetlands/module_executor.py env1 --wetlandsInstancePath /tmp/wetlands | 12345 | 12340
-python /path/to/wetlands/module_executor.py env2 --wetlandsInstancePath /tmp/wetlands | 12346 | 12340
+python /path/to/wetlands/module_executor.py env1 --wetlandsInstancePath path/to/wetlands | 12345 | 12340
+python /path/to/wetlands/module_executor.py env2 --wetlandsInstancePath path/to/wetlands | 12346 | 12340
 
-Environments of the wetlands instance /tmp/wetlands:
+Environments of the wetlands instance path/to/wetlands:
 
 Environment | Debug Port | Path
 ---
@@ -53,6 +53,7 @@ env2 | 5679 | /path/to/module_executor.py
 ```
 
 This command displays:
+
 - **Running processes**: All active Wetlands environment processes with their PIDs
 - **Available debug ports**: The port number assigned to each environment for debugging
 - **Module executor paths**: Where the module executor is located for each environment
@@ -129,7 +130,7 @@ wetlands kill -n my_env
 ```python
 from wetlands.environment_manager import EnvironmentManager
 
-env_manager = EnvironmentManager("pixi/")
+env_manager = EnvironmentManager()
 env = env_manager.create("my_env", {"pip": ["numpy", "pandas"]})
 env.launch()
 
