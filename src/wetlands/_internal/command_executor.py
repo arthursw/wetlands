@@ -14,6 +14,8 @@ class CommandExecutor:
     def __init__(self, scriptsPath: Path | None = None) -> None:
         """scriptsPath: Path where to create temporary script files for command execution (useful for debugging). If None, use the system default temp directory."""
         self.scriptsPath = scriptsPath
+        if scriptsPath is not None:
+            scriptsPath.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def killProcess(process) -> None:
