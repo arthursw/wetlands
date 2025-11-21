@@ -406,6 +406,11 @@ class EnvironmentManager:
                 "Environment name cannot be a Path, use EnvironmentManager.load() to load an existing environment."
             )
 
+        # Check if environment already exists on disk
+        path = self.settingsManager.getEnvironmentPathFromName(name)
+        if self.environmentExists(path) and name not in self.environments:
+            self.environments[name] = ExternalEnvironment(name, path, self)
+
         if name in self.environments:
             logger.debug(f"Environment '{name}' already exists, returning existing instance.")
             return self.environments[name]
@@ -436,7 +441,7 @@ class EnvironmentManager:
             raise Exception("Python version must be greater than 3.8")
         pythonRequirement = " python=" + (pythonVersion if len(pythonVersion) > 0 else platform.python_version())
         createEnvCommands = self.commandGenerator.getActivateCondaCommands()
-        path = self.settingsManager.getEnvironmentPathFromName(name)
+
         if self.settingsManager.usePixi:
             manifestPath = path
             if not manifestPath.exists():
