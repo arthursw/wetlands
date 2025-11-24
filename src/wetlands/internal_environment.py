@@ -29,7 +29,7 @@ class InternalEnvironment(Environment):
         module = self._importModule(modulePath)
         if not self._isModFunction(module, function):
             raise Exception(f"Module {modulePath} has no function {function}.")
-        return getattr(module, function)(*args)
+        return getattr(module, function)(*args, **kwargs)
 
     def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
         """

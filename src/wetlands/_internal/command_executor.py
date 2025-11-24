@@ -3,7 +3,8 @@ import platform
 import json
 import subprocess
 import tempfile
-from typing import Any
+import threading
+from typing import Any, Callable
 import psutil
 from wetlands.logger import logger
 
@@ -116,6 +117,7 @@ class CommandExecutor:
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
         removePythonEnvVars: bool = True,
+        log_callback: Callable[[str], None] | None = None,
     ) -> subprocess.Popen:
         """Executes shell commands in a subprocess. Warning: does not wait for completion unless ``wait`` is True.
 
@@ -125,6 +127,7 @@ class CommandExecutor:
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
                 wait: Whether to wait for the process to complete before returning.
                 removePythonEnvVars: Whether to remove PYTHONEXECUTABLE, PYTHONHOME and PYTHONPATH from the environment variables to avoid interference with conda/pixi environment activation.
+                log_callback: Optional callback function to call for each line of output. Will be called in a daemon thread.
 
         Returns:
                 Subprocess handle for the executed commands.
@@ -185,6 +188,25 @@ class CommandExecutor:
                 "bufsize": 1,  # 1 means line buffered
             }
             process = subprocess.Popen(executeFile, **(defaultPopenKwargs | popenKwargs))
+
+            # Launch logging thread if callback provided
+            if log_callback is not None:
+                def log_output_thread():
+                    """Thread to read stdout and call the callback."""
+                    if process.stdout is not None:
+                        try:
+                            for line in process.stdout:
+                                line = line.rstrip("\n\r")
+                                try:
+                                    log_callback(line)
+                                except Exception as e:
+                                    logger.error(f"Exception in log_callback: {e}")
+                        except Exception as e:
+                            logger.error(f"Exception reading process output: {e}")
+
+                thread = threading.Thread(target=log_output_thread, daemon=True)
+                thread.start()
+
             if wait:
                 process.wait()
             return process

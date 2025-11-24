@@ -259,3 +259,38 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 #### Summary of Example 1 Flow:
 
 The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment_manager.Environment.launch] starts a hidden server in that environment. [`env.importModule()`][wetlands.environment.Environment.importModule] provides a proxy, and calling functions on the proxy executes the code (like `example_module.segment`) within the isolated environment, handling data transfer automatically. [`env.exit()`][wetlands.environment.Environment.exit] cleans up the server process.
+
+---
+
+## 📊 Monitoring with Logging Callbacks
+
+You can optionally monitor the environment's output in real-time using logging callbacks. This is useful for tracking progress, debugging, or implementing custom logging strategies.
+
+### Example: Basic Callback Usage
+
+```python
+def log_callback(line: str):
+    print(f"[LOG] {line}")
+
+# Monitor launch
+env = environmentManager.create("cellpose_env", {"conda": ["cellpose==3.1.0"]})
+env.launch(log_callback=log_callback)
+
+# Monitor execution
+example_module = env.importModule("example_module.py")
+result = example_module.segment(
+    str(imagePath),
+    str(segmentationPath),
+    log_callback=log_callback  # Capture output during execution
+)
+```
+
+!!! note "Callback Features"
+
+    - **Global callbacks**: Set during `launch()` to capture all environment output
+    - **Per-execution callbacks**: Set during `execute()` or `importModule()` calls to monitor specific operations
+    - **Combination**: Both can be used together—global callback receives all output while per-execution callback captures specific operation output
+    - **Thread-safe**: Callbacks are invoked from daemon threads without blocking the main process
+    - **Exception handling**: Exceptions in callbacks are caught and logged automatically
+
+For advanced patterns like file logging, pattern matching, and custom handlers, see the [Logging Callbacks Guide](logging_callbacks.md).

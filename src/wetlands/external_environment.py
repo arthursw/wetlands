@@ -1,10 +1,9 @@
-import queue
 import subprocess
 from pathlib import Path
 from multiprocessing.connection import Client, Connection
 import functools
 import threading
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union, Callable
 from send2trash import send2trash
 
 from wetlands.logger import logger
@@ -37,34 +36,41 @@ class ExternalEnvironment(Environment):
     def __init__(self, name: str, path: Path, environmentManager: "EnvironmentManager") -> None:
         super().__init__(name, path, environmentManager)
         self._lock = threading.RLock()
-        self._logThread: threading.Thread | None = None
-        self.loggingQueue = queue.Queue()
+        self._global_log_callback: Callable[[str], None] | None = None
+        self._execution_log_callback: Callable[[str], None] | None = None
 
-    def logOutput(self) -> None:
-        """Logs output from the subprocess."""
-        if self.process is None or self.process.stdout is None or self.process.stdout.readline is None:
-            return
-        try:
-            for line in iter(self.process.stdout.readline, ""):  # Use iter to avoid buffering issues:
-                # iter(callable, sentinel) repeatedly calls callable (process.stdout.readline) until it returns the sentinel value ("", an empty string).
-                # Since readline() is called directly in each iteration, it immediately processes available output instead of accumulating it in a buffer.
-                # This effectively forces line-by-line reading in real-time rather than waiting for the subprocess to fill its buffer.
-                logger.info(line.strip())
-                self.loggingQueue.put(line.strip())
-        except Exception as e:
-            logger.error(f"Exception in logging thread: {e}")
-            self.loggingQueue.put(f"Exception in logging thread: {e}")
-        finally:
-            self.loggingQueue.put(None)
-        return
+    def _createLogCallback(self) -> Callable[[str], None]:
+        """Creates a combined log callback that calls both global and per-execution callbacks.
+
+        Thread-safe: _execution_log_callback is only modified in synchronized execute()/runScript() methods,
+        and reads from the callback thread are atomic in Python for simple object references.
+
+        Returns:
+                A callback function that calls both global and execution callbacks if they are set.
+        """
+        def combined_callback(line: str) -> None:
+            if self._global_log_callback is not None:
+                try:
+                    self._global_log_callback(line)
+                except Exception as e:
+                    logger.error(f"Exception in global log callback: {e}")
+
+            # Safe to read _execution_log_callback without lock: only modified in synchronized methods
+            if self._execution_log_callback is not None:
+                try:
+                    self._execution_log_callback(line)
+                except Exception as e:
+                    logger.error(f"Exception in execution log callback: {e}")
+
+        return combined_callback
 
     @synchronized
-    def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
+    def launch(self, additionalActivateCommands: Commands = {}, log_callback: Callable[[str], None] | None = None) -> None:
         """Launches a server listening for orders in the environment.
 
         Args:
                 additionalActivateCommands: Platform-specific activation commands.
-                logOutputInThread: Logs the process output in a separate thread.
+                log_callback: Optional callback to receive log messages during launch and subsequent background logging.
         """
 
         if self.launched():
@@ -78,34 +84,44 @@ class ExternalEnvironment(Environment):
             f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}'
         ]
 
-        self.process = self.executeCommands(commands, additionalActivateCommands)
+        # Set up global callback for this launch and subsequent background logging
+        self._global_log_callback = log_callback
 
-        if self.process.stdout is not None:
-            try:
-                for line in self.process.stdout:
-                    logger.info(line.strip())
-                    if self.environmentManager.debug:
-                        if line.strip().startswith("Listening debug port "):
-                            debugPort = int(line.strip().replace("Listening debug port ", ""))
-                            self.environmentManager.registerEnvironment(self, debugPort, moduleExecutorPath)
-                    if line.strip().startswith("Listening port "):
-                        self.port = int(line.strip().replace("Listening port ", ""))
-                        break
-            except Exception as e:
-                self.process.stdout.close()
-                raise e
+        # Event to signal when port is found
+        port_found_event = threading.Event()
 
+        # Create a callback that parses output for port information using the combined callback
+        combined = self._createLogCallback()
+
+        def launch_callback(line: str) -> None:
+            """Callback to parse ports and call the combined callback."""
+            # Call the combined callback (which includes global and per-execution callbacks)
+            combined(line)
+
+            # Parse port information
+            if self.environmentManager.debug:
+                if line.startswith("Listening debug port "):
+                    debugPort = int(line.replace("Listening debug port ", ""))
+                    self.environmentManager.registerEnvironment(self, debugPort, moduleExecutorPath)
+
+            if line.startswith("Listening port "):
+                self.port = int(line.replace("Listening port ", ""))
+                port_found_event.set()
+
+        # Launch process with callback
+        self.process = self.executeCommands(commands, additionalActivateCommands, log_callback=launch_callback)
+
+        # Wait for port to be found (with timeout)
+        if not port_found_event.wait(timeout=30):
+            raise Exception(f"Timeout waiting for server port.")
+
+        # Check if process is still running
         if self.process.poll() is not None:
-            if self.process.stdout is not None:
-                self.process.stdout.close()
             raise Exception(f"Process exited with return code {self.process.returncode}.")
         if self.port is None:
             raise Exception(f"Could not find the server port.")
-        self.connection = Client(("localhost", self.port))
 
-        if logOutputInThread:
-            self._logThread = threading.Thread(target=self.logOutput, daemon=True)
-            self._logThread.start()
+        self.connection = Client(("localhost", self.port))
 
     def _sendAndWait(self, payload: dict) -> Any:
         """Send a payload to the remote environment and wait for its response."""
@@ -142,7 +158,7 @@ class ExternalEnvironment(Environment):
         return None
 
     @synchronized
-    def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
+    def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}, log_callback: Callable[[str], None] | None = None) -> Any:
         """Executes a function in the given module and return the result.
         Warning: all arguments (args and kwargs) must be picklable (since they will be send with [multiprocessing.connection.Connection.send](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send))!
 
@@ -151,23 +167,31 @@ class ExternalEnvironment(Environment):
                 function: the name of the function to execute
                 args: the argument list for the function
                 kwargs: the keyword arguments for the function
+                log_callback: Optional callback to receive log messages during this execution
 
         Returns:
                 The result of the function if it is defined and the connection is opened ; None otherwise.
         Raises:
             OSError when raised by the communication.
         """
-        payload = dict(
-            action="execute",
-            modulePath=str(modulePath),
-            function=function,
-            args=args,
-            kwargs=kwargs,
-        )
-        return self._sendAndWait(payload)
+        # Set per-execution callback for duration of this execution
+        self._execution_log_callback = log_callback
+
+        try:
+            payload = dict(
+                action="execute",
+                modulePath=str(modulePath),
+                function=function,
+                args=args,
+                kwargs=kwargs,
+            )
+            return self._sendAndWait(payload)
+        finally:
+            # Clear per-execution callback
+            self._execution_log_callback = None
 
     @synchronized
-    def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
+    def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__", log_callback: Callable[[str], None] | None = None) -> Any:
         """
         Runs a Python script remotely using runpy.run_path(), simulating
         'python script.py arg1 arg2 ...'
@@ -176,17 +200,25 @@ class ExternalEnvironment(Environment):
             scriptPath: Path to the script to execute.
             args: List of arguments to pass (becomes sys.argv[1:] remotely).
             run_name: Value for runpy.run_path(run_name=...); defaults to "__main__".
+            log_callback: Optional callback to receive log messages during this execution
 
         Returns:
             The resulting globals dict from the executed script, or None on failure.
         """
-        payload = dict(
-            action="run",
-            scriptPath=str(scriptPath),
-            args=args,
-            run_name=run_name,
-        )
-        return self._sendAndWait(payload)
+        # Set per-execution callback for duration of this execution
+        self._execution_log_callback = log_callback
+
+        try:
+            payload = dict(
+                action="run",
+                scriptPath=str(scriptPath),
+                args=args,
+                run_name=run_name,
+            )
+            return self._sendAndWait(payload)
+        finally:
+            # Clear per-execution callback
+            self._execution_log_callback = None
 
     @synchronized
     def launched(self) -> bool:
@@ -213,9 +245,6 @@ class ExternalEnvironment(Environment):
 
         if self.process and self.process.stdout:
             self.process.stdout.close()
-
-        if self._logThread:
-            self._logThread.join(timeout=2)
 
         CommandExecutor.killProcess(self.process)
 

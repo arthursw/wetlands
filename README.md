@@ -85,6 +85,33 @@ def sum(x):
 
 See the `examples/` folder for more detailed examples.
 
+## 📊 Monitoring with Callbacks
+
+Wetlands provides callback-based logging to monitor subprocess output in real-time:
+
+```python
+# Monitor environment launch and execution with callbacks
+def log_callback(line: str):
+    print(f"[LOG] {line}")
+
+env = environmentManager.create("demo", {"pip": ["numpy"]})
+env.launch(log_callback=log_callback)  # Monitor startup
+
+result = env.execute(
+    "module.py",
+    "my_function",
+    log_callback=log_callback  # Monitor execution
+)
+```
+
+**Features:**
+- Global callbacks for environment-level logging
+- Per-execution callbacks for operation-specific monitoring
+- Real-time output capture from subprocesses
+- Thread-safe callback invocation
+
+For comprehensive examples and advanced patterns, see the [Logging Callbacks Guide](docs/logging_callbacks.md).
+
 ## 🐛 Debugging
 
 Wetlands includes tools to debug code running in isolated environments using VS Code or PyCharm. You can set breakpoints, step through code, and inspect variables in real-time.

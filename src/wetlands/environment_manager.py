@@ -546,6 +546,7 @@ class EnvironmentManager:
         additionalActivateCommands: Commands = {},
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
+        log_callback: Any = None,
     ) -> subprocess.Popen:
         """Executes the given commands in the given environment.
 
@@ -554,6 +555,8 @@ class EnvironmentManager:
                 commands: The commands to execute in the environment.
                 additionalActivateCommands: Platform-specific activation commands.
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+                wait: Whether to wait for the process to complete before returning.
+                log_callback: Optional callback to receive log messages from command output.
 
         Returns:
                 The launched process.
@@ -561,7 +564,7 @@ class EnvironmentManager:
         activateCommands = self.commandGenerator.getActivateEnvironmentCommands(environment, additionalActivateCommands)
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(
-            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait
+            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait, log_callback=log_callback
         )
 
     def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path) -> None:

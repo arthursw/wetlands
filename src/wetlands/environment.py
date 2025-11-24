@@ -67,8 +67,9 @@ class Environment:
         """
         return self.environmentManager.install(self, dependencies, additionalInstallCommands)
 
-    def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
+    def launch(self, additionalActivateCommands: Commands = {}, log_callback: Any = None) -> None:
         """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Do nothing when InternalEnvironment. See [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
+        del additionalActivateCommands, log_callback  # Arguments used by ExternalEnvironment
         return
 
     def executeCommands(
@@ -77,6 +78,7 @@ class Environment:
         additionalActivateCommands: Commands = {},
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
+        log_callback: Any = None,
     ) -> subprocess.Popen:
         """Executes the given commands in this environment.
 
@@ -85,12 +87,13 @@ class Environment:
                 additionalActivateCommands: Platform-specific activation commands.
                 popenKwargs: Keyword arguments for subprocess.Popen(). See [`EnvironmentManager.executeCommands`][wetlands.environment_manager.EnvironmentManager.executeCommands].
                 wait: Whether to wait for the process to complete before returning.
+                log_callback: Optional callback to receive log messages from command output.
 
         Returns:
                 The launched process.
         """
         return self.environmentManager.executeCommands(
-            self, commands, additionalActivateCommands, popenKwargs, wait=wait
+            self, commands, additionalActivateCommands, popenKwargs, wait=wait, log_callback=log_callback
         )
 
     @abstractmethod
@@ -122,4 +125,5 @@ class Environment:
         useExisting: bool = False,
     ) -> "Environment":
         """Update this environment with new dependencies. Only available in ExternalEnvironment."""
+        del dependencies, additionalInstallCommands, useExisting  # Arguments used by subclasses
         raise NotImplementedError("update() in ExternalEnvironment")
