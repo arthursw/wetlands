@@ -17,6 +17,7 @@ from wetlands._internal.process_logger import ProcessLogger
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
 
+MODULE_EXECUTOR_FILE = "module_executor.py"
 
 def synchronized(method):
     """Decorator to wrap a method call with self._lock."""
@@ -51,24 +52,27 @@ class ExternalEnvironment(Environment):
         if self.launched():
             return
 
-        moduleExecutorFile = "module_executor.py"
-        moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / moduleExecutorFile
+        moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / MODULE_EXECUTOR_FILE
 
         debugArgs = f" --debugPort 0" if self.environmentManager.debug else ""
         commands = [
             f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}'
         ]
 
-        self.process = self.executeCommands(commands, additionalActivateCommands)
-
-        # Create ProcessLogger with context for the module executor process
+        # Create log context for the module executor process
         log_context = {
             "log_source": LOG_SOURCE_EXECUTION,
             "env_name": self.name,
-            "func_name": "module_executor"
+            "call_target": MODULE_EXECUTOR_FILE
         }
-        self._process_logger = ProcessLogger(self.process, log_context, logger)
-        self._process_logger.start_reading()
+
+        # Pass log_context to executeCommands so ProcessLogger is created with proper context
+        self.process = self.executeCommands(commands, additionalActivateCommands, log_context=log_context)
+
+        # Retrieve the ProcessLogger that was already created and started by executeCommands
+        self._process_logger = self.environmentManager.commandExecutor._process_loggers.get(self.process.pid)
+        if self._process_logger is None:
+            raise Exception("Failed to retrieve ProcessLogger for module executor process")
 
         # Wait for port announcement with timeout
         def port_predicate(line: str) -> bool:
@@ -145,14 +149,25 @@ class ExternalEnvironment(Environment):
         Raises:
             OSError when raised by the communication.
         """
-        payload = dict(
-            action="execute",
-            modulePath=str(modulePath),
-            function=function,
-            args=args,
-            kwargs=kwargs,
-        )
-        return self._sendAndWait(payload)
+        # Update log context to reflect the function being executed
+        module_name = Path(modulePath).stem
+        call_target = f"{module_name}:{function}"
+        if self._process_logger:
+            self._process_logger.update_log_context({"call_target": call_target})
+
+        try:
+            payload = dict(
+                action="execute",
+                modulePath=str(modulePath),
+                function=function,
+                args=args,
+                kwargs=kwargs,
+            )
+            return self._sendAndWait(payload)
+        finally:
+            # Reset to module_executor after execution
+            if self._process_logger:
+                self._process_logger.update_log_context({"call_target": MODULE_EXECUTOR_FILE})
 
     @synchronized
     def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
@@ -168,13 +183,23 @@ class ExternalEnvironment(Environment):
         Returns:
             The resulting globals dict from the executed script, or None on failure.
         """
-        payload = dict(
-            action="run",
-            scriptPath=str(scriptPath),
-            args=args,
-            run_name=run_name,
-        )
-        return self._sendAndWait(payload)
+        # Update log context to reflect the script being executed
+        script_name = Path(scriptPath).name
+        if self._process_logger:
+            self._process_logger.update_log_context({"call_target": script_name})
+
+        try:
+            payload = dict(
+                action="run",
+                scriptPath=str(scriptPath),
+                args=args,
+                run_name=run_name,
+            )
+            return self._sendAndWait(payload)
+        finally:
+            # Reset to module_executor after execution
+            if self._process_logger:
+                self._process_logger.update_log_context({"call_target": MODULE_EXECUTOR_FILE})
 
     @synchronized
     def launched(self) -> bool:

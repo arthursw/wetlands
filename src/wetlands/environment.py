@@ -77,6 +77,7 @@ class Environment:
         additionalActivateCommands: Commands = {},
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
+        log_context: dict[str, Any] | None = None,
     ) -> subprocess.Popen:
         """Executes the given commands in this environment.
 
@@ -85,12 +86,13 @@ class Environment:
                 additionalActivateCommands: Platform-specific activation commands.
                 popenKwargs: Keyword arguments for subprocess.Popen(). See [`EnvironmentManager.executeCommands`][wetlands.environment_manager.EnvironmentManager.executeCommands].
                 wait: Whether to wait for the process to complete before returning.
+                log_context: Optional context dict to attach to logs via ProcessLogger.
 
         Returns:
                 The launched process.
         """
         return self.environmentManager.executeCommands(
-            self, commands, additionalActivateCommands, popenKwargs, wait=wait
+            self, commands, additionalActivateCommands, popenKwargs, wait=wait, log_context=log_context
         )
 
     @abstractmethod

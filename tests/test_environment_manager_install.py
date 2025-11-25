@@ -13,12 +13,19 @@ from wetlands._internal.command_generator import Commands
 @pytest.fixture
 def mock_command_executor(monkeypatch):
     """Mocks the CommandExecutor methods."""
-    mock_execute = MagicMock(spec=subprocess.Popen)
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.returncode = 0
+    mock_process.pid = 12345
+    # Make wait() set returncode to 0 when called
+    mock_process.wait.return_value = 0
+
+    mock_execute = MagicMock(return_value=mock_process)
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
 
     mocks = {
         "executeCommands": mock_execute,
         "executeCommandsAndGetOutput": mock_execute_output,
+        "mock_process": mock_process,
     }
     return mocks
 
@@ -42,7 +49,7 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
+    return manager, mock_command_executor["executeCommands"], mock_command_executor["executeCommandsAndGetOutput"]
 
 
 @pytest.fixture
@@ -61,14 +68,15 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
 
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
+    return manager, mock_command_executor["executeCommands"], mock_command_executor["executeCommandsAndGetOutput"]
 
 
 # ---- install Tests (micromamba) ----
 
 
 def test_install_in_existing_env(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
+    manager, _, mock_execute_and_get_output = environment_manager_fixture
+    mock_execute_output = mock_execute_and_get_output
     env_name = "target-env"
     dependencies: Dependencies = {"conda": ["new_dep==1.0"]}
 
@@ -91,7 +99,8 @@ def test_install_in_existing_env(environment_manager_fixture):
 
 
 def test_install_in_main_env(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
+    manager, _, mock_execute_and_get_output = environment_manager_fixture
+    mock_execute_output = mock_execute_and_get_output
     dependencies: Dependencies = {"pip": ["another_pip_dep"]}
 
     # Pass the main environment
@@ -108,7 +117,8 @@ def test_install_in_main_env(environment_manager_fixture):
 
 
 def test_install_with_additional_commands(environment_manager_fixture):
-    manager, mock_execute_output, _ = environment_manager_fixture
+    manager, _, mock_execute_and_get_output = environment_manager_fixture
+    mock_execute_output = mock_execute_and_get_output
     env_name = "install-env-extras"
     dependencies: Dependencies = {"conda": ["dep1"]}
     additional_commands: Commands = {"all": ["post-install script"]}
@@ -133,7 +143,8 @@ def test_install_with_additional_commands(environment_manager_fixture):
 
 
 def test_install_in_existing_env_pixi(environment_manager_pixi_fixture):
-    manager, mock_execute_output, _ = environment_manager_pixi_fixture
+    manager, _, mock_execute_and_get_output = environment_manager_pixi_fixture
+    mock_execute_output = mock_execute_and_get_output
     env_name = "target-env"
     dependencies: Dependencies = {"conda": ["new_dep==1.0"]}
 

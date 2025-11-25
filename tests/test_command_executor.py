@@ -8,7 +8,8 @@ def executor():
 
 
 def test_execute_commands_success(executor):
-    process = executor.executeCommands(["echo HelloWorld"])
+    # Use log=False to prevent ProcessLogger from consuming stdout
+    process = executor.executeCommands(["echo HelloWorld"], log=False)
     with process:
         output = process.stdout.read().strip()
     assert output == "HelloWorld"
@@ -22,21 +23,15 @@ def test_execute_commands_failure(executor):
 
 
 def test_get_output_success(executor):
-    process = executor.executeCommands(["echo Hello"])
-    with process:
-        output = executor.getOutput(process, ["echo Hello"], log=False)
+    output = executor.executeCommandsAndGetOutput(["echo Hello"], log=False)
     assert output == ["Hello"]
 
 
 def test_get_output_failure(executor):
-    process = executor.executeCommands(["exit 1"])
     with pytest.raises(Exception, match="failed"):
-        with process:
-            executor.getOutput(process, ["exit 1"], log=False)
+        executor.executeCommandsAndGetOutput(["exit 1"], log=False)
 
 
 def test_conda_system_exit(executor):
-    process = executor.executeCommands(["echo CondaSystemExit"])  # Simulate Conda exit
     with pytest.raises(Exception, match="failed"):
-        with process:
-            executor.getOutput(process, ["echo CondaSystemExit"], log=False)
+        executor.executeCommandsAndGetOutput(["echo CondaSystemExit"], log=False)

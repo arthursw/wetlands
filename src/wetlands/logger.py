@@ -46,20 +46,20 @@ class WetlandsLogger(logging.Logger):
         self.info(msg, extra=extra)
 
     def log_execution(
-        self, msg: str, env_name: str, func_name: str | None = None, **kwargs: Any
+        self, msg: str, env_name: str, call_target: str | None = None, **kwargs: Any
     ) -> None:
         """Log an execution operation (running functions or scripts in an environment).
 
         Args:
             msg: The log message
             env_name: Name of the environment
-            func_name: Optional name of the function being executed
+            call_target: Optional target being executed (e.g., "module.py:function" or "script.py")
             **kwargs: Additional context to attach to the log
         """
         extra = {
             "log_source": LOG_SOURCE_EXECUTION,
             "env_name": env_name,
-            "func_name": func_name,
+            "call_target": call_target,
             **kwargs,
         }
         self.info(msg, extra=extra)

@@ -460,7 +460,7 @@ class EnvironmentManager:
 
         logger.log_environment(f"Creating environment '{name}'", name, stage="download")
         log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": name, "stage": "install"}
-        self.commandExecutor.executeCommandsAndGetOutput(createEnvCommands, log_context=log_context)
+        process = self.commandExecutor.executeCommands(createEnvCommands, wait=True, log_context=log_context)
         logger.log_environment(f"Environment '{name}' created successfully", name, stage="complete")
         return self.environments[name]
 
@@ -552,6 +552,7 @@ class EnvironmentManager:
         additionalActivateCommands: Commands = {},
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
+        log_context: dict[str, Any] | None = None,
     ) -> subprocess.Popen:
         """Executes the given commands in the given environment.
 
@@ -560,6 +561,7 @@ class EnvironmentManager:
                 commands: The commands to execute in the environment.
                 additionalActivateCommands: Platform-specific activation commands.
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+                log_context: Optional context dict to attach to logs via ProcessLogger.
 
         Returns:
                 The launched process.
@@ -567,7 +569,7 @@ class EnvironmentManager:
         activateCommands = self.commandGenerator.getActivateEnvironmentCommands(environment, additionalActivateCommands)
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(
-            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait
+            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait, log_context=log_context
         )
 
     def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path) -> None:

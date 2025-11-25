@@ -9,18 +9,28 @@ from wetlands.external_environment import ExternalEnvironment
 @patch("subprocess.Popen")
 def test_launch(mock_popen):
     mock_process = MagicMock()
+    mock_process.pid = 12345
 
     mock_stdout = MagicMock()
     mock_stdout.__iter__.return_value = iter(["Listening port 5000\n"])  # For iteration
     mock_stdout.readline = MagicMock(side_effect=["Listening port 5000\n", ""])  # For readline()
 
     mock_process.stdout = mock_stdout
-
     mock_process.poll.return_value = None
     mock_popen.return_value = mock_process
 
     with patch("wetlands.external_environment.Client") as mock_client:
-        env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
+        # Create a mock ProcessLogger that returns expected lines
+        mock_process_logger = MagicMock()
+        mock_process_logger.wait_for_line.side_effect = ["Listening port 5000", None]
+        # Mock the update_log_context method so it doesn't fail
+        mock_process_logger.update_log_context = MagicMock()
+
+        # Mock the environment manager with a mock command executor
+        mock_env_manager = MagicMock()
+        mock_env_manager.commandExecutor._process_loggers = {12345: mock_process_logger}
+
+        env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
         env.executeCommands = MagicMock(return_value=mock_process)
         env.launch()
 

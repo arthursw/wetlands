@@ -259,3 +259,10 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 #### Summary of Example 1 Flow:
 
 The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment_manager.Environment.launch] starts a hidden server in that environment. [`env.importModule()`][wetlands.environment.Environment.importModule] provides a proxy, and calling functions on the proxy executes the code (like `example_module.segment`) within the isolated environment, handling data transfer automatically. [`env.exit()`][wetlands.environment.Environment.exit] cleans up the server process.
+
+
+### Next Steps
+
+- See [Advanced Examples](advanced_example.md) for more complex workflows
+- See [Wetlands logging system](logging.md)
+- See [Debugging Guide](debugging.md) to understand how to debug within environments

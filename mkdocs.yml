@@ -34,6 +34,7 @@ nav:
   - Getting started: getting_started.md
   - Advanced example: advanced_example.md
   - Debugging: debugging.md
+  - Logging: logging.md
   - Shared memory: shared_memory.md
   - Secifying dependencies: dependencies.md
   - How it works: how_it_works.md

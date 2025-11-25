@@ -16,12 +16,19 @@ from wetlands._internal.command_generator import Commands
 @pytest.fixture
 def mock_command_executor(monkeypatch):
     """Mocks the CommandExecutor methods."""
-    mock_execute = MagicMock(spec=subprocess.Popen)
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.returncode = 0
+    mock_process.pid = 12345
+    # Make wait() set returncode to 0 when called
+    mock_process.wait.return_value = 0
+
+    mock_execute = MagicMock(return_value=mock_process)
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
 
     mocks = {
         "executeCommands": mock_execute,
         "executeCommandsAndGetOutput": mock_execute_output,
+        "mock_process": mock_process,
     }
     return mocks
 
@@ -49,7 +56,7 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
+    return manager, mock_command_executor["executeCommands"], mock_command_executor["executeCommandsAndGetOutput"]
 
 
 @pytest.fixture
@@ -69,7 +76,7 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
 
     monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommandsAndGetOutput"], mock_command_executor["executeCommands"]
+    return manager, mock_command_executor["executeCommands"], mock_command_executor["executeCommandsAndGetOutput"]
 
 
 # ---- create Tests (micromamba) ----
@@ -91,7 +98,7 @@ def test_create_dependencies_met_use_main_environment(environment_manager_fixtur
 
 
 def test_create_always_creates_new_when_use_existing_false(environment_manager_fixture, monkeypatch):
-    manager, mock_execute_output, _ = environment_manager_fixture
+    manager, mock_execute, _ = environment_manager_fixture
     env_name = "always-new-env"
     dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
 
@@ -103,7 +110,7 @@ def test_create_always_creates_new_when_use_existing_false(environment_manager_f
     # Should create new environment, not return existing one
     assert isinstance(env, ExternalEnvironment)
     assert env.name == env_name
-    mock_execute_output.assert_called()
+    mock_execute.assert_called()  # executeCommands is called for creation
 
 
 def test_create_dependencies_not_met_create_external(environment_manager_fixture, monkeypatch):

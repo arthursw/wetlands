@@ -17,6 +17,7 @@ class CommandExecutor:
         self.scriptsPath = scriptsPath
         if scriptsPath is not None:
             scriptsPath.mkdir(parents=True, exist_ok=True)
+        self._process_loggers: dict[int, ProcessLogger] = {}  # Map process PID to ProcessLogger
 
     @staticmethod
     def killProcess(process) -> None:
@@ -99,66 +100,9 @@ class CommandExecutor:
 
         process_logger = ProcessLogger(process, log_context, logger)
         process_logger.start_reading()
+        # Store reference for later retrieval
+        self._process_loggers[process.pid] = process_logger
         return process_logger
-
-    def getOutput(
-        self,
-        process: subprocess.Popen,
-        commands: list[str],
-        log: bool = True,
-        strip: bool = True,
-        log_context: dict[str, Any] | None = None,
-    ) -> list[str]:
-        """Captures and processes output from a subprocess.
-
-        Args:
-                process: Subprocess to monitor.
-                commands: Commands that were executed (for error messages).
-                log: Whether to log output lines.
-                strip: Whether to strip whitespace from output lines.
-                log_context: Optional context dict to attach to logs via ProcessLogger.
-
-        Returns:
-                Output lines.
-
-        Raises:
-                Exception: If CondaSystemExit is detected or non-zero exit code.
-        """
-        outputs = []
-        conda_exit_detected = False
-
-        def output_callback(line: str, _context: dict) -> None:
-            nonlocal conda_exit_detected
-            if strip:
-                line = line.strip()
-            if "CondaSystemExit" in line:
-                conda_exit_detected = True
-            outputs.append(line)
-
-        if log_context is not None and log:
-            # Use ProcessLogger for real-time logging with context
-            process_logger = self.getProcessLogger(process, log_context)
-            process_logger.subscribe(output_callback)
-        else:
-            # Fallback to direct stdout reading for backwards compatibility
-            if process.stdout is not None:
-                for line in process.stdout:
-                    if strip:
-                        line = line.strip()
-                    if log:
-                        logger.info(line)
-                    if "CondaSystemExit" in line:
-                        conda_exit_detected = True
-                    outputs.append(line)
-
-        process.wait()
-
-        if conda_exit_detected:
-            self.killProcess(process)
-            raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
-        if process.returncode != 0:
-            raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
-        return outputs
 
     def executeCommands(
         self,
@@ -167,8 +111,12 @@ class CommandExecutor:
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
         removePythonEnvVars: bool = True,
+        log_context: dict[str, Any] | None = None,
+        log: bool = True,
     ) -> subprocess.Popen:
-        """Executes shell commands in a subprocess. Warning: does not wait for completion unless ``wait`` is True.
+        """Executes shell commands in a subprocess with automatic logging via ProcessLogger.
+
+        Warning: does not wait for completion unless ``wait`` is True. Output is logged in real-time via a background thread.
 
         Args:
                 commands: List of shell commands to execute.
@@ -176,9 +124,11 @@ class CommandExecutor:
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
                 wait: Whether to wait for the process to complete before returning.
                 removePythonEnvVars: Whether to remove PYTHONEXECUTABLE, PYTHONHOME and PYTHONPATH from the environment variables to avoid interference with conda/pixi environment activation.
+                log_context: Optional context dict to attach to logs. If provided, ProcessLogger will emit logs with this context.
+                log: Whether to enable logging of command output. Defaults to True.
 
         Returns:
-                Subprocess handle for the executed commands.
+                Subprocess handle for the executed commands. Output is logged in real-time via ProcessLogger.
         """
         import os
 
@@ -236,6 +186,20 @@ class CommandExecutor:
                 "bufsize": 1,  # 1 means line buffered
             }
             process = subprocess.Popen(executeFile, **(defaultPopenKwargs | popenKwargs))
+
+            # Create ProcessLogger to handle stdout in background if logging is enabled
+            if log:
+                process_logger = self.getProcessLogger(process, log_context)
+
+                # Subscribe to detect CondaSystemExit in real-time during execution
+                def conda_exit_detector(line: str, _context: dict) -> None:
+                    if "CondaSystemExit" in line:
+                        # Kill process immediately and mark it
+                        self.killProcess(process)
+                        process._conda_exit_detected = True  # type: ignore[attr-defined]
+
+                process_logger.subscribe(conda_exit_detector)
+
             if wait:
                 process.wait()
             return process
@@ -258,21 +222,59 @@ class CommandExecutor:
                 log_context: Optional context dict to attach to logs via ProcessLogger.
 
         Returns:
-                Output lines.
+                Output lines (stripped of whitespace).
+
+        Raises:
+                Exception: If CondaSystemExit detected or non-zero exit code.
         """
-        rawCommands = commands.copy()
-        process = self.executeCommands(commands, exitIfCommandError, popenKwargs)
-        with process:
-            output = self.getOutput(process, rawCommands, log=log, log_context=log_context)
-            return output
+        # Always create ProcessLogger to capture output (set log=True internally)
+        process = self.executeCommands(
+            commands, exitIfCommandError=exitIfCommandError, popenKwargs=popenKwargs,
+            wait=True, log=True, log_context=log_context
+        )
+
+        # Get output from ProcessLogger (always created above)
+        if process.pid in self._process_loggers:
+            process_logger = self._process_loggers[process.pid]
+            # Wait for reader thread to finish processing all output
+            if process_logger._reader_thread is not None and process_logger._reader_thread.is_alive():
+                process_logger._reader_thread.join(timeout=5.0)
+
+            # Check if CondaSystemExit was detected during execution
+            if getattr(process, '_conda_exit_detected', False):
+                raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
+
+            output = process_logger.get_output()
+            # Strip whitespace from each line
+            stripped_output = [line.strip() for line in output]
+
+            # Check exit code
+            if process.returncode != 0:
+                raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
+
+            return stripped_output
+
+        # Fallback: should not happen with executeCommands since it creates ProcessLogger
+        return []
 
     def executeCommandAndGetJsonOutput(
         self, commands: list[str], exitIfCommandError: bool = True, log: bool = True, popenKwargs: dict[str, Any] = {}
     ) -> list[dict[str, str]]:
-        """Execute [`CommandExecutor.executeCommandsAndGetOutput`][wetlands._internal.command_executor.CommandExecutor.executeCommandsAndGetOutput] and parse the json output.
+        """Execute commands and parse the json output.
 
         Returns:
                 Output json.
         """
-        output = self.executeCommandsAndGetOutput(commands, exitIfCommandError, log, popenKwargs)
-        return json.loads("".join(output))
+        # Execute with wait=True to block until completion
+        process = self.executeCommands(
+            commands, exitIfCommandError=exitIfCommandError, popenKwargs=popenKwargs,
+            wait=True, log=log
+        )
+
+        # Get output from ProcessLogger
+        if process.pid in self._process_loggers:
+            output = self._process_loggers[process.pid].get_output()
+            return json.loads("".join(output))
+
+        # Fallback: should not happen with executeCommands since it creates ProcessLogger
+        return []
