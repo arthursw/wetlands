@@ -507,6 +507,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../logging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../shared_memory/" class="md-nav__link">
         
   
@@ -596,10 +623,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
             
   
   
@@ -617,8 +644,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -755,10 +782,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9_5" >
         
           
-          <label class="md-nav__link" for="__nav_8_5" id="__nav_8_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9_5" id="__nav_9_5_label" tabindex="0">
             
   
   
@@ -776,8 +803,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_8_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8_5">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_9_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -990,6 +1017,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/process_logger/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Process logger
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../reference/wetlands/_internal/settings_manager/" class="md-nav__link">
         
   
@@ -1166,7 +1221,7 @@
 
   <h1>Advanced example</h1>
 
-<h2 id="manual-communication-with-envexecutecommands">Manual Communication with <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>env.executeCommands</code></a></h2>
+<h2 id="manual-communication-with-envexecutecommands">Manual Communication with <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False, log_context=None, log=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>env.executeCommands</code></a></h2>
 <p>This example shows how to use Wetlands to run a specific script within the environment and manage the communication manually using Python's <a href="https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection"><code>multiprocessing.connection</code></a>. This gives you full control over the interaction protocol but requires more setup.</p>
 <p>Let's see the main script <a href="https://github.com/arthursw/wetlands/blob/main/examples/advanced_example.py"><code>advanced_example.py</code></a> step by step. </p>
 <h3 id="initialize-wetlands-and-logging">Initialize Wetlands and Logging</h3>
@@ -1193,7 +1248,7 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">env</span> <span class="o">=</span> <span class="n">environmentManager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="s2">&quot;advanced_cellpose_env&quot;</span><span class="p">,</span> <span class="n">deps</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="execute-a-custom-script-in-the-environment">Execute a Custom Script in the Environment</h3>
-<p>Instead of <a class="autorefs autorefs-internal" title="            launch(additionalActivateCommands={}, logOutputInThread=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.launch"><code>env.launch()</code></a>, we use <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>env.executeCommands()</code></a>. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script (<a href="https://github.com/arthursw/wetlands/blob/main/examples/advanced_example_module.py"><code>advanced_example_module.py</code></a>) using <code>python -u</code> (unbuffered output, important for reading stdout line-by-line immediately). We capture the <code>Popen</code> object for the launched process. We also redirect stderr to stdout for easier log capture.</p>
+<p>Instead of <a class="autorefs autorefs-internal" title="            launch(additionalActivateCommands={}, logOutputInThread=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.launch"><code>env.launch()</code></a>, we use <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False, log_context=None, log=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>env.executeCommands()</code></a>. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script (<a href="https://github.com/arthursw/wetlands/blob/main/examples/advanced_example_module.py"><code>advanced_example_module.py</code></a>) using <code>python -u</code> (unbuffered output, important for reading stdout line-by-line immediately). We capture the <code>Popen</code> object for the launched process. We also redirect stderr to stdout for easier log capture.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Executing advanced_example_module.py in environment...&quot;</span><span class="p">)</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">process</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">executeCommands</span><span class="p">([</span><span class="s2">&quot;python -u advanced_example_module.py&quot;</span><span class="p">])</span>
 </span></code></pre></div>
@@ -1312,7 +1367,7 @@
 </span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>                <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
 </span></code></pre></div>
 <p><strong>Summary of Example 2 Flow:</strong></p>
-<p>The main script uses <a class="autorefs autorefs-internal" title="            EnvironmentManager" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager"><code>EnvironmentManager</code></a> to create an environment. <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>env.executeCommands()</code></a> starts a <em>custom</em> server script (<code>advanced_example_module.py</code>) inside the environment. The main script reads the server's port from stdout and connects manually using <code>Client</code>. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>executeCommands</code></a>. This approach offers more control but requires implementing the server logic and communication protocol.</p>
+<p>The main script uses <a class="autorefs autorefs-internal" title="            EnvironmentManager" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager"><code>EnvironmentManager</code></a> to create an environment. <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False, log_context=None, log=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>env.executeCommands()</code></a> starts a <em>custom</em> server script (<code>advanced_example_module.py</code>) inside the environment. The main script reads the server's port from stdout and connects manually using <code>Client</code>. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by <a class="autorefs autorefs-internal" title="            executeCommands(commands, additionalActivateCommands={}, popenKwargs={}, wait=False, log_context=None, log=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.executeCommands"><code>executeCommands</code></a>. This approach offers more control but requires implementing the server logic and communication protocol.</p>
 
 
 

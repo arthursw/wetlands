@@ -2,82 +2,90 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/advanced_example/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/debugging/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/dependencies/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/getting_started/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/how_it_works/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://arthursw.github.io/wetlands/0.3.2/logging/</loc>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/shared_memory/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/SUMMARY/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/environment/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/environment_manager/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/external_environment/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/internal_environment/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/command_executor/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/command_generator/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/config_parser/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/dependency_manager/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/exceptions/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/install/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/module_executor/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
+    </url>
+    <url>
+         <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/process_logger/</loc>
+         <lastmod>2025-11-25</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/0.3.2/reference/wetlands/_internal/settings_manager/</loc>
-         <lastmod>2025-11-21</lastmod>
+         <lastmod>2025-11-25</lastmod>
     </url>
 </urlset>
