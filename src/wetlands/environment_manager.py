@@ -164,19 +164,19 @@ class EnvironmentManager:
         if self.settingsManager.usePixi:
             commands = self.commandGenerator.getActivateCondaCommands()
             commands += [f'{self.settingsManager.condaBin} list --json --manifest-path "{environment.path}"']
-            return self.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
+            return self.commandExecutor.executeCommandsAndGetJsonOutput(commands)
         else:
             commands = self.commandGenerator.getActivateEnvironmentCommands(environment) + [
                 f"{self.settingsManager.condaBin} list --json",
             ]
-            packages = self.commandExecutor.executeCommandAndGetJsonOutput(commands, log=False)
+            packages = self.commandExecutor.executeCommandsAndGetJsonOutput(commands)
             for package in packages:
                 package["kind"] = "conda"
 
             commands = self.commandGenerator.getActivateEnvironmentCommands(environment) + [
                 f"pip freeze --all",
             ]
-            output = self.commandExecutor.executeCommandsAndGetOutput(commands, log=False)
+            output = self.commandExecutor.executeCommandsAndGetOutput(commands)
             parsedOutput = [o.split("==") for o in output if "==" in o]
             packages += [{"name": name, "version": version, "kind": "pypi"} for name, version in parsedOutput]
             return packages
@@ -553,6 +553,7 @@ class EnvironmentManager:
         popenKwargs: dict[str, Any] = {},
         wait: bool = False,
         log_context: dict[str, Any] | None = None,
+        log: bool = True,
     ) -> subprocess.Popen:
         """Executes the given commands in the given environment.
 
@@ -562,6 +563,7 @@ class EnvironmentManager:
                 additionalActivateCommands: Platform-specific activation commands.
                 popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
                 log_context: Optional context dict to attach to logs via ProcessLogger.
+                log: Whether to log the process output.
 
         Returns:
                 The launched process.
@@ -569,7 +571,7 @@ class EnvironmentManager:
         activateCommands = self.commandGenerator.getActivateEnvironmentCommands(environment, additionalActivateCommands)
         platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
         return self.commandExecutor.executeCommands(
-            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait, log_context=log_context
+            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait, log_context=log_context, log=log
         )
 
     def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path) -> None:

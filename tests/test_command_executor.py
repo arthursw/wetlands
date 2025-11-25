@@ -23,15 +23,15 @@ def test_execute_commands_failure(executor):
 
 
 def test_get_output_success(executor):
-    output = executor.executeCommandsAndGetOutput(["echo Hello"], log=False)
+    output = executor.executeCommandsAndGetOutput(["echo Hello"])
     assert output == ["Hello"]
 
 
 def test_get_output_failure(executor):
     with pytest.raises(Exception, match="failed"):
-        executor.executeCommandsAndGetOutput(["exit 1"], log=False)
+        executor.executeCommandsAndGetOutput(["exit 1"])
 
 
 def test_conda_system_exit(executor):
     with pytest.raises(Exception, match="failed"):
-        executor.executeCommandsAndGetOutput(["echo CondaSystemExit"], log=False)
+        executor.executeCommandsAndGetOutput(["echo CondaSystemExit"])

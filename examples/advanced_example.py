@@ -17,7 +17,8 @@ environmentManager = EnvironmentManager()
 
 env = environmentManager.create("advanced_cellpose", {"conda": ["cellpose==3.1.0"]})
 
-process = env.executeCommands(["python -u advanced_example_module.py"])
+# Warning: set log=False since process output is handled manually below (having two loggers reading the same stdout causes issues)
+process = env.executeCommands(["python -u advanced_example_module.py"], log=False)
 
 port = 0
 

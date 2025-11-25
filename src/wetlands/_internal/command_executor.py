@@ -104,6 +104,25 @@ class CommandExecutor:
         self._process_loggers[process.pid] = process_logger
         return process_logger
 
+    def _getCompleteProcessLogger(self, process: subprocess.Popen) -> ProcessLogger | None:
+        """Get the process logger and wait for the reader thread to finish processing all output.
+
+        Args:
+                process: The completed subprocess.
+
+        Returns:
+                ProcessLogger instance with all output read, or None if not found.
+        """
+        if process.pid not in self._process_loggers:
+            return None
+
+        process_logger = self._process_loggers[process.pid]
+        # Wait for reader thread to finish processing all output
+        if process_logger._reader_thread is not None and process_logger._reader_thread.is_alive():
+            process_logger._reader_thread.join(timeout=5.0)
+
+        return process_logger
+
     def executeCommands(
         self,
         commands: list[str],
@@ -208,7 +227,6 @@ class CommandExecutor:
         self,
         commands: list[str],
         exitIfCommandError: bool = True,
-        log: bool = True,
         popenKwargs: dict[str, Any] = {},
         log_context: dict[str, Any] | None = None,
     ) -> list[str]:
@@ -217,7 +235,6 @@ class CommandExecutor:
         Args:
                 commands: Shell commands to execute.
                 exitIfCommandError: Whether to insert error checking.
-                log: Enable logging of command output.
                 popenKwargs: Keyword arguments for subprocess.Popen().
                 log_context: Optional context dict to attach to logs via ProcessLogger.
 
@@ -234,33 +251,36 @@ class CommandExecutor:
         )
 
         # Get output from ProcessLogger (always created above)
-        if process.pid in self._process_loggers:
-            process_logger = self._process_loggers[process.pid]
-            # Wait for reader thread to finish processing all output
-            if process_logger._reader_thread is not None and process_logger._reader_thread.is_alive():
-                process_logger._reader_thread.join(timeout=5.0)
+        process_logger = self._getCompleteProcessLogger(process)
+        if process_logger is None:
+            return []
 
-            # Check if CondaSystemExit was detected during execution
-            if getattr(process, '_conda_exit_detected', False):
-                raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
+        # Check if CondaSystemExit was detected during execution
+        if getattr(process, '_conda_exit_detected', False):
+            raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
 
-            output = process_logger.get_output()
-            # Strip whitespace from each line
-            stripped_output = [line.strip() for line in output]
+        output = process_logger.get_output()
+        # Strip whitespace from each line
+        stripped_output = [line.strip() for line in output]
 
-            # Check exit code
-            if process.returncode != 0:
-                raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
+        # Check exit code
+        if process.returncode != 0:
+            raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
 
-            return stripped_output
+        return stripped_output
 
-        # Fallback: should not happen with executeCommands since it creates ProcessLogger
-        return []
-
-    def executeCommandAndGetJsonOutput(
-        self, commands: list[str], exitIfCommandError: bool = True, log: bool = True, popenKwargs: dict[str, Any] = {}
+    def executeCommandsAndGetJsonOutput(
+        self,
+        commands: list[str],
+        exitIfCommandError: bool = True,
+        popenKwargs: dict[str, Any] = {}
     ) -> list[dict[str, str]]:
         """Execute commands and parse the json output.
+
+        Args:
+                commands: Shell commands to execute.
+                exitIfCommandError: Whether to insert error checking.
+                popenKwargs: Keyword arguments for subprocess.Popen().
 
         Returns:
                 Output json.
@@ -268,13 +288,13 @@ class CommandExecutor:
         # Execute with wait=True to block until completion
         process = self.executeCommands(
             commands, exitIfCommandError=exitIfCommandError, popenKwargs=popenKwargs,
-            wait=True, log=log
+            wait=True, log=True
         )
 
         # Get output from ProcessLogger
-        if process.pid in self._process_loggers:
-            output = self._process_loggers[process.pid].get_output()
-            return json.loads("".join(output))
+        process_logger = self._getCompleteProcessLogger(process)
+        if process_logger is None:
+            return []
 
-        # Fallback: should not happen with executeCommands since it creates ProcessLogger
-        return []
+        output = process_logger.get_output()
+        return json.loads("".join(output))

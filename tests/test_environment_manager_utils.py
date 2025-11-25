@@ -107,7 +107,7 @@ class TestGetInstalledPackages:
             {"name": "pandas", "version": "2.0.0", "kind": "conda"},
         ]
 
-        manager.commandExecutor.executeCommandAndGetJsonOutput = MagicMock(return_value=mock_packages)
+        manager.commandExecutor.executeCommandsAndGetJsonOutput = MagicMock(return_value=mock_packages)
         manager.commandExecutor.executeCommandsAndGetOutput = MagicMock(return_value=[])
 
         # Create an environment object

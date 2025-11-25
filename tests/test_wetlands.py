@@ -275,7 +275,7 @@ with Listener(("localhost", 0)) as listener:
                 sys.exit()
     """)
 
-    process = env.executeCommands([f"python -u {(tmp_path / 'test_module.py').resolve()}"])
+    process = env.executeCommands([f"python -u {(tmp_path / 'test_module.py').resolve()}"], log=False)
 
     port = 0
     if process.stdout is not None:

@@ -2,6 +2,13 @@
 
 Wetlands provides a rich logging system that emits logs in real-time with context metadata. This guide shows you how to integrate logging into your applications.
 
+
+!!! note
+
+    By default, `executeCommands()` functions read the process stdout in a background thread and provide the stream to the logging system. 
+    Thus, when creating or launching an environment, executing a function or a script, it will not be possible to read the process stdout.
+    If you want to read it manually (as in the advanced example), pass `log=False` to the `executeCommands()` functions.
+
 ## Table of Contents
 
 - [Log Context](#log-context)
@@ -478,7 +485,7 @@ for func_name in ["preprocess", "train", "evaluate"]:
 
 ## Tips & Tricks
 
-1. **Real-time monitoring**: Use `attachLogHandler()` for live updates in GUI applications
+1. **Real-time monitoring**: Use `attachLogHandler()` for live updates in GUI applications, but remember logs are handled in a background thread
 2. **Per-operation logs**: Use context managers with filters to capture individual operations
 3. **Log rotation**: Use `RotatingFileHandler` for large logs
 4. **Structured logging**: Access context via `getattr(record, 'extra', {})` in custom handlers
