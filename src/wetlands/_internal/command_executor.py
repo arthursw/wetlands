@@ -6,6 +6,7 @@ import tempfile
 from typing import Any
 import psutil
 from wetlands.logger import logger
+from wetlands._internal.process_logger import ProcessLogger
 
 
 class CommandExecutor:
@@ -22,12 +23,18 @@ class CommandExecutor:
         """Terminates the process and its children"""
         if process is None:
             return
-        parent = psutil.Process(process.pid)
-        for child in parent.children(recursive=True):  # Get all child processes
-            if child.is_running():
-                child.kill()
-        if parent.is_running():
-            parent.kill()
+        try:
+            parent = psutil.Process(process.pid)
+        except psutil.NoSuchProcess:
+            return
+        try:
+            for child in parent.children(recursive=True):  # Get all child processes
+                if child.is_running():
+                    child.kill()
+            if parent.is_running():
+                parent.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
 
     def _isWindows(self) -> bool:
         """Checks if the current OS is Windows."""
@@ -71,12 +78,36 @@ class CommandExecutor:
         prefix: str = "[...] " if len(str(commands)) > 150 else ""
         return prefix + str(commands)[-150:]
 
+    def getProcessLogger(
+        self,
+        process: subprocess.Popen,
+        log_context: dict[str, Any] | None = None,
+    ) -> ProcessLogger:
+        """Create and start a ProcessLogger for a subprocess.
+
+        This enables non-blocking, real-time logging with context metadata.
+
+        Args:
+                process: Subprocess to monitor.
+                log_context: Dictionary of context to attach to all logs.
+
+        Returns:
+                ProcessLogger instance (already started).
+        """
+        if log_context is None:
+            log_context = {}
+
+        process_logger = ProcessLogger(process, log_context, logger)
+        process_logger.start_reading()
+        return process_logger
+
     def getOutput(
         self,
         process: subprocess.Popen,
         commands: list[str],
         log: bool = True,
         strip: bool = True,
+        log_context: dict[str, Any] | None = None,
     ) -> list[str]:
         """Captures and processes output from a subprocess.
 
@@ -85,6 +116,7 @@ class CommandExecutor:
                 commands: Commands that were executed (for error messages).
                 log: Whether to log output lines.
                 strip: Whether to strip whitespace from output lines.
+                log_context: Optional context dict to attach to logs via ProcessLogger.
 
         Returns:
                 Output lines.
@@ -93,18 +125,37 @@ class CommandExecutor:
                 Exception: If CondaSystemExit is detected or non-zero exit code.
         """
         outputs = []
-        if process.stdout is not None:
-            for line in process.stdout:
-                if strip:
-                    line = line.strip()
-                if log:
-                    logger.info(line)
-                if "CondaSystemExit" in line:  # Sometime conda exists with a CondaSystemExit and a return code 0
-                    # we want to stop our script when this happens (and not run the later commands)
-                    self.killProcess(process)
-                    raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
-                outputs.append(line)
+        conda_exit_detected = False
+
+        def output_callback(line: str, _context: dict) -> None:
+            nonlocal conda_exit_detected
+            if strip:
+                line = line.strip()
+            if "CondaSystemExit" in line:
+                conda_exit_detected = True
+            outputs.append(line)
+
+        if log_context is not None and log:
+            # Use ProcessLogger for real-time logging with context
+            process_logger = self.getProcessLogger(process, log_context)
+            process_logger.subscribe(output_callback)
+        else:
+            # Fallback to direct stdout reading for backwards compatibility
+            if process.stdout is not None:
+                for line in process.stdout:
+                    if strip:
+                        line = line.strip()
+                    if log:
+                        logger.info(line)
+                    if "CondaSystemExit" in line:
+                        conda_exit_detected = True
+                    outputs.append(line)
+
         process.wait()
+
+        if conda_exit_detected:
+            self.killProcess(process)
+            raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
         if process.returncode != 0:
             raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
         return outputs
@@ -190,7 +241,12 @@ class CommandExecutor:
             return process
 
     def executeCommandsAndGetOutput(
-        self, commands: list[str], exitIfCommandError: bool = True, log: bool = True, popenKwargs: dict[str, Any] = {}
+        self,
+        commands: list[str],
+        exitIfCommandError: bool = True,
+        log: bool = True,
+        popenKwargs: dict[str, Any] = {},
+        log_context: dict[str, Any] | None = None,
     ) -> list[str]:
         """Executes commands and captures their output. See [`CommandExecutor.executeCommands`][wetlands._internal.command_executor.CommandExecutor.executeCommands] for more details on the arguments.
 
@@ -199,6 +255,7 @@ class CommandExecutor:
                 exitIfCommandError: Whether to insert error checking.
                 log: Enable logging of command output.
                 popenKwargs: Keyword arguments for subprocess.Popen().
+                log_context: Optional context dict to attach to logs via ProcessLogger.
 
         Returns:
                 Output lines.
@@ -206,7 +263,7 @@ class CommandExecutor:
         rawCommands = commands.copy()
         process = self.executeCommands(commands, exitIfCommandError, popenKwargs)
         with process:
-            output = self.getOutput(process, rawCommands, log=log)
+            output = self.getOutput(process, rawCommands, log=log, log_context=log_context)
             return output
 
     def executeCommandAndGetJsonOutput(

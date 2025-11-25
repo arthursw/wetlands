@@ -7,7 +7,6 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import Any, Literal, cast, Union
-from venv import logger
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion
 
@@ -20,7 +19,7 @@ from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.config_parser import ConfigParser
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
-from wetlands.logger import setLogLevel
+from wetlands.logger import setLogLevel, logger, LOG_SOURCE_ENVIRONMENT
 
 
 class EnvironmentManager:
@@ -458,7 +457,11 @@ class EnvironmentManager:
         self.environments[name] = environment
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
-        self.commandExecutor.executeCommandsAndGetOutput(createEnvCommands)
+
+        logger.log_environment(f"Creating environment '{name}'", name, stage="download")
+        log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": name, "stage": "install"}
+        self.commandExecutor.executeCommandsAndGetOutput(createEnvCommands, log_context=log_context)
+        logger.log_environment(f"Environment '{name}' created successfully", name, stage="complete")
         return self.environments[name]
 
     def createFromConfig(
@@ -537,7 +540,10 @@ class EnvironmentManager:
 
         installCommands = self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
-        return self.commandExecutor.executeCommandsAndGetOutput(installCommands)
+
+        logger.log_environment(f"Installing dependencies in environment '{environment.name}'", environment.name, stage="install")
+        log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": environment.name, "stage": "install"}
+        return self.commandExecutor.executeCommandsAndGetOutput(installCommands, log_context=log_context)
 
     def executeCommands(
         self,

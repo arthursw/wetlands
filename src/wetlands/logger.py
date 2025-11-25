@@ -1,9 +1,68 @@
 import logging
 from pathlib import Path
 from collections.abc import Callable
+from typing import Any
+
+# Constants for log sources
+LOG_SOURCE_GLOBAL = "global"
+LOG_SOURCE_ENVIRONMENT = "environment"
+LOG_SOURCE_EXECUTION = "execution"
 
 _logger: logging.Logger | None = None
 _log_file_path: Path | None = None
+
+
+class WetlandsLogger(logging.Logger):
+    """Extended logger with convenience methods for attaching context metadata."""
+
+    def log_global(self, msg: str, stage: str | None = None, **kwargs: Any) -> None:
+        """Log a global operation (not specific to any environment or execution).
+
+        Args:
+            msg: The log message
+            stage: Optional stage identifier (e.g., "search", "create")
+            **kwargs: Additional context to attach to the log
+        """
+        extra = {"log_source": LOG_SOURCE_GLOBAL, "stage": stage, **kwargs}
+        self.info(msg, extra=extra)
+
+    def log_environment(
+        self, msg: str, env_name: str, stage: str | None = None, **kwargs: Any
+    ) -> None:
+        """Log an environment-related operation (creation, update, deletion).
+
+        Args:
+            msg: The log message
+            env_name: Name of the environment
+            stage: Optional stage identifier (e.g., "download", "install", "configure")
+            **kwargs: Additional context to attach to the log
+        """
+        extra = {
+            "log_source": LOG_SOURCE_ENVIRONMENT,
+            "env_name": env_name,
+            "stage": stage,
+            **kwargs,
+        }
+        self.info(msg, extra=extra)
+
+    def log_execution(
+        self, msg: str, env_name: str, func_name: str | None = None, **kwargs: Any
+    ) -> None:
+        """Log an execution operation (running functions or scripts in an environment).
+
+        Args:
+            msg: The log message
+            env_name: Name of the environment
+            func_name: Optional name of the function being executed
+            **kwargs: Additional context to attach to the log
+        """
+        extra = {
+            "log_source": LOG_SOURCE_EXECUTION,
+            "env_name": env_name,
+            "func_name": func_name,
+            **kwargs,
+        }
+        self.info(msg, extra=extra)
 
 
 def _initializeLogger(log_file_path=None):
@@ -27,6 +86,9 @@ def _initializeLogger(log_file_path=None):
     # Ensure parent directory exists
     log_file_path.parent.mkdir(exist_ok=True, parents=True)
 
+    # Set WetlandsLogger as the logger class
+    logging.setLoggerClass(WetlandsLogger)
+
     logging.basicConfig(
         level=logging.INFO,
         handlers=[
@@ -37,11 +99,11 @@ def _initializeLogger(log_file_path=None):
     _logger = logging.getLogger("wetlands")
 
 
-def getLogger() -> logging.Logger:
+def getLogger() -> WetlandsLogger:
     if _logger is None:
         _initializeLogger()
     assert _logger is not None
-    return _logger
+    return _logger  # type: ignore
 
 
 def setLogLevel(level):
@@ -71,7 +133,7 @@ def setLogFilePath(log_file_path):
     _initializeLogger(log_file_path)
 
 
-logger: logging.Logger = getLogger()
+logger: WetlandsLogger = getLogger()  # type: ignore
 
 
 class CustomHandler(logging.Handler):

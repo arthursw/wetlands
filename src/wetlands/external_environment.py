@@ -1,4 +1,3 @@
-import queue
 import subprocess
 from pathlib import Path
 from multiprocessing.connection import Client, Connection
@@ -7,12 +6,13 @@ import threading
 from typing import Any, TYPE_CHECKING, Union
 from send2trash import send2trash
 
-from wetlands.logger import logger
+from wetlands.logger import logger, LOG_SOURCE_EXECUTION
 from wetlands._internal.command_generator import Commands
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands.environment import Environment
 from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.command_executor import CommandExecutor
+from wetlands._internal.process_logger import ProcessLogger
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
@@ -37,26 +37,7 @@ class ExternalEnvironment(Environment):
     def __init__(self, name: str, path: Path, environmentManager: "EnvironmentManager") -> None:
         super().__init__(name, path, environmentManager)
         self._lock = threading.RLock()
-        self._logThread: threading.Thread | None = None
-        self.loggingQueue = queue.Queue()
-
-    def logOutput(self) -> None:
-        """Logs output from the subprocess."""
-        if self.process is None or self.process.stdout is None or self.process.stdout.readline is None:
-            return
-        try:
-            for line in iter(self.process.stdout.readline, ""):  # Use iter to avoid buffering issues:
-                # iter(callable, sentinel) repeatedly calls callable (process.stdout.readline) until it returns the sentinel value ("", an empty string).
-                # Since readline() is called directly in each iteration, it immediately processes available output instead of accumulating it in a buffer.
-                # This effectively forces line-by-line reading in real-time rather than waiting for the subprocess to fill its buffer.
-                logger.info(line.strip())
-                self.loggingQueue.put(line.strip())
-        except Exception as e:
-            logger.error(f"Exception in logging thread: {e}")
-            self.loggingQueue.put(f"Exception in logging thread: {e}")
-        finally:
-            self.loggingQueue.put(None)
-        return
+        self._process_logger: ProcessLogger | None = None
 
     @synchronized
     def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
@@ -64,7 +45,7 @@ class ExternalEnvironment(Environment):
 
         Args:
                 additionalActivateCommands: Platform-specific activation commands.
-                logOutputInThread: Logs the process output in a separate thread.
+                logOutputInThread: Deprecated parameter, kept for backwards compatibility. ProcessLogger always runs in background.
         """
 
         if self.launched():
@@ -80,32 +61,39 @@ class ExternalEnvironment(Environment):
 
         self.process = self.executeCommands(commands, additionalActivateCommands)
 
-        if self.process.stdout is not None:
-            try:
-                for line in self.process.stdout:
-                    logger.info(line.strip())
-                    if self.environmentManager.debug:
-                        if line.strip().startswith("Listening debug port "):
-                            debugPort = int(line.strip().replace("Listening debug port ", ""))
-                            self.environmentManager.registerEnvironment(self, debugPort, moduleExecutorPath)
-                    if line.strip().startswith("Listening port "):
-                        self.port = int(line.strip().replace("Listening port ", ""))
-                        break
-            except Exception as e:
-                self.process.stdout.close()
-                raise e
+        # Create ProcessLogger with context for the module executor process
+        log_context = {
+            "log_source": LOG_SOURCE_EXECUTION,
+            "env_name": self.name,
+            "func_name": "module_executor"
+        }
+        self._process_logger = ProcessLogger(self.process, log_context, logger)
+        self._process_logger.start_reading()
+
+        # Wait for port announcement with timeout
+        def port_predicate(line: str) -> bool:
+            return line.startswith("Listening port ")
+
+        port_line = self._process_logger.wait_for_line(port_predicate, timeout=30)
+        if port_line:
+            self.port = int(port_line.replace("Listening port ", ""))
+
+        # Handle debug port if needed
+        if self.environmentManager.debug:
+            def debug_predicate(line: str) -> bool:
+                return line.startswith("Listening debug port ")
+
+            debug_line = self._process_logger.wait_for_line(debug_predicate, timeout=5)
+            if debug_line:
+                debugPort = int(debug_line.replace("Listening debug port ", ""))
+                self.environmentManager.registerEnvironment(self, debugPort, moduleExecutorPath)
 
         if self.process.poll() is not None:
-            if self.process.stdout is not None:
-                self.process.stdout.close()
             raise Exception(f"Process exited with return code {self.process.returncode}.")
         if self.port is None:
-            raise Exception(f"Could not find the server port.")
-        self.connection = Client(("localhost", self.port))
+            raise Exception("Could not find the server port.")
 
-        if logOutputInThread:
-            self._logThread = threading.Thread(target=self.logOutput, daemon=True)
-            self._logThread.start()
+        self.connection = Client(("localhost", self.port))
 
     def _sendAndWait(self, payload: dict) -> Any:
         """Send a payload to the remote environment and wait for its response."""
@@ -214,8 +202,8 @@ class ExternalEnvironment(Environment):
         if self.process and self.process.stdout:
             self.process.stdout.close()
 
-        if self._logThread:
-            self._logThread.join(timeout=2)
+        # ProcessLogger runs in a daemon thread, so it will be cleaned up automatically
+        self._process_logger = None
 
         CommandExecutor.killProcess(self.process)
 
