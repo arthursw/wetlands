@@ -1,0 +1,2251 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://arthursw.github.io/wetlands/0.3.3/debugging/">
+      
+      
+        <link rel="prev" href="../advanced_example/">
+      
+      
+        <link rel="next" href="../logging/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>Debugging - Wetlands</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#debugging-wetlands-environments" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Wetlands" class="md-header__button md-logo" aria-label="Wetlands" data-md-component="logo">
+      
+  <img src="../WetlandInverted.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Wetlands
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Debugging
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/arthursw/wetlands" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    arthursw/wetlands
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Wetlands" class="md-nav__button md-logo" aria-label="Wetlands" data-md-component="logo">
+      
+  <img src="../WetlandInverted.svg" alt="logo">
+
+    </a>
+    Wetlands
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/arthursw/wetlands" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    arthursw/wetlands
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting_started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../advanced_example/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debugging
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-wetlands-list-view-running-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. wetlands list - View Running Environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-wetlands-debug-attach-debugger-to-an-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. wetlands debug - Attach Debugger to an Environment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. wetlands debug - Attach Debugger to an Environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-happens-when-you-run-wetlands-debug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Happens When You Run wetlands debug
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-wetlands-kill-stop-an-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. wetlands kill - Stop an Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debugging-with-vs-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging with VS Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Debugging with VS Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setup-and-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup and Debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debugging-with-pycharm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging with PyCharm
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Debugging with PyCharm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setup-and-debugging_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup and Debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-details_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow Example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow Example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-your-project-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create Your Project Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-create-the-main-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Create the Main Script
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-create-the-module-to-debug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Create the Module to Debug
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-start-your-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Start Your Application
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-launch-the-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Launch the Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-attach-the-debugger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Attach the Debugger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-debug-your-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Debug Your Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-clean-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Clean Up
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-ports-file-does-not-exist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Debug ports file does not exist"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debug-port-not-found-for-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Debug port not found for environment"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-wetlands-process-with-environment-name-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "No wetlands process with environment name found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugger-doesnt-break-at-breakpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugger doesn't break at breakpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kill-environment-no-process-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Kill environment: no process found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced Usage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debugging-multiple-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging Multiple Environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugging-with-custom-wetlands-instances" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging with Custom Wetlands Instances
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vs-code-only-just-my-code-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VS Code Only: Just My Code Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works-under-the-hood" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works Under the Hood
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../logging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../shared_memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Shared memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dependencies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secifying dependencies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how_it_works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Code Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/environment_manager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/internal_environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internal environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/external_environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    External environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_9_5" id="__nav_9_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    internal
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_9_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    internal
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/command_executor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command executor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/command_generator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/config_parser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Config parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/dependency_manager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependency manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/exceptions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/module_executor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module executor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/process_logger/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Process logger
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/settings_manager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-wetlands-list-view-running-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. wetlands list - View Running Environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-wetlands-debug-attach-debugger-to-an-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. wetlands debug - Attach Debugger to an Environment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. wetlands debug - Attach Debugger to an Environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-happens-when-you-run-wetlands-debug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Happens When You Run wetlands debug
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-wetlands-kill-stop-an-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. wetlands kill - Stop an Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debugging-with-vs-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging with VS Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Debugging with VS Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setup-and-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup and Debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debugging-with-pycharm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging with PyCharm
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Debugging with PyCharm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setup-and-debugging_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup and Debugging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-details_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow Example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow Example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-your-project-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create Your Project Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-create-the-main-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Create the Main Script
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-create-the-module-to-debug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Create the Module to Debug
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-start-your-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Start Your Application
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-launch-the-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Launch the Environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-attach-the-debugger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Attach the Debugger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-debug-your-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Debug Your Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-clean-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Clean Up
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-ports-file-does-not-exist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Debug ports file does not exist"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debug-port-not-found-for-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Debug port not found for environment"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-wetlands-process-with-environment-name-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "No wetlands process with environment name found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugger-doesnt-break-at-breakpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugger doesn't break at breakpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kill-environment-no-process-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Kill environment: no process found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced Usage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debugging-multiple-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging Multiple Environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugging-with-custom-wetlands-instances" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging with Custom Wetlands Instances
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vs-code-only-just-my-code-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VS Code Only: Just My Code Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works-under-the-hood" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works Under the Hood
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="debugging-wetlands-environments">Debugging Wetlands Environments</h1>
+<p>Wetlands provides built-in debugging tools that allow you to attach a debugger to an isolated environment and step through code execution in real-time. This is essential for development and troubleshooting when running code in isolated Conda environments.</p>
+<h2 id="overview">Overview</h2>
+<p>The debugging system includes:</p>
+<ul>
+<li><strong>IDE Integration</strong>: Support for VS Code and PyCharm</li>
+<li><strong>Remote Debugging</strong>: Attach to running environment processes</li>
+<li><strong>Environment Management</strong>: List and kill running environments</li>
+<li><strong>Port Allocation</strong>: Automatic debug port assignment for each environment</li>
+</ul>
+<h2 id="installation">Installation</h2>
+<p>The debugging tools are part of the Wetlands package and are automatically installed with:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>wetlands
+</span></code></pre></div>
+<h2 id="usage-commands">Usage Commands</h2>
+<h3 id="1-wetlands-list-view-running-environments">1. <code>wetlands list</code> - View Running Environments</h3>
+<p>List all currently running Wetlands environments and their debug ports.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>wetlands<span class="w"> </span>list<span class="w"> </span><span class="o">[</span>-wip<span class="w"> </span>PATH<span class="o">]</span>
+</span></code></pre></div>
+<p><strong>Arguments:</strong></p>
+<ul>
+<li><code>-wip, --wetlandsInstancePath PATH</code> (optional): Path to the Wetlands instance folder (default: <code>wetlands</code>)</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>$<span class="w"> </span>wetlands<span class="w"> </span>list
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>Running<span class="w"> </span>wetlands<span class="w"> </span>environments<span class="w"> </span><span class="o">(</span><span class="k">for</span><span class="w"> </span>all<span class="w"> </span>wetlands<span class="w"> </span>instance<span class="o">)</span>:
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>Command<span class="w"> </span>line<span class="w"> </span><span class="p">|</span><span class="w"> </span>Process<span class="w"> </span>ID<span class="w"> </span><span class="p">|</span><span class="w"> </span>Parent<span class="w"> </span>process<span class="w"> </span>ID
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>---
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>python<span class="w"> </span>/path/to/wetlands/module_executor.py<span class="w"> </span>env1<span class="w"> </span>--wetlandsInstancePath<span class="w"> </span>path/to/wetlands<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12345</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12340</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>python<span class="w"> </span>/path/to/wetlands/module_executor.py<span class="w"> </span>env2<span class="w"> </span>--wetlandsInstancePath<span class="w"> </span>path/to/wetlands<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12346</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">12340</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>Environments<span class="w"> </span>of<span class="w"> </span>the<span class="w"> </span>wetlands<span class="w"> </span>instance<span class="w"> </span>path/to/wetlands:
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>Environment<span class="w"> </span><span class="p">|</span><span class="w"> </span>Debug<span class="w"> </span>Port<span class="w"> </span><span class="p">|</span><span class="w"> </span>Path
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>---
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>env1<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">5678</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>/path/to/module_executor.py
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>env2<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="m">5679</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>/path/to/module_executor.py
+</span></code></pre></div>
+<p>This command displays:</p>
+<ul>
+<li><strong>Running processes</strong>: All active Wetlands environment processes with their PIDs</li>
+<li><strong>Available debug ports</strong>: The port number assigned to each environment for debugging</li>
+<li><strong>Module executor paths</strong>: Where the module executor is located for each environment</li>
+</ul>
+<h3 id="2-wetlands-debug-attach-debugger-to-an-environment">2. <code>wetlands debug</code> - Attach Debugger to an Environment</h3>
+<p>Attach VS Code or PyCharm to a running Wetlands environment for debugging.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>SOURCE_PATH<span class="w"> </span>-n<span class="w"> </span>ENV_NAME<span class="w"> </span><span class="o">[</span>-ide<span class="w"> </span><span class="o">{</span>vscode,pycharm<span class="o">}]</span><span class="w"> </span><span class="o">[</span>-wip<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>-jmc<span class="o">]</span>
+</span></code></pre></div>
+<p><strong>Arguments:</strong></p>
+<ul>
+<li><code>-s, --sources SOURCE_PATH</code> (required): Path to the source code directory you want to debug</li>
+<li><code>-n, --name ENV_NAME</code> (required): Name of the environment to debug</li>
+<li><code>-ide, --ide {vscode,pycharm}</code> (optional): IDE to use (default: <code>vscode</code>)</li>
+<li><code>-wip, --wetlandsInstancePath PATH</code> (optional): Path to the Wetlands instance folder (default: <code>pixi/wetlands</code>)</li>
+<li><code>-jmc, --justMyCode</code> (optional, VS Code only): Only debug your source files, not library code</li>
+</ul>
+<p><strong>Example - VS Code:</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/my/project<span class="w"> </span>-n<span class="w"> </span>my_env
+</span></code></pre></div>
+<p><strong>Example - PyCharm:</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/my/project<span class="w"> </span>-n<span class="w"> </span>my_env<span class="w"> </span>-ide<span class="w"> </span>pycharm
+</span></code></pre></div>
+<p><strong>Example - VS Code with Just My Code:</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/my/project<span class="w"> </span>-n<span class="w"> </span>my_env<span class="w"> </span>-jmc
+</span></code></pre></div>
+<h4 id="what-happens-when-you-run-wetlands-debug">What Happens When You Run <code>wetlands debug</code></h4>
+<ol>
+<li><strong>Configuration Detection</strong>: Wetlands searches for running processes matching the environment name</li>
+<li><strong>Port Discovery</strong>: The debug port for the environment is read from <code>debug_ports.json</code> in the Wetlands instance directory</li>
+<li><strong>IDE Configuration</strong>:</li>
+<li><strong>VS Code</strong>: Creates/updates <code>.vscode/launch.json</code> with remote attach configuration</li>
+<li><strong>PyCharm</strong>: Creates <code>.idea/runConfigurations/Remote_Attach_Wetlands.xml</code> with remote debugging configuration</li>
+<li><strong>IDE Launch</strong>: Opens the specified IDE with the source directory</li>
+<li><strong>Debugger Connection</strong>: The IDE connects to the remote debugger running in the isolated environment</li>
+</ol>
+<h3 id="3-wetlands-kill-stop-an-environment">3. <code>wetlands kill</code> - Stop an Environment</h3>
+<p>Terminate a running Wetlands environment and all its child processes.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>wetlands<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-n<span class="w"> </span>ENV_NAME<span class="w"> </span><span class="o">[</span>-wip<span class="w"> </span>PATH<span class="o">]</span>
+</span></code></pre></div>
+<p><strong>Arguments:</strong></p>
+<ul>
+<li><code>-n, --name ENV_NAME</code> (required): Name of the environment to kill</li>
+<li><code>-wip, --wetlandsInstancePath PATH</code> (optional): Path to the Wetlands instance folder (default: <code>pixi/wetlands</code>)</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>wetlands<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-n<span class="w"> </span>my_env
+</span></code></pre></div>
+<h2 id="debugging-with-vs-code">Debugging with VS Code</h2>
+<h3 id="setup-and-debugging">Setup and Debugging</h3>
+<ol>
+<li><strong>Start your Wetlands environment</strong> in your Python script:</li>
+</ol>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">wetlands.environment_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvironmentManager</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">env_manager</span> <span class="o">=</span> <span class="n">EnvironmentManager</span><span class="p">()</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">env_manager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="s2">&quot;my_env&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;pip&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;numpy&quot;</span><span class="p">,</span> <span class="s2">&quot;pandas&quot;</span><span class="p">]})</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># Your code here</span>
+</span></code></pre></div>
+<ol>
+<li><strong>List available environments</strong> to verify it's running:</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>wetlands<span class="w"> </span>list
+</span></code></pre></div>
+<ol>
+<li><strong>Attach the debugger</strong> with VS Code:</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/my/project<span class="w"> </span>-n<span class="w"> </span>my_env
+</span></code></pre></div>
+<ol>
+<li>
+<p><strong>Set breakpoints</strong> in VS Code and interact with your environment code</p>
+</li>
+<li>
+<p><strong>Stop debugging</strong> when finished:</p>
+</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>wetlands<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-n<span class="w"> </span>my_env
+</span></code></pre></div>
+<h3 id="configuration-details">Configuration Details</h3>
+<p>The <code>launch.json</code> file created by Wetlands for VS Code contains:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.2.0&quot;</span><span class="p">,</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">&quot;configurations&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Python Debugger: Remote Attach Wetlands&quot;</span><span class="p">,</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;debugpy&quot;</span><span class="p">,</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">      </span><span class="nt">&quot;request&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;attach&quot;</span><span class="p">,</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">      </span><span class="nt">&quot;justMyCode&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">      </span><span class="nt">&quot;connect&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">        </span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;localhost&quot;</span><span class="p">,</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">        </span><span class="nt">&quot;port&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5678</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">      </span><span class="p">},</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">      </span><span class="nt">&quot;pathMappings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">        </span><span class="p">{</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">          </span><span class="nt">&quot;localRoot&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/module/executor&quot;</span><span class="p">,</span>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">          </span><span class="nt">&quot;remoteRoot&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/module/executor&quot;</span>
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">        </span><span class="p">}</span>
+</span><span id="__span-13-18"><a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">      </span><span class="p">]</span>
+</span><span id="__span-13-19"><a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-13-20"><a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="w">  </span><span class="p">]</span>
+</span><span id="__span-13-21"><a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="p">}</span>
+</span></code></pre></div>
+<ul>
+<li><strong>type</strong>: Uses <code>debugpy</code> for Python debugging</li>
+<li><strong>connect</strong>: Specifies <code>localhost</code> and the assigned debug port</li>
+<li><strong>justMyCode</strong>: Set to <code>true</code> if you used the <code>-jmc</code> flag</li>
+<li><strong>pathMappings</strong>: Maps local source paths to remote paths in the environment</li>
+</ul>
+<h2 id="debugging-with-pycharm">Debugging with PyCharm</h2>
+<h3 id="setup-and-debugging_1">Setup and Debugging</h3>
+<ol>
+<li>
+<p><strong>Start your Wetlands environment</strong> in your Python script (same as VS Code)</p>
+</li>
+<li>
+<p><strong>Attach the debugger</strong> with PyCharm:</p>
+</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/my/project<span class="w"> </span>-n<span class="w"> </span>my_env<span class="w"> </span>-ide<span class="w"> </span>pycharm
+</span></code></pre></div>
+<ol>
+<li><strong>Select the run configuration</strong> in PyCharm:</li>
+<li>Look for "Remote_Attach_Wetlands" in the run configurations dropdown</li>
+<li>
+<p>Click the Debug button</p>
+</li>
+<li>
+<p><strong>Set breakpoints</strong> in PyCharm and interact with your environment code</p>
+</li>
+<li>
+<p><strong>Stop debugging</strong> when finished:</p>
+</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>wetlands<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-n<span class="w"> </span>my_env
+</span></code></pre></div>
+<h3 id="configuration-details_1">Configuration Details</h3>
+<p>The XML configuration file created in <code>.idea/runConfigurations/Remote_Attach_Wetlands.xml</code> contains:</p>
+<div class="language-xml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="cp">&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nt">&lt;component</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;ProjectRunConfigurationManager&quot;</span><span class="nt">&gt;</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">&lt;configuration</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;Remote Attach Wetlands&quot;</span><span class="w"> </span><span class="na">type=</span><span class="s">&quot;Python&quot;</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">                 </span><span class="na">factoryName=</span><span class="s">&quot;Python&quot;</span><span class="w"> </span><span class="na">show_console_on_std_err=</span><span class="s">&quot;false&quot;</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">                 </span><span class="na">show_console_on_std_out=</span><span class="s">&quot;false&quot;</span><span class="nt">&gt;</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="nt">&lt;module</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;$PROJECT_NAME&quot;</span><span class="w"> </span><span class="nt">/&gt;</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span><span class="nt">&lt;option</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;PATH_MAPPINGS&quot;</span><span class="nt">&gt;</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">      </span><span class="nt">&lt;list&gt;</span>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">        </span><span class="nt">&lt;item</span><span class="w"> </span><span class="na">index=</span><span class="s">&quot;0&quot;</span><span class="w"> </span><span class="na">itemvalue=</span><span class="s">&quot;/path/to/module/executor:/path/to/module/executor&quot;</span><span class="w"> </span><span class="nt">/&gt;</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">      </span><span class="nt">&lt;/list&gt;</span>
+</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="nt">&lt;/option&gt;</span>
+</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="w">  </span><span class="nt">&lt;/configuration&gt;</span>
+</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="nt">&lt;/component&gt;</span>
+</span></code></pre></div>
+<ul>
+<li>Creates a Python remote debugging configuration</li>
+<li>Path mappings ensure source code paths are correctly resolved</li>
+</ul>
+<h2 id="workflow-example">Workflow Example</h2>
+<p>Here's a complete workflow for debugging a Wetlands environment:</p>
+<h3 id="1-create-your-project-structure">1. Create Your Project Structure</h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>my_project/
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>├── main.py              # Main script
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>├── module_to_debug.py   # Code to debug
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>└── requirements.txt     # Dependencies
+</span></code></pre></div>
+<h3 id="2-create-the-main-script">2. Create the Main Script</h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># main.py</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">wetlands.environment_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvironmentManager</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="n">env_manager</span> <span class="o">=</span> <span class="n">EnvironmentManager</span><span class="p">(</span><span class="s2">&quot;pixi/&quot;</span><span class="p">)</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="n">env</span> <span class="o">=</span> <span class="n">env_manager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>    <span class="s2">&quot;my_debug_env&quot;</span><span class="p">,</span>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>    <span class="p">{</span><span class="s2">&quot;pip&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;requests&quot;</span><span class="p">,</span> <span class="s2">&quot;numpy&quot;</span><span class="p">]}</span>
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="p">)</span>
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>
+</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="c1"># Import module and call function</span>
+</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="n">my_module</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">importModule</span><span class="p">(</span><span class="s2">&quot;module_to_debug.py&quot;</span><span class="p">)</span>
+</span><span id="__span-18-14"><a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="n">result</span> <span class="o">=</span> <span class="n">my_module</span><span class="o">.</span><span class="n">process_data</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">])</span>
+</span><span id="__span-18-15"><a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>
+</span><span id="__span-18-16"><a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Result: </span><span class="si">{</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-18-17"><a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a><span class="n">env</span><span class="o">.</span><span class="n">exit</span><span class="p">()</span>
+</span></code></pre></div>
+<h3 id="3-create-the-module-to-debug">3. Create the Module to Debug</h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># module_to_debug.py</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">process_data</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Process data with numpy&quot;&quot;&quot;</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="n">arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">arr</span><span class="p">)</span> <span class="o">*</span> <span class="mi">2</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>  <span class="c1"># Breakpoint here to inspect values</span>
+</span></code></pre></div>
+<h3 id="4-start-your-application">4. Start Your Application</h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>python<span class="w"> </span>main.py
+</span></code></pre></div>
+<h3 id="5-launch-the-environment">5. Launch the Environment</h3>
+<p>Keep the main script running, and in another terminal:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>wetlands<span class="w"> </span>list
+</span></code></pre></div>
+<p>You'll see <code>my_debug_env</code> listed.</p>
+<h3 id="6-attach-the-debugger">6. Attach the Debugger</h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># For VS Code:</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/my_project<span class="w"> </span>-n<span class="w"> </span>my_debug_env
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="c1"># Or for PyCharm:</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/my_project<span class="w"> </span>-n<span class="w"> </span>my_debug_env<span class="w"> </span>-ide<span class="w"> </span>pycharm
+</span></code></pre></div>
+<h3 id="7-debug-your-code">7. Debug Your Code</h3>
+<ul>
+<li>Set breakpoints in <code>module_to_debug.py</code></li>
+<li>Call functions from your main script</li>
+<li>Step through code and inspect variables</li>
+<li>VS Code/PyCharm will break at your breakpoints</li>
+</ul>
+<h3 id="8-clean-up">8. Clean Up</h3>
+<p>When finished:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>wetlands<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-n<span class="w"> </span>my_debug_env
+</span></code></pre></div>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="debug-ports-file-does-not-exist">"Debug ports file does not exist"</h3>
+<p><strong>Cause</strong>: The Wetlands instance hasn't created the <code>debug_ports.json</code> file yet.</p>
+<p><strong>Solution</strong>: Make sure your environment has been launched with <code>env.launch()</code> before running the debug command.</p>
+<h3 id="debug-port-not-found-for-environment">"Debug port not found for environment"</h3>
+<p><strong>Cause</strong>: The environment name doesn't exist or is spelled incorrectly.</p>
+<p><strong>Solution</strong>:
+- Verify the environment is running: <code>wetlands list</code>
+- Check the exact environment name
+- Make sure you're using the correct <code>-wip</code> path if you have multiple Wetlands instances</p>
+<h3 id="no-wetlands-process-with-environment-name-found">"No wetlands process with environment name found"</h3>
+<p><strong>Cause</strong>: The specified environment is not currently running.</p>
+<p><strong>Solution</strong>:
+- Start your Python script that creates and launches the environment
+- Keep the script running while debugging
+- Verify with <code>wetlands list</code></p>
+<h3 id="debugger-doesnt-break-at-breakpoints">Debugger doesn't break at breakpoints</h3>
+<p><strong>Cause</strong>: The source code path mapping might be incorrect.</p>
+<p><strong>Solution</strong>:
+- Ensure the source path you provide to <code>wetlands debug</code> matches your actual source code location
+- Check the path mappings in the generated configuration file
+- Verify that the line numbers haven't changed since you set the breakpoint</p>
+<h3 id="kill-environment-no-process-found">"Kill environment: no process found"</h3>
+<p><strong>Cause</strong>: The environment is not currently running.</p>
+<p><strong>Solution</strong>: This is usually not a problem. Verify with <code>wetlands list</code> that the environment isn't running, and proceed.</p>
+<h2 id="advanced-usage">Advanced Usage</h2>
+<h3 id="debugging-multiple-environments">Debugging Multiple Environments</h3>
+<p>You can debug multiple environments simultaneously by:</p>
+<ol>
+<li>Opening multiple IDE windows</li>
+<li>Using <code>wetlands debug</code> with different environment names</li>
+<li>Each environment gets its own debug port</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># Terminal 1</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/project1<span class="w"> </span>-n<span class="w"> </span>env1
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="c1"># Terminal 2</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/project2<span class="w"> </span>-n<span class="w"> </span>env2
+</span></code></pre></div>
+<h3 id="debugging-with-custom-wetlands-instances">Debugging with Custom Wetlands Instances</h3>
+<p>If you have multiple Wetlands instances, specify the instance path:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/project<span class="w"> </span>-n<span class="w"> </span>my_env<span class="w"> </span>-wip<span class="w"> </span>/custom/wetlands/path
+</span></code></pre></div>
+<h3 id="vs-code-only-just-my-code-mode">VS Code Only: Just My Code Mode</h3>
+<p>Debug only your code, skipping library internals:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>wetlands<span class="w"> </span>debug<span class="w"> </span>-s<span class="w"> </span>/path/to/project<span class="w"> </span>-n<span class="w"> </span>my_env<span class="w"> </span>-jmc
+</span></code></pre></div>
+<p>This sets <code>justMyCode: true</code> in the VS Code launch configuration, which speeds up debugging by not stepping into library code.</p>
+<h2 id="how-it-works-under-the-hood">How It Works Under the Hood</h2>
+<ol>
+<li><strong>Process Detection</strong>: Wetlands uses <code>psutil</code> to find running processes matching your environment</li>
+<li><strong>Port Assignment</strong>: Each environment gets a unique debug port from <code>debug_ports.json</code></li>
+<li><strong>Debugpy Integration</strong>: The environment's module executor runs <code>debugpy</code> in socket mode</li>
+<li><strong>IDE Configuration</strong>: Wetlands generates IDE-specific configuration files for remote attach</li>
+<li><strong>Network Connection</strong>: Your IDE connects via localhost to the debug port in the isolated environment</li>
+</ol>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="../getting_started/">Getting Started</a> - Basic Wetlands usage</li>
+<li><a href="../advanced_example/">Advanced Example</a> - More complex scenarios</li>
+<li><a href="../how_it_works/">How It Works</a> - Internal architecture</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant"], "search": "../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+    
+  </body>
+</html>
