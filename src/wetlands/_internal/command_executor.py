@@ -246,8 +246,12 @@ class CommandExecutor:
         """
         # Always create ProcessLogger to capture output (set log=True internally)
         process = self.executeCommands(
-            commands, exitIfCommandError=exitIfCommandError, popenKwargs=popenKwargs,
-            wait=True, log=True, log_context=log_context
+            commands,
+            exitIfCommandError=exitIfCommandError,
+            popenKwargs=popenKwargs,
+            wait=True,
+            log=True,
+            log_context=log_context,
         )
 
         # Get output from ProcessLogger (always created above)
@@ -256,7 +260,7 @@ class CommandExecutor:
             return []
 
         # Check if CondaSystemExit was detected during execution
-        if getattr(process, '_conda_exit_detected', False):
+        if getattr(process, "_conda_exit_detected", False):
             raise Exception(f'The execution of the commands "{self._commandsExcerpt(commands)}" failed.')
 
         output = process_logger.get_output()
@@ -270,10 +274,7 @@ class CommandExecutor:
         return stripped_output
 
     def executeCommandsAndGetJsonOutput(
-        self,
-        commands: list[str],
-        exitIfCommandError: bool = True,
-        popenKwargs: dict[str, Any] = {}
+        self, commands: list[str], exitIfCommandError: bool = True, popenKwargs: dict[str, Any] = {}
     ) -> list[dict[str, str]]:
         """Execute commands and parse the json output.
 
@@ -287,8 +288,7 @@ class CommandExecutor:
         """
         # Execute with wait=True to block until completion
         process = self.executeCommands(
-            commands, exitIfCommandError=exitIfCommandError, popenKwargs=popenKwargs,
-            wait=True, log=True
+            commands, exitIfCommandError=exitIfCommandError, popenKwargs=popenKwargs, wait=True, log=True
         )
 
         # Get output from ProcessLogger

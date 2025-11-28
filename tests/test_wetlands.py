@@ -165,6 +165,7 @@ def test_mambarc_modification(env_manager, tmp_path):
 def test_code_execution(env_manager, tmp_path):
     """Test that Environment.execute() correctly executes code within an environment."""
     env_name = "test_env_code_exec"
+
     logger.info(f"Testing code execution: {env_name}")
     dependencies = {"conda": ["numpy"]}  # numpy is required to import it
 

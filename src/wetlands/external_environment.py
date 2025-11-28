@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 MODULE_EXECUTOR_FILE = "module_executor.py"
 
+
 def synchronized(method):
     """Decorator to wrap a method call with self._lock."""
 
@@ -60,11 +61,7 @@ class ExternalEnvironment(Environment):
         ]
 
         # Create log context for the module executor process
-        log_context = {
-            "log_source": LOG_SOURCE_EXECUTION,
-            "env_name": self.name,
-            "call_target": MODULE_EXECUTOR_FILE
-        }
+        log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}
 
         # Pass log_context to executeCommands so ProcessLogger is created with proper context
         self.process = self.executeCommands(commands, additionalActivateCommands, log_context=log_context)
@@ -84,6 +81,7 @@ class ExternalEnvironment(Environment):
 
         # Handle debug port if needed
         if self.environmentManager.debug:
+
             def debug_predicate(line: str) -> bool:
                 return line.startswith("Listening debug port ")
 

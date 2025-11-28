@@ -1,12 +1,14 @@
 from pathlib import Path
 from wetlands.environment_manager import EnvironmentManager
 import urllib.request
+import logging
 
 
 def initialize():
     # Initialize the environment manager
     # Wetlands will store logs and state in the wetlandsInstancePath (defaults to "wetlands/")
     # Pixi/Micromamba will be installed in wetlandsInstancePath/pixi by default
+    logging.getLogger("wetlands").addHandler(logging.StreamHandler())
     environmentManager = EnvironmentManager()
 
     # Create and launch an isolated Conda environment named "cellpose"

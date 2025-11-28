@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 import platform
 from importlib import metadata
@@ -19,7 +18,7 @@ from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.config_parser import ConfigParser
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
-from wetlands.logger import setLogLevel, logger, LOG_SOURCE_ENVIRONMENT
+from wetlands.logger import logger, enable_file_logging, LOG_SOURCE_ENVIRONMENT
 
 
 class EnvironmentManager:
@@ -46,6 +45,7 @@ class EnvironmentManager:
         mainCondaEnvironmentPath: Path | None = None,
         debug: bool = False,
         manager="auto",
+        log_file_path=Path("wetlands.log"),
     ) -> None:
         """Initializes the EnvironmentManager.
 
@@ -60,8 +60,8 @@ class EnvironmentManager:
                 mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the pixi.toml or pyproject.toml file.
                 debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlandsInstancePath / debug_ports.json
                 manager: Use "pixi" to use Pixi as the conda manager, "micromamba" to use Micromamba and "auto" to infer from condaPath (will look for "pixi" or "micromamba" in the path).
+                log_file_path: Path to the log file where logs will be stored. Use relative path to wetlandsInstancePath, or absolute path. Set to None to disable file logging.
         """
-        from wetlands.logger import setLogFilePath
 
         self.environments: dict[str | Path, Environment] = {}
         self.wetlandsInstancePath = cast(Path, wetlandsInstancePath).resolve()
@@ -73,8 +73,10 @@ class EnvironmentManager:
         condaPath = Path(condaPath)
 
         # Initialize logger to use the wetlandsInstancePath for logs
-        setLogLevel(logging.DEBUG if debug else logging.INFO)
-        setLogFilePath(self.wetlandsInstancePath / "wetlands.log")
+        if log_file_path is not None:
+            enable_file_logging(
+                log_file_path if log_file_path.is_absolute() else self.wetlandsInstancePath / log_file_path
+            )
 
         usePixi = self._initManager(manager, condaPath)
 
@@ -91,6 +93,9 @@ class EnvironmentManager:
         self.commandGenerator = CommandGenerator(self.settingsManager)
         self.dependencyManager = DependencyManager(self.commandGenerator)
         self.commandExecutor = CommandExecutor(self.wetlandsInstancePath / "command_executions" if debug else None)
+
+        if log_file_path is not None:
+            logger.info("Wetlands initialized at %s", str(self.wetlandsInstancePath))
 
     def _initManager(self, manager: str, condaPath: Path) -> bool:
         if manager not in ["auto", "pixi", "micromamba"]:
@@ -408,6 +413,7 @@ class EnvironmentManager:
         # Check if environment already exists on disk
         path = self.settingsManager.getEnvironmentPathFromName(name)
         if self.environmentExists(path) and name not in self.environments:
+            logger.log_environment(f"Loading existing environment '{name}' from '{path}'", name, stage="create")
             self.environments[name] = ExternalEnvironment(name, path, self)
 
         if name in self.environments:
@@ -427,7 +433,11 @@ class EnvironmentManager:
             for env in envs:
                 try:
                     if self._environmentValidatesRequirements(env, dependencies):
-                        logger.debug(f"Environment '{env.name}' satisfies dependencies for '{name}', returning it.")
+                        logger.log_environment(
+                            f"Environment '{env.name}' satisfies dependencies for '{name}', returning it.",
+                            name,
+                            stage="create",
+                        )
                         return env
                 except Exception as e:
                     logger.debug(f"Error checking environment '{env.name}': {e}")
@@ -458,10 +468,10 @@ class EnvironmentManager:
         createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
 
-        logger.log_environment(f"Creating environment '{name}'", name, stage="download")
+        logger.log_environment(f"Creating environment '{name}'", name, stage="create")
         log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": name, "stage": "install"}
-        process = self.commandExecutor.executeCommands(createEnvCommands, wait=True, log_context=log_context)
-        logger.log_environment(f"Environment '{name}' created successfully", name, stage="complete")
+        self.commandExecutor.executeCommands(createEnvCommands, wait=True, log_context=log_context)
+        logger.log_environment(f"Environment '{name}' created successfully", name, stage="create")
         return self.environments[name]
 
     def createFromConfig(
@@ -541,7 +551,9 @@ class EnvironmentManager:
         installCommands = self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
         installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
 
-        logger.log_environment(f"Installing dependencies in environment '{environment.name}'", environment.name, stage="install")
+        logger.log_environment(
+            f"Installing dependencies in environment '{environment.name}'", environment.name, stage="install"
+        )
         log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": environment.name, "stage": "install"}
         return self.commandExecutor.executeCommandsAndGetOutput(installCommands, log_context=log_context)
 

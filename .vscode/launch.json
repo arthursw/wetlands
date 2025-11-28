@@ -10,6 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/src/wetlands/_internal/module_executor.py",
             "console": "integratedTerminal",
+            "justMyCode": false,
             "args": [
                 "env"
             ]
@@ -21,6 +22,7 @@
             "python": "/Users/amasson/Travail/wetlands/.venv/bin/python3",
             "program": "${workspaceFolder}/src/wetlands/main.py",
             "console": "integratedTerminal",
+            "justMyCode": false,
             "args": [
                 "list"
             ]
@@ -32,6 +34,7 @@
             "python": "/Users/amasson/Travail/wetlands/.venv/bin/python3",
             "program": "${workspaceFolder}/src/wetlands/main.py",
             "console": "integratedTerminal",
+            "justMyCode": false,
             "args": [
                 "-wip",
                 "/Users/amasson/Travail/galaxy/pixi/wetlands/",
@@ -39,6 +42,16 @@
                 "-n",
                 "custom_splitchannels"
             ]
+        },
+        {
+            "name": "Current file",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "/Users/amasson/Travail/wetlands/.venv/bin/python3",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": []
         }
     ]
 }

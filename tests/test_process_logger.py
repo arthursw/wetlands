@@ -3,8 +3,7 @@
 import subprocess
 import pytest
 import logging
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands.logger import logger
 
@@ -21,11 +20,7 @@ def mock_process():
 @pytest.fixture
 def log_context():
     """Create a test log context."""
-    return {
-        "log_source": "execution",
-        "env_name": "test_env",
-        "call_target": "test:function"
-    }
+    return {"log_source": "execution", "env_name": "test_env", "call_target": "test:function"}
 
 
 def test_process_logger_initialization(mock_process, log_context):
@@ -86,6 +81,7 @@ def test_process_logger_wait_for_line(mock_process, log_context):
 
     # Start waiting (in background)
     import threading
+
     result_holder = []
 
     def wait():
@@ -97,6 +93,7 @@ def test_process_logger_wait_for_line(mock_process, log_context):
 
     # Simulate matching line being found
     import time
+
     time.sleep(0.1)
     callback = process_logger._subscribers[0]  # The callback added by wait_for_line
     callback("Listening port 12345", {})
@@ -199,11 +196,7 @@ class TestProcessLoggerIntegration:
     def test_process_logger_reads_echo_output(self):
         """Test ProcessLogger reads output from real subprocess."""
         process = subprocess.Popen(
-            ["echo", "Hello World"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
+            ["echo", "Hello World"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
         )
 
         log_context = {"log_source": "execution", "env_name": "test"}
@@ -218,6 +211,7 @@ class TestProcessLoggerIntegration:
 
         # Give reader thread time to process
         import time
+
         time.sleep(0.1)
 
         assert "Hello World" in collected_lines
@@ -225,31 +219,26 @@ class TestProcessLoggerIntegration:
     def test_process_logger_with_log_context_in_logger(self):
         """Test that log context is properly attached to log records."""
         process = subprocess.Popen(
-            ["echo", "Test message"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
+            ["echo", "Test message"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
         )
 
-        log_context = {
-            "log_source": "execution",
-            "env_name": "cellpose",
-            "call_target": "segment:detect"
-        }
+        log_context = {"log_source": "execution", "env_name": "cellpose", "call_target": "segment:detect"}
 
         # Create a custom handler that captures record.__dict__ to verify extra field
         records_with_extra = []
+
         class TestHandler(logging.Handler):
             def emit(self, record):
                 # Store record with its attributes to capture extra
-                records_with_extra.append({
-                    'message': record.getMessage(),
-                    'extra': dict(record.__dict__)  # Capture all attributes
-                })
+                records_with_extra.append(
+                    {
+                        "message": record.getMessage(),
+                        "extra": dict(record.__dict__),  # Capture all attributes
+                    }
+                )
 
         handler = TestHandler()
-        logger.addHandler(handler)
+        logger.logger.addHandler(handler)
 
         try:
             process_logger = ProcessLogger(process, log_context, logger)
@@ -258,16 +247,17 @@ class TestProcessLoggerIntegration:
 
             # Give reader thread time to process
             import time
+
             time.sleep(0.1)
 
             # Verify at least one record was logged
             assert len(records_with_extra) > 0
 
             # The extra fields are stored as attributes on the record
-            record_dict = records_with_extra[0]['extra']
+            record_dict = records_with_extra[0]["extra"]
             # Check that context fields were attached
             assert record_dict.get("log_source") == "execution"
             assert record_dict.get("env_name") == "cellpose"
             assert record_dict.get("call_target") == "segment:detect"
         finally:
-            logger.removeHandler(handler)
+            logger.logger.removeHandler(handler)

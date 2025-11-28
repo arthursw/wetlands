@@ -20,7 +20,7 @@ class ProcessLogger:
         logger.start_reading()
     """
 
-    def __init__(self, process: subprocess.Popen, log_context: dict[str, Any], base_logger: logging.Logger):
+    def __init__(self, process: subprocess.Popen, log_context: dict[str, Any], base_logger: logging.LoggerAdapter):
         """Initialize ProcessLogger.
 
         Args:
@@ -61,10 +61,7 @@ class ProcessLogger:
         if self._reader_thread is not None:
             return
 
-        self._reader_thread = threading.Thread(
-            target=self._read_stdout,
-            daemon=True
-        )
+        self._reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
         self._reader_thread.start()
 
     def _read_stdout(self) -> None:
@@ -126,7 +123,7 @@ class ProcessLogger:
 
         def callback(line: str, context: dict) -> None:
             if predicate(line):
-                found_line[0] = line        # type: ignore
+                found_line[0] = line  # type: ignore
                 found_event.set()
 
         self.subscribe(callback)
