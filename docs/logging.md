@@ -97,12 +97,12 @@ Capture logs from individual function/script executions to separate files. Here'
 from pathlib import Path
 from contextlib import contextmanager
 from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import logger
 import logging
 
 @contextmanager
 def capture_execution_logs(output_file: Path):
     """Context manager to capture all logs during execution to a file."""
+    logger = logging.getLogger("wetlands")
     handler = logging.FileHandler(output_file)
     handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
     logger.addHandler(handler)
@@ -134,12 +134,13 @@ If you want to capture only logs from a specific execution (filtering by `call_t
 @contextmanager
 def capture_execution_logs_filtered(env_name: str, call_target: str, output_file: Path):
     """Context manager that captures only logs from a specific execution."""
+    logger = logging.getLogger("wetlands")
     handler = logging.FileHandler(output_file)
     handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
 
     def filter_execution(record):
-        return (getattr(record, "log_source") == "execution" and 
-            getattr(record, "env_name") == env_name and 
+        return (getattr(record, "log_source") == "execution" and
+            getattr(record, "env_name") == env_name and
             getattr(record, "call_target") == call_target
         )
 
@@ -165,10 +166,13 @@ Route different log types to separate files:
 import logging
 from pathlib import Path
 from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import logger, enable_file_logging
+from wetlands.logger import enable_file_logging
 
 # Enable main log file
 enable_file_logging(Path("wetlands.log"))
+
+# Get the wetlands logger
+logger = logging.getLogger("wetlands")
 
 # Create separate handlers for different log sources
 env_handler = logging.FileHandler("environment.log")
@@ -185,8 +189,8 @@ def filter_execution(record):
 env_handler.addFilter(filter_environment)
 exec_handler.addFilter(filter_execution)
 
-logger.logger.addHandler(env_handler)
-logger.logger.addHandler(exec_handler)
+logger.addHandler(env_handler)
+logger.addHandler(exec_handler)
 
 # Now operations are routed to appropriate files
 env_manager = EnvironmentManager()
