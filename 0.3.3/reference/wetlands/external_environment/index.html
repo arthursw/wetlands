@@ -1283,7 +1283,7 @@
 
 
 
-  <div class="doc doc-children">
+<div class="doc doc-children">
 
 
 
@@ -1689,7 +1689,7 @@
 </span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">process</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">executeCommands</span><span class="p">(</span><span class="n">commands</span><span class="p">,</span> <span class="n">additionalActivateCommands</span><span class="p">,</span> <span class="n">log_context</span><span class="o">=</span><span class="n">log_context</span><span class="p">)</span>
 </span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68"></a>
 </span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69"></a>        <span class="c1"># Retrieve the ProcessLogger that was already created and started by executeCommands</span>
-</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_process_logger</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">environmentManager</span><span class="o">.</span><span class="n">commandExecutor</span><span class="o">.</span><span class="n">_process_loggers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">pid</span><span class="p">)</span>
+</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_process_logger</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">environmentManager</span><span class="o">.</span><span class="n">getProcessLogger</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="p">)</span>
 </span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_logger</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 </span><span id="__span-0-72"><a id="__codelineno-0-72" name="__codelineno-0-72"></a>            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Failed to retrieve ProcessLogger for module executor process&quot;</span><span class="p">)</span>
 </span><span id="__span-0-73"><a id="__codelineno-0-73" name="__codelineno-0-73"></a>
@@ -1931,7 +1931,7 @@
 
 
 
-  <div class="doc doc-children">
+<div class="doc doc-children">
 
 
 
@@ -2085,7 +2085,7 @@
 </span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">process</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">executeCommands</span><span class="p">(</span><span class="n">commands</span><span class="p">,</span> <span class="n">additionalActivateCommands</span><span class="p">,</span> <span class="n">log_context</span><span class="o">=</span><span class="n">log_context</span><span class="p">)</span>
 </span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68"></a>
 </span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69"></a>    <span class="c1"># Retrieve the ProcessLogger that was already created and started by executeCommands</span>
-</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_process_logger</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">environmentManager</span><span class="o">.</span><span class="n">commandExecutor</span><span class="o">.</span><span class="n">_process_loggers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="o">.</span><span class="n">pid</span><span class="p">)</span>
+</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_process_logger</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">environmentManager</span><span class="o">.</span><span class="n">getProcessLogger</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">process</span><span class="p">)</span>
 </span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_logger</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 </span><span id="__span-0-72"><a id="__codelineno-0-72" name="__codelineno-0-72"></a>        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Failed to retrieve ProcessLogger for module executor process&quot;</span><span class="p">)</span>
 </span><span id="__span-0-73"><a id="__codelineno-0-73" name="__codelineno-0-73"></a>
