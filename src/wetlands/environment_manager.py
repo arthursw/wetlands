@@ -18,6 +18,7 @@ from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.config_parser import ConfigParser
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
+from wetlands._internal.process_logger import ProcessLogger
 from wetlands.logger import logger, enable_file_logging, LOG_SOURCE_ENVIRONMENT
 
 
@@ -585,6 +586,16 @@ class EnvironmentManager:
         return self.commandExecutor.executeCommands(
             activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait, log_context=log_context, log=log
         )
+    
+    def getProcessLogger(self, process: subprocess.Popen)-> ProcessLogger:
+        """Get a ProcessLogger for the given process.
+
+        Args:
+                process: The process to create a ProcessLogger for. 
+        Returns:
+                The created ProcessLogger.
+        """
+        return self.commandExecutor.getProcessLogger(process)
 
     def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path) -> None:
         """

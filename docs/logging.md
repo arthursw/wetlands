@@ -128,6 +128,32 @@ with capture_execution_logs(Path("evaluate.log")):
     env.execute("analysis.py", "evaluate")
 ```
 
+You can also use Wetlands ProcessLogger:
+
+```python
+
+# Retrieve the ProcessLogger that was created by executeCommands
+process_logger = self.environment_manager.getProcessLogger(env.process.pid)
+
+# Subscribe to the process output
+def check_output(line: str, _context: dict) -> None:
+    if "Special message" in line:
+        print(line)
+
+process_logger.subscribe(check_output)
+
+# Wait for port announcement with timeout
+def port_predicate(line: str) -> bool:
+    return line.startswith("Listening port ")
+
+port_line = process_logger.wait_for_line(port_predicate, timeout=30)
+
+if port_line:
+    port = int(port_line.replace("Listening port ", ""))
+    connection = Client(("localhost", self.port))
+
+```
+
 If you want to capture only logs from a specific execution (filtering by `call_target`), use a filter:
 
 ```python

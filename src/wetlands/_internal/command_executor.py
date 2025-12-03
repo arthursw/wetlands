@@ -79,7 +79,7 @@ class CommandExecutor:
         prefix: str = "[...] " if len(str(commands)) > 150 else ""
         return prefix + str(commands)[-150:]
 
-    def getProcessLogger(
+    def _createProcessLogger(
         self,
         process: subprocess.Popen,
         log_context: dict[str, Any] | None = None,
@@ -104,6 +104,20 @@ class CommandExecutor:
         self._process_loggers[process.pid] = process_logger
         return process_logger
 
+    def getProcessLogger(
+        self,
+        process: subprocess.Popen,
+    ) -> ProcessLogger:
+        """Get the ProcessLogger for a subprocess.
+
+        Args:
+                process: Subprocess whose logger to retrieve.
+
+        Returns:
+                ProcessLogger instance if found, raise exception if not found.
+        """
+        return self._process_loggers[process.pid]
+    
     def _getCompleteProcessLogger(self, process: subprocess.Popen) -> ProcessLogger | None:
         """Get the process logger and wait for the reader thread to finish processing all output.
 
@@ -208,7 +222,7 @@ class CommandExecutor:
 
             # Create ProcessLogger to handle stdout in background if logging is enabled
             if log:
-                process_logger = self.getProcessLogger(process, log_context)
+                process_logger = self._createProcessLogger(process, log_context)
 
                 # Subscribe to detect CondaSystemExit in real-time during execution
                 def conda_exit_detector(line: str, _context: dict) -> None:

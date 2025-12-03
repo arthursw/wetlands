@@ -12,5 +12,8 @@ pixi/
 *.log
 *.png
 examples/*_segmentation.bin
+examples/wetlands/
 !Wetland.png
 reference.md
+todo.md
+specs.md

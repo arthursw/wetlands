@@ -54,11 +54,15 @@ if __name__ == "__main__":
     logger = logging.getLogger(args.environment)
     if args.debugPort is not None:
         logger.setLevel(logging.DEBUG)
-        logger.debug(f"Starting {args.environment} with python {sys.version}")
-        import debugpy
+        try:
+            import debugpy
 
-        _, debugPort = debugpy.listen(args.debugPort)
-        print(f"Listening debug port {debugPort}")
+            logger.debug(f"Starting {args.environment} with python {sys.version}")
+            _, debugPort = debugpy.listen(args.debugPort)
+            print(f"Listening debug port {debugPort}")
+        except ImportError as ie:
+            logger.error("debugpy is not installed in this environment. Debugging is not available.")
+            logger.error(str(ie))
 else:
     logger = logging.getLogger("module_executor")
 

@@ -67,7 +67,7 @@ class ExternalEnvironment(Environment):
         self.process = self.executeCommands(commands, additionalActivateCommands, log_context=log_context)
 
         # Retrieve the ProcessLogger that was already created and started by executeCommands
-        self._process_logger = self.environmentManager.commandExecutor._process_loggers.get(self.process.pid)
+        self._process_logger = self.environmentManager.getProcessLogger(self.process)
         if self._process_logger is None:
             raise Exception("Failed to retrieve ProcessLogger for module executor process")
 
