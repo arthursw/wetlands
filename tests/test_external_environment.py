@@ -28,6 +28,10 @@ def test_launch(mock_popen):
 
         # Mock the environment manager with a mock command executor
         mock_env_manager = MagicMock()
+        mock_env_manager.debug = False
+        mock_env_manager.getProcessLogger = MagicMock(return_value=mock_process_logger)
+        mock_env_manager.wetlandsInstancePath = MagicMock()
+        mock_env_manager.wetlandsInstancePath.resolve.return_value = Path("/tmp/wetlands")
         mock_env_manager.commandExecutor._process_loggers = {12345: mock_process_logger}
 
         env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
