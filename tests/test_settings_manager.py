@@ -6,18 +6,18 @@ from wetlands._internal.settings_manager import SettingsManager
 
 def test_initialization():
     sm = SettingsManager()
-    assert sm.condaPath == Path("pixi").resolve()
+    assert sm.conda_path == Path("pixi").resolve()
     sm = SettingsManager("micromamba", False)
-    assert sm.condaPath == Path("micromamba").resolve()
+    assert sm.conda_path == Path("micromamba").resolve()
 
 
 def test_set_conda_path():
     sm = SettingsManager()
     new_path = Path("/custom/path")
     with patch("pathlib.Path.exists", return_value=False):
-        sm.setCondaPath(new_path)
-        assert sm.condaPath == new_path.resolve()
-        assert str(new_path) in sm.condaBinConfig
+        sm.set_conda_path(new_path)
+        assert sm.conda_path == new_path.resolve()
+        assert str(new_path) in sm.conda_bin_config
 
 
 def test_set_conda_path_with_proxies():
@@ -46,19 +46,19 @@ def test_set_proxies():
         patch("pathlib.Path.exists", return_value=True),
         patch("builtins.open", mock_open(read_data="{}")) as m_open,
     ):
-        sm.setProxies(proxies)
-        m_open.assert_called_with(sm.condaPath / ".mambarc", "w")
+        sm.set_proxies(proxies)
+        m_open.assert_called_with(sm.conda_path / ".mambarc", "w")
 
 
 def test_get_conda_paths():
     sm = SettingsManager("/some/path", False)
-    root, bin_path = sm.getCondaPaths()
+    root, bin_path = sm.get_conda_paths()
     assert root == Path("/some/path").resolve()
     expected_bin = "bin/micromamba" if platform.system() != "Windows" else "bin/micromamba.exe"
     assert bin_path == Path(expected_bin)
 
     sm = SettingsManager("/some/path")
-    root, bin_path = sm.getCondaPaths()
+    root, bin_path = sm.get_conda_paths()
     assert root == Path("/some/path").resolve()
     expected_bin = "bin/pixi" if platform.system() != "Windows" else "bin/pixi.exe"
     assert bin_path == Path(expected_bin)
@@ -78,7 +78,7 @@ def test_get_proxy_environment_variables_commands():
         if platform.system() != "Windows"
         else '$Env:HTTPS_PROXY="https://secure-proxy.com:8443"',
     ]
-    assert sm.getProxyEnvironmentVariablesCommands() == expected_cmds
+    assert sm.get_proxy_environment_variables_commands() == expected_cmds
 
 
 def test_get_proxy_string():
@@ -87,8 +87,8 @@ def test_get_proxy_string():
         "http": "http://proxy.com:8080",
         "https": "https://secure-proxy.com:8443",
     }
-    assert sm.getProxyString() == "https://secure-proxy.com:8443"
+    assert sm.get_proxy_string() == "https://secure-proxy.com:8443"
     sm.proxies.pop("https")
-    assert sm.getProxyString() == "http://proxy.com:8080"
+    assert sm.get_proxy_string() == "http://proxy.com:8080"
     sm.proxies.pop("http")
-    assert sm.getProxyString() is None
+    assert sm.get_proxy_string() is None

@@ -19,7 +19,7 @@ class TestProcessMatch:
             "python",
             "/path/to/wetlands/module_executor.py",
             "test_env",
-            "--wetlandsInstancePath",
+            "--wetlands_instance_path",
             "/tmp/wetlands",
         ]
         assert process_match(process_args, name="test_env") is True
@@ -30,13 +30,13 @@ class TestProcessMatch:
         assert process_match(process_args) is False
 
     def test_process_match_no_wetlands_instance_path(self):
-        """Test that processes without --wetlandsInstancePath are not matched"""
+        """Test that processes without --wetlands_instance_path are not matched"""
         process_args = ["python", "/path/to/wetlands/module_executor.py", "test_env"]
         assert process_match(process_args) is False
 
     def test_process_match_no_module_executor(self):
         """Test that processes without module_executor are not matched"""
-        process_args = ["python", "script.py", "--wetlandsInstancePath", "/tmp/wetlands"]
+        process_args = ["python", "script.py", "--wetlands_instance_path", "/tmp/wetlands"]
         assert process_match(process_args) is False
 
     def test_process_match_wrong_env_name(self):
@@ -45,7 +45,7 @@ class TestProcessMatch:
             "python",
             "/path/to/wetlands/module_executor.py",
             "other_env",
-            "--wetlandsInstancePath",
+            "--wetlands_instance_path",
             "/tmp/wetlands",
         ]
         assert process_match(process_args, name="test_env") is False
@@ -56,7 +56,7 @@ class TestProcessMatch:
             "python",
             "/path/to/wetlands/module_executor.py",
             "any_env",
-            "--wetlandsInstancePath",
+            "--wetlands_instance_path",
             "/tmp/wetlands",
         ]
         assert process_match(process_args, name=None) is True
@@ -71,7 +71,7 @@ class TestGetMatchingProcesses:
             "python",
             "/path/to/wetlands/module_executor.py",
             "test_env",
-            "--wetlandsInstancePath",
+            "--wetlands_instance_path",
             "/tmp/wetlands",
         ]
         mock_process_iter.return_value = [mock_process]
@@ -101,7 +101,7 @@ class TestGetMatchingProcesses:
             "python",
             "/path/to/wetlands/module_executor.py",
             "test_env",
-            "--wetlandsInstancePath",
+            "--wetlands_instance_path",
             "/tmp/wetlands",
         ]
         mock_process_iter.return_value = [mock_process1, mock_process2]
@@ -119,7 +119,7 @@ class TestGetWetlandsInstancePaths:
                     "python",
                     "/path/to/wetlands/module_executor.py",
                     "env1",
-                    "--wetlandsInstancePath",
+                    "--wetlands_instance_path",
                     "/tmp/wetlands1",
                 ]
             }
@@ -135,7 +135,7 @@ class TestGetWetlandsInstancePaths:
                     "python",
                     "/path/to/wetlands/module_executor.py",
                     "env1",
-                    "--wetlandsInstancePath",
+                    "--wetlands_instance_path",
                     "/tmp/wetlands1",
                 ]
             },
@@ -144,7 +144,7 @@ class TestGetWetlandsInstancePaths:
                     "python",
                     "/path/to/wetlands/module_executor.py",
                     "env2",
-                    "--wetlandsInstancePath",
+                    "--wetlands_instance_path",
                     "/tmp/wetlands2",
                 ]
             },
@@ -167,8 +167,8 @@ class TestSetupAndLaunchVscode:
         args.sources = MagicMock()
         args.sources.resolve = MagicMock(return_value=Path("/sources"))
         args.name = "test_env"
-        args.wetlandsInstancePath = MagicMock()
-        args.wetlandsInstancePath.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
+        args.wetlands_instance_path = MagicMock()
+        args.wetlands_instance_path.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
 
         mock_get_processes.return_value = []
         mock_get_paths.return_value = []
@@ -188,12 +188,12 @@ class TestListEnvironments:
     def test_list_environments_with_running_processes(self, mock_get_processes, mock_open, mock_json5_load, mock_print):
         """Test listing environments when processes are running"""
         args = MagicMock()
-        args.wetlandsInstancePath = MagicMock()
-        args.wetlandsInstancePath.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
+        args.wetlands_instance_path = MagicMock()
+        args.wetlands_instance_path.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
 
         debug_ports = {
-            "env1": {"debugPort": 5678, "moduleExecutorPath": "/path/to/executor1"},
-            "env2": {"debugPort": 5679, "moduleExecutorPath": "/path/to/executor2"},
+            "env1": {"debug_port": 5678, "module_executor_path": "/path/to/executor1"},
+            "env2": {"debug_port": 5679, "module_executor_path": "/path/to/executor2"},
         }
         mock_json5_load.return_value = debug_ports
         mock_get_processes.return_value = []
@@ -211,8 +211,8 @@ class TestListEnvironments:
     def test_list_environments_no_debug_ports_file(self, mock_get_processes, mock_print):
         """Test when debug_ports.json does not exist"""
         args = MagicMock()
-        args.wetlandsInstancePath = MagicMock()
-        args.wetlandsInstancePath.resolve = MagicMock(return_value=Path("/nonexistent/path"))
+        args.wetlands_instance_path = MagicMock()
+        args.wetlands_instance_path.resolve = MagicMock(return_value=Path("/nonexistent/path"))
 
         mock_get_processes.return_value = []
 
@@ -229,8 +229,8 @@ class TestKillEnvironment:
         """Test killing a single matching process"""
         args = MagicMock()
         args.name = "test_env"
-        args.wetlandsInstancePath = MagicMock()
-        args.wetlandsInstancePath.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
+        args.wetlands_instance_path = MagicMock()
+        args.wetlands_instance_path.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
 
         mock_process = MagicMock()
         mock_process.pid = 1234
@@ -249,7 +249,7 @@ class TestKillEnvironment:
                     "python",
                     "/path/to/wetlands/module_executor.py",
                     "test_env",
-                    "--wetlandsInstancePath",
+                    "--wetlands_instance_path",
                     "/tmp/wetlands",
                 ],
             }
@@ -265,8 +265,8 @@ class TestKillEnvironment:
         """Test when no matching process is found"""
         args = MagicMock()
         args.name = "test_env"
-        args.wetlandsInstancePath = MagicMock()
-        args.wetlandsInstancePath.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
+        args.wetlands_instance_path = MagicMock()
+        args.wetlands_instance_path.resolve = MagicMock(return_value=Path("/tmp/wetlands"))
 
         mock_get_processes.return_value = []
 
@@ -287,7 +287,7 @@ class TestSetupAndLaunchPycharm:
         args = MagicMock()
         args.sources = Path("/tmp/sources")
         args.name = "test_env"
-        args.wetlandsInstancePath = Path("/nonexistent/path")
+        args.wetlands_instance_path = Path("/nonexistent/path")
 
         mock_get_processes.return_value = []
         mock_get_paths.return_value = []
@@ -312,7 +312,7 @@ class TestSetupAndLaunchPycharm:
             args = MagicMock()
             args.sources = sources_dir
             args.name = "test_env"
-            args.wetlandsInstancePath = wetlands_dir
+            args.wetlands_instance_path = wetlands_dir
 
             # Create debug_ports.json file
             debug_ports_file = wetlands_dir / "debug_ports.json"
@@ -322,8 +322,8 @@ class TestSetupAndLaunchPycharm:
                 json5.dump(
                     {
                         "test_env": {
-                            "debugPort": 5678,
-                            "moduleExecutorPath": "/path/to/module_executor.py",
+                            "debug_port": 5678,
+                            "module_executor_path": "/path/to/module_executor.py",
                         }
                     },
                     f,
@@ -369,7 +369,7 @@ class TestSetupAndLaunchPycharm:
             args = MagicMock()
             args.sources = sources_dir
             args.name = "unknown_env"
-            args.wetlandsInstancePath = wetlands_dir
+            args.wetlands_instance_path = wetlands_dir
 
             mock_get_processes.return_value = []
             mock_get_paths.return_value = []
@@ -382,8 +382,8 @@ class TestSetupAndLaunchPycharm:
                 json5.dump(
                     {
                         "other_env": {
-                            "debugPort": 5678,
-                            "moduleExecutorPath": "/path/to/executor",
+                            "debug_port": 5678,
+                            "module_executor_path": "/path/to/executor",
                         }
                     },
                     f,

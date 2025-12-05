@@ -40,11 +40,11 @@ if __name__ == "__main__":
     parser.add_argument("environment", help="The name of the execution environment.")
     parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
     parser.add_argument(
-        "-dp", "--debugPort", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int
+        "-dp", "--debug_port", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int
     )
     parser.add_argument(
         "-wip",
-        "--wetlandsInstancePath",
+        "--wetlands_instance_path",
         help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.",
         default=None,
         type=Path,
@@ -52,14 +52,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     port = args.port
     logger = logging.getLogger(args.environment)
-    if args.debugPort is not None:
+    if args.debug_port is not None:
         logger.setLevel(logging.DEBUG)
         try:
             import debugpy
 
             logger.debug(f"Starting {args.environment} with python {sys.version}")
-            _, debugPort = debugpy.listen(args.debugPort)
-            print(f"Listening debug port {debugPort}")
+            _, debug_port = debugpy.listen(args.debug_port)
+            print(f"Listening debug port {debug_port}")
         except ImportError as ie:
             logger.error("debugpy is not installed in this environment. Debugging is not available.")
             logger.error(str(ie))
@@ -67,13 +67,13 @@ else:
     logger = logging.getLogger("module_executor")
 
 
-def sendMessage(lock: threading.Lock, connection: Connection, message: dict):
+def send_message(lock: threading.Lock, connection: Connection, message: dict):
     """Thread-safe sending of messages."""
     with lock:
         connection.send(message)
 
 
-def handleExecutionError(lock: threading.Lock, connection: Connection, e: Exception):
+def handle_execution_error(lock: threading.Lock, connection: Connection, e: Exception):
     """Common error handling for any execution type."""
     logger.error(str(e))
     logger.error("Traceback:")
@@ -81,7 +81,7 @@ def handleExecutionError(lock: threading.Lock, connection: Connection, e: Except
     for line in tbftb:
         logger.error(line)
     sys.stderr.flush()
-    sendMessage(
+    send_message(
         lock,
         connection,
         dict(
@@ -93,17 +93,17 @@ def handleExecutionError(lock: threading.Lock, connection: Connection, e: Except
     logger.debug("Error sent")
 
 
-def executeFunction(message: dict):
+def execute_function(message: dict):
     """Import a module and execute one of its functions."""
-    modulePath = Path(message["modulePath"])
-    logger.debug(f"Import module {modulePath}")
-    sys.path.append(str(modulePath.parent))
-    module = import_module(modulePath.stem)
+    module_path = Path(message["module_path"])
+    logger.debug(f"Import module {module_path}")
+    sys.path.append(str(module_path.parent))
+    module = import_module(module_path.stem)
     if not hasattr(module, message["function"]):
-        raise Exception(f"Module {modulePath} has no function {message['function']}.")
+        raise Exception(f"Module {module_path} has no function {message['function']}.")
     args = message.get("args", [])
     kwargs = message.get("kwargs", {})
-    logger.info(f"Execute {message['modulePath']}:{message['function']}({args})")
+    logger.info(f"Execute {message['module_path']}:{message['function']}({args})")
     try:
         result = getattr(module, message["function"])(*args, **kwargs)
     except SystemExit as se:
@@ -112,33 +112,33 @@ def executeFunction(message: dict):
     return result
 
 
-def runScript(message: dict):
+def run_script(message: dict):
     """Run a Python script via runpy.run_path(), simulating 'python script.py args...'."""
-    scriptPath = message["scriptPath"]
+    script_path = message["script_path"]
     args = message.get("args", [])
     run_name = message.get("run_name", "__main__")
 
-    sys.argv = [scriptPath] + list(args)
-    logger.info(f"Running script {scriptPath} with args {args} and run_name={run_name}")
-    runpy.run_path(scriptPath, run_name=run_name)
+    sys.argv = [script_path] + list(args)
+    logger.info(f"Running script {script_path} with args {args} and run_name={run_name}")
+    runpy.run_path(script_path, run_name=run_name)
     logger.info("Script executed")
     return None
 
 
-def executionWorker(lock: threading.Lock, connection: Connection, message: dict):
+def execution_worker(lock: threading.Lock, connection: Connection, message: dict):
     """
     Worker function handling both 'execute' and 'run' actions.
     """
     try:
         action = message["action"]
         if action == "execute":
-            result = executeFunction(message)
+            result = execute_function(message)
         elif action == "run":
-            result = runScript(message)
+            result = run_script(message)
         else:
             raise Exception(f"Unknown action: {action}")
 
-        sendMessage(
+        send_message(
             lock,
             connection,
             dict(
@@ -148,15 +148,15 @@ def executionWorker(lock: threading.Lock, connection: Connection, message: dict)
             ),
         )
     except Exception as e:
-        handleExecutionError(lock, connection, e)
+        handle_execution_error(lock, connection, e)
 
 
-def getMessage(connection: Connection) -> dict:
+def get_message(connection: Connection) -> dict:
     logger.debug("Waiting for message...")
     return connection.recv()
 
 
-def launchListener():
+def launch_listener():
     """
     Launches a listener on a random available port on localhost.
     Waits for client connections and handles 'execute', 'run', or 'exit' messages.
@@ -169,27 +169,27 @@ def launchListener():
                 logger.debug(f"Connection accepted {listener.address}")
                 message = ""
                 try:
-                    while message := getMessage(connection):
+                    while message := get_message(connection):
                         logger.debug(f"Got message: {message}")
 
                         if message["action"] in ("execute", "run"):
                             logger.debug(f"Launch thread for action {message['action']}")
                             thread = threading.Thread(
-                                target=executionWorker,
+                                target=execution_worker,
                                 args=(lock, connection, message),
                             )
                             thread.start()
 
                         elif message["action"] == "exit":
                             logger.info("exit")
-                            sendMessage(lock, connection, dict(action="exited"))
+                            send_message(lock, connection, dict(action="exited"))
                             listener.close()
                             return
                 except Exception as e:
-                    handleExecutionError(lock, connection, e)
+                    handle_execution_error(lock, connection, e)
 
 
 if __name__ == "__main__":
-    launchListener()
+    launch_listener()
 
 logger.debug("Exit")

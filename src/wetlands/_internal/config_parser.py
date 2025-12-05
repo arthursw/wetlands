@@ -19,15 +19,15 @@ class ConfigParser:
     def parse(
         self,
         config_path: Union[str, Path],
-        environmentName: Optional[str] = None,
-        optionalDependencies: Optional[list[str]] = None,
+        environment_name: Optional[str] = None,
+        optional_dependencies: Optional[list[str]] = None,
     ) -> Dependencies:
         """Parse configuration file and extract dependencies.
 
         Args:
             config_path: Path to configuration file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt)
-            environmentName: Environment name to use (for pixi.toml and pyproject.toml)
-            optionalDependencies: Optional dependency groups to include (for pyproject.toml)
+            environment_name: Environment name to use (for pixi.toml and pyproject.toml)
+            optional_dependencies: Optional dependency groups to include (for pyproject.toml)
 
         Returns:
             Dependencies dict with conda, pip, and python keys
@@ -42,24 +42,24 @@ class ConfigParser:
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
-        file_type = self.detectConfigFileType(config_path)
+        file_type = self.detect_config_file_type(config_path)
 
         if file_type == "pixi":
-            return self.parsePixiToml(config_path, environmentName)
+            return self.parse_pixi_toml(config_path, environment_name)
         elif file_type == "pyproject":
-            return self.parsePyprojectToml(
+            return self.parse_pyproject_toml(
                 config_path,
-                environmentName=environmentName,
-                optionalDependencies=optionalDependencies,
+                environment_name=environment_name,
+                optional_dependencies=optional_dependencies,
             )
         elif file_type == "environment":
-            return self.parseEnvironmentYml(config_path)
+            return self.parse_environment_yml(config_path)
         elif file_type == "requirements":
-            return self.parseRequirementsTxt(config_path)
+            return self.parse_requirements_txt(config_path)
         else:
             raise ValueError(f"Unsupported config file type: {file_type}")
 
-    def detectConfigFileType(self, config_path: Union[str, Path]) -> str:
+    def detect_config_file_type(self, config_path: Union[str, Path]) -> str:
         """Detect the type of configuration file.
 
         Args:
@@ -88,16 +88,16 @@ class ConfigParser:
                 "Expected pixi.toml, pyproject.toml, environment.yml, or requirements.txt"
             )
 
-    def parsePixiToml(
+    def parse_pixi_toml(
         self,
         pixi_path: Union[str, Path],
-        environmentName: Optional[str] = None,
+        environment_name: Optional[str] = None,
     ) -> Dependencies:
         """Parse pixi.toml file and extract dependencies.
 
         Args:
             pixi_path: Path to pixi.toml file
-            environmentName: Name of environment to extract (optional - falls back to default)
+            environment_name: Name of environment to extract (optional - falls back to default)
 
         Returns:
             Dependencies dict
@@ -119,13 +119,13 @@ class ConfigParser:
         environments = config.get("tool", {}).get("pixi", {}).get("environments", {})
 
         # Determine which environment to use
-        env_to_use = environmentName
+        env_to_use = environment_name
         if env_to_use and env_to_use not in environments:
             # Fall back to default if requested environment doesn't exist
             env_to_use = "default"
 
         if not env_to_use:
-            # No environmentName provided, use default
+            # No environment_name provided, use default
             env_to_use = "default"
 
         if env_to_use not in environments:
@@ -170,18 +170,18 @@ class ConfigParser:
 
         return dependencies
 
-    def parsePyprojectToml(
+    def parse_pyproject_toml(
         self,
         pyproject_path: Union[str, Path],
-        environmentName: Optional[str] = None,
-        optionalDependencies: Optional[list[str]] = None,
+        environment_name: Optional[str] = None,
+        optional_dependencies: Optional[list[str]] = None,
     ) -> Dependencies:
         """Parse pyproject.toml file and extract dependencies.
 
         Args:
             pyproject_path: Path to pyproject.toml file
-            environmentName: Name of pixi environment to extract
-            optionalDependencies: List of optional dependency groups to include
+            environment_name: Name of pixi environment to extract
+            optional_dependencies: List of optional dependency groups to include
 
         Returns:
             Dependencies dict
@@ -204,18 +204,18 @@ class ConfigParser:
 
         # If pixi config exists, use it (like pixi.toml)
         if pixi_config:
-            if environmentName or not optionalDependencies:
-                # Use pixi environment if environmentName provided, or if no optionalDependencies
+            if environment_name or not optional_dependencies:
+                # Use pixi environment if environment_name provided, or if no optional_dependencies
                 environments = pixi_config.get("environments", {})
 
                 # Determine which environment to use
-                env_to_use = environmentName
+                env_to_use = environment_name
                 if env_to_use and env_to_use not in environments:
                     # Fall back to default if requested environment doesn't exist
                     env_to_use = "default"
 
                 if not env_to_use:
-                    # No environmentName provided, use default
+                    # No environment_name provided, use default
                     env_to_use = "default"
 
                 if env_to_use not in environments:
@@ -256,13 +256,13 @@ class ConfigParser:
                 if pip_deps:
                     dependencies["pip"] = pip_deps
 
-            elif optionalDependencies:
+            elif optional_dependencies:
                 # Use pixi features as optional dependencies
                 features_config = pixi_config.get("feature", {})
                 conda_deps = []
                 pip_deps = []
 
-                for feature_name in optionalDependencies:
+                for feature_name in optional_dependencies:
                     if feature_name not in features_config:
                         available = list(features_config.keys())
                         raise ValueError(
@@ -283,7 +283,7 @@ class ConfigParser:
                     dependencies["pip"] = pip_deps
             else:
                 raise ValueError(
-                    "For pyproject.toml with pixi config, provide either environmentName or optionalDependencies"
+                    "For pyproject.toml with pixi config, provide either environment_name or optional_dependencies"
                 )
         else:
             # Standard PEP 621 pyproject.toml (no pixi config)
@@ -295,11 +295,11 @@ class ConfigParser:
                 dependencies["pip"] = main_deps
 
             # Optional dependencies
-            if optionalDependencies:
+            if optional_dependencies:
                 optional_deps = project_config.get("optional-dependencies", {})
                 pip_deps = dependencies.get("pip", [])
 
-                for group_name in optionalDependencies:
+                for group_name in optional_dependencies:
                     if group_name not in optional_deps:
                         available = list(optional_deps.keys())
                         raise ValueError(
@@ -313,7 +313,7 @@ class ConfigParser:
 
         return dependencies
 
-    def parseEnvironmentYml(
+    def parse_environment_yml(
         self,
         env_path: Union[str, Path],
     ) -> Dependencies:
@@ -368,7 +368,7 @@ class ConfigParser:
 
         return dependencies
 
-    def parseRequirementsTxt(
+    def parse_requirements_txt(
         self,
         requirements_path: Union[str, Path],
     ) -> Dependencies:

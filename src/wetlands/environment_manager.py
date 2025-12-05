@@ -26,124 +26,124 @@ class EnvironmentManager:
     """Manages Conda environments using micromamba for isolation and dependency management.
 
     Attributes:
-            mainEnvironment: The main conda environment in which wetlands is installed.
+            main_environment: The main conda environment in which wetlands is installed.
             environments: map of the environments
 
-            settingsManager: SettingsManager(condaPath)
-            commandGenerator: CommandGenerator(settingsManager)
-            dependencyManager: DependencyManager(commandGenerator)
-            commandExecutor: CommandExecutor()
+            settings_manager: SettingsManager(conda_path)
+            command_generator: CommandGenerator(settings_manager)
+            dependency_manager: DependencyManager(command_generator)
+            command_executor: CommandExecutor()
     """
 
-    mainEnvironment: InternalEnvironment
-    wetlandsInstancePath: Path
+    main_environment: InternalEnvironment
+    wetlands_instance_path: Path
     debug: bool
 
     def __init__(
         self,
-        wetlandsInstancePath: Path = Path("wetlands"),
-        condaPath: str | Path | None = None,
-        mainCondaEnvironmentPath: Path | None = None,
+        wetlands_instance_path: Path = Path("wetlands"),
+        conda_path: str | Path | None = None,
+        main_conda_environment_path: Path | None = None,
         debug: bool = False,
         manager="auto",
         log_file_path=Path("wetlands.log"),
     ) -> None:
         """Initializes the EnvironmentManager.
 
-        The wetlandsInstancePath directory will contain:
+        The wetlands_instance_path directory will contain:
         - logs (managed by logger.py)
         - debug_ports.json (for debug port tracking)
-        - conda installation (by default at wetlandsInstancePath / "pixi" or "micromamba")
+        - conda installation (by default at wetlands_instance_path / "pixi" or "micromamba")
 
         Args:
-                wetlandsInstancePath: Path to the folder which will contain the state of this wetlands instance (logs, debug ports stored in debug_ports.json, and conda installation). Defaults to "wetlands".
-                condaPath: Path to the micromamba or pixi installation path. If None, defaults to wetlandsInstancePath / "pixi". Warning: cannot contain any space character on Windows when using micromamba.
-                mainCondaEnvironmentPath: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the pixi.toml or pyproject.toml file.
-                debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlandsInstancePath / debug_ports.json
-                manager: Use "pixi" to use Pixi as the conda manager, "micromamba" to use Micromamba and "auto" to infer from condaPath (will look for "pixi" or "micromamba" in the path).
-                log_file_path: Path to the log file where logs will be stored. Use relative path to wetlandsInstancePath, or absolute path. Set to None to disable file logging.
+                wetlands_instance_path: Path to the folder which will contain the state of this wetlands instance (logs, debug ports stored in debug_ports.json, and conda installation). Defaults to "wetlands".
+                conda_path: Path to the micromamba or pixi installation path. If None, defaults to wetlands_instance_path / "pixi". Warning: cannot contain any space character on Windows when using micromamba.
+                main_conda_environment_path: Path of the main conda environment in which Wetlands is installed, used to check whether it is necessary to create new environments (only when dependencies are not already available in the main environment). When using Pixi, this must point to the pixi.toml or pyproject.toml file.
+                debug: When true, processes will listen to debugpy ( debugpy.listen(0) ) to enable debugging, and their ports will be sorted in  wetlands_instance_path / debug_ports.json
+                manager: Use "pixi" to use Pixi as the conda manager, "micromamba" to use Micromamba and "auto" to infer from conda_path (will look for "pixi" or "micromamba" in the path).
+                log_file_path: Path to the log file where logs will be stored. Use relative path to wetlands_instance_path, or absolute path. Set to None to disable file logging.
         """
 
         self.environments: dict[str | Path, Environment] = {}
-        self.wetlandsInstancePath = cast(Path, wetlandsInstancePath).resolve()
+        self.wetlands_instance_path = cast(Path, wetlands_instance_path).resolve()
 
-        # Set default condaPath if not provided
-        if condaPath is None:
-            condaPath = self.wetlandsInstancePath / "pixi"
+        # Set default conda_path if not provided
+        if conda_path is None:
+            conda_path = self.wetlands_instance_path / "pixi"
 
-        condaPath = Path(condaPath)
+        conda_path = Path(conda_path)
 
-        # Initialize logger to use the wetlandsInstancePath for logs
+        # Initialize logger to use the wetlands_instance_path for logs
         if log_file_path is not None:
             enable_file_logging(
-                log_file_path if log_file_path.is_absolute() else self.wetlandsInstancePath / log_file_path
+                log_file_path if log_file_path.is_absolute() else self.wetlands_instance_path / log_file_path
             )
 
-        usePixi = self._initManager(manager, condaPath)
+        use_pixi = self._init_manager(manager, conda_path)
 
-        if platform.system() == "Windows" and (not usePixi) and " " in str(condaPath) and not condaPath.exists():
+        if platform.system() == "Windows" and (not use_pixi) and " " in str(conda_path) and not conda_path.exists():
             raise Exception(
-                f'The Micromamba path cannot contain any space character on Windows (given path is "{condaPath}").'
+                f'The Micromamba path cannot contain any space character on Windows (given path is "{conda_path}").'
             )
 
-        self.mainEnvironment = InternalEnvironment("wetlands_main", mainCondaEnvironmentPath, self)
-        self.environments["wetlands_main"] = self.mainEnvironment
-        self.settingsManager = SettingsManager(condaPath, usePixi)
+        self.main_environment = InternalEnvironment("wetlands_main", main_conda_environment_path, self)
+        self.environments["wetlands_main"] = self.main_environment
+        self.settings_manager = SettingsManager(conda_path, use_pixi)
         self.debug = debug
-        self.installConda()
-        self.commandGenerator = CommandGenerator(self.settingsManager)
-        self.dependencyManager = DependencyManager(self.commandGenerator)
-        self.commandExecutor = CommandExecutor(self.wetlandsInstancePath / "command_executions" if debug else None)
+        self.install_conda()
+        self.command_generator = CommandGenerator(self.settings_manager)
+        self.dependency_manager = DependencyManager(self.command_generator)
+        self.command_executor = CommandExecutor(self.wetlands_instance_path / "command_executions" if debug else None)
 
         if log_file_path is not None:
-            logger.info("Wetlands initialized at %s", str(self.wetlandsInstancePath))
+            logger.info("Wetlands initialized at %s", str(self.wetlands_instance_path))
 
-    def _initManager(self, manager: str, condaPath: Path) -> bool:
+    def _init_manager(self, manager: str, conda_path: Path) -> bool:
         if manager not in ["auto", "pixi", "micromamba"]:
             raise Exception(f'Invalid manager "{manager}", must be "auto", "pixi" or "micromamba".')
         if manager == "auto":
-            if "pixi" in str(condaPath).lower():
-                usePixi = True
-            elif "micromamba" in str(condaPath).lower():
-                usePixi = False
+            if "pixi" in str(conda_path).lower():
+                use_pixi = True
+            elif "micromamba" in str(conda_path).lower():
+                use_pixi = False
             else:
                 raise Exception(
-                    'When using manager="auto", the condaPath must contain either "pixi" or "micromamba" to infer the manager to use.'
+                    'When using manager="auto", the conda_path must contain either "pixi" or "micromamba" to infer the manager to use.'
                 )
         elif manager == "pixi":
-            usePixi = True
+            use_pixi = True
         else:
-            usePixi = False
-        return usePixi
+            use_pixi = False
+        return use_pixi
 
-    def installConda(self):
-        """Install Pixi or Micromamba (depending on settingsManager.usePixi)"""
+    def install_conda(self):
+        """Install Pixi or Micromamba (depending on settings_manager.use_pixi)"""
 
-        condaPath, condaBinPath = self.settingsManager.getCondaPaths()
-        if (condaPath / condaBinPath).exists():
+        conda_path, conda_bin_path = self.settings_manager.get_conda_paths()
+        if (conda_path / conda_bin_path).exists():
             return []
 
-        condaPath.mkdir(exist_ok=True, parents=True)
+        conda_path.mkdir(exist_ok=True, parents=True)
 
-        if self.settingsManager.usePixi:
-            installPixi(condaPath, proxies=self.settingsManager.proxies)
+        if self.settings_manager.use_pixi:
+            installPixi(conda_path, proxies=self.settings_manager.proxies)
         else:
-            installMicromamba(condaPath, proxies=self.settingsManager.proxies)
+            installMicromamba(conda_path, proxies=self.settings_manager.proxies)
         return
 
-    def setCondaPath(self, condaPath: str | Path, usePixi: bool = True) -> None:
+    def set_conda_path(self, conda_path: str | Path, use_pixi: bool = True) -> None:
         """Updates the micromamba path and loads proxy settings if exists.
 
         Args:
-                condaPath: New path to micromamba binary.
-                usePixi: Whether to use Pixi or Micromamba
+                conda_path: New path to micromamba binary.
+                use_pixi: Whether to use Pixi or Micromamba
 
         Side Effects:
-                Updates self.settingsManager.condaBinConfig, and self.settingsManager.proxies from the .mambarc file.
+                Updates self.settings_manager.conda_bin_config, and self.settings_manager.proxies from the .mambarc file.
         """
-        self.settingsManager.setCondaPath(condaPath, usePixi)
+        self.settings_manager.set_conda_path(conda_path, use_pixi)
 
-    def setProxies(self, proxies: dict[str, str]) -> None:
+    def set_proxies(self, proxies: dict[str, str]) -> None:
         """Configures proxy settings for Conda operations.
 
         Args:
@@ -152,13 +152,13 @@ class EnvironmentManager:
         Side Effects:
                 Updates .mambarc configuration file with proxy settings.
         """
-        self.settingsManager.setProxies(proxies)
+        self.settings_manager.set_proxies(proxies)
 
-    def _removeChannel(self, condaDependency: str) -> str:
+    def _remove_channel(self, conda_dependency: str) -> str:
         """Removes channel prefix from a Conda dependency string (e.g., "channel::package" -> "package")."""
-        return condaDependency.split("::")[1] if "::" in condaDependency else condaDependency
+        return conda_dependency.split("::")[1] if "::" in conda_dependency else conda_dependency
 
-    def getInstalledPackages(self, environment: Environment) -> list[dict[str, str]]:
+    def get_installed_packages(self, environment: Environment) -> list[dict[str, str]]:
         """Get the list of the packages installed in the environment
 
         Args:
@@ -167,30 +167,30 @@ class EnvironmentManager:
         Returns:
                 A list of dict containing the installed packages [{"kind":"conda|pypi", "name": "numpy", "version", "2.1.3"}, ...].
         """
-        if self.settingsManager.usePixi:
-            commands = self.commandGenerator.getActivateCondaCommands()
-            commands += [f'{self.settingsManager.condaBin} list --json --manifest-path "{environment.path}"']
-            return self.commandExecutor.executeCommandsAndGetJsonOutput(commands)
+        if self.settings_manager.use_pixi:
+            commands = self.command_generator.get_activate_conda_commands()
+            commands += [f'{self.settings_manager.conda_bin} list --json --manifest-path "{environment.path}"']
+            return self.command_executor.execute_commands_and_get_json_output(commands)
         else:
-            commands = self.commandGenerator.getActivateEnvironmentCommands(environment) + [
-                f"{self.settingsManager.condaBin} list --json",
+            commands = self.command_generator.get_activate_environment_commands(environment) + [
+                f"{self.settings_manager.conda_bin} list --json",
             ]
-            packages = self.commandExecutor.executeCommandsAndGetJsonOutput(commands)
+            packages = self.command_executor.execute_commands_and_get_json_output(commands)
             for package in packages:
                 package["kind"] = "conda"
 
-            commands = self.commandGenerator.getActivateEnvironmentCommands(environment) + [
+            commands = self.command_generator.get_activate_environment_commands(environment) + [
                 f"pip freeze --all",
             ]
-            output = self.commandExecutor.executeCommandsAndGetOutput(commands)
-            parsedOutput = [o.split("==") for o in output if "==" in o]
-            packages += [{"name": name, "version": version, "kind": "pypi"} for name, version in parsedOutput]
+            output = self.command_executor.execute_commands_and_get_output(commands)
+            parsed_output = [o.split("==") for o in output if "==" in o]
+            packages += [{"name": name, "version": version, "kind": "pypi"} for name, version in parsed_output]
             return packages
 
-    def _checkRequirement(
-        self, dependency: str, packageManager: Literal["pip", "conda"], installedPackages: list[dict[str, str]]
+    def _check_requirement(
+        self, dependency: str, package_manager: Literal["pip", "conda"], installed_packages: list[dict[str, str]]
     ) -> bool:
-        """Check if dependency is installed (exists in installedPackages).
+        """Check if dependency is installed (exists in installed_packages).
 
         Supports PEP 440 version specifiers like:
         - "numpy" (any version)
@@ -199,10 +199,10 @@ class EnvironmentManager:
         - "numpy~=2.28" (compatible release)
         - "numpy!=1.5.0" (any except specific version)
         """
-        if packageManager == "conda":
-            dependency = self._removeChannel(dependency)
+        if package_manager == "conda":
+            dependency = self._remove_channel(dependency)
 
-        packageManagerName = "conda" if packageManager == "conda" else "pypi"
+        package_manager_name = "conda" if package_manager == "conda" else "pypi"
 
         # Parse dependency string to extract package name and version specifier
         # Package name is followed by optional version specifier (starts with ==, >=, <=, >, <, !=, ~=)
@@ -214,8 +214,8 @@ class EnvironmentManager:
         version_spec = match.group(2).strip()
 
         # Find matching package
-        for package in installedPackages:
-            if package_name != package["name"] or packageManagerName != package["kind"]:
+        for package in installed_packages:
+            if package_name != package["name"] or package_manager_name != package["kind"]:
                 continue
 
             # If no version specified, just match on name
@@ -234,7 +234,7 @@ class EnvironmentManager:
 
         return False
 
-    def _environmentValidatesRequirements(self, environment: Environment, dependencies: Dependencies) -> bool:
+    def _environment_validates_requirements(self, environment: Environment, dependencies: Dependencies) -> bool:
         """Verifies if all specified dependencies are installed in the given environment.
 
         Applies special handling for main environment with None path (uses metadata.distributions() for pip packages).
@@ -249,22 +249,22 @@ class EnvironmentManager:
         if not sys.version.startswith(dependencies.get("python", "").replace("=", "")):
             return False
 
-        condaDependencies, condaDependenciesNoDeps, hasCondaDependencies = self.dependencyManager.formatDependencies(
+        conda_dependencies, condaDependenciesNoDeps, hasCondaDependencies = self.dependency_manager.format_dependencies(
             "conda", dependencies, False, False
         )
-        pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.dependencyManager.formatDependencies(
+        pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.dependency_manager.format_dependencies(
             "pip", dependencies, False, False
         )
         if not hasPipDependencies and not hasCondaDependencies:
             return True
 
         # Special handling for main environment with None path
-        isMainEnvironment = environment == self.mainEnvironment
-        if isMainEnvironment and environment.path is None:
+        is_main_environment = environment == self.main_environment
+        if is_main_environment and environment.path is None:
             if hasCondaDependencies:
                 return False
             if hasPipDependencies:
-                installedPackages = [
+                installed_packages = [
                     {"name": dist.metadata["Name"], "version": dist.version, "kind": "pypi"}
                     for dist in metadata.distributions()
                 ]
@@ -272,43 +272,43 @@ class EnvironmentManager:
                 return True
         else:
             # Get installed packages for the environment
-            installedPackages = self.getInstalledPackages(environment)
+            installed_packages = self.get_installed_packages(environment)
 
-        condaSatisfied = (
+        conda_satisfied = (
             all(
                 [
-                    self._checkRequirement(d, "conda", installedPackages)
-                    for d in condaDependencies + condaDependenciesNoDeps
+                    self._check_requirement(d, "conda", installed_packages)
+                    for d in conda_dependencies + condaDependenciesNoDeps
                 ]
             )
             if hasCondaDependencies
             else True
         )
-        pipSatisfied = (
-            all([self._checkRequirement(d, "pip", installedPackages) for d in pipDependencies + pipDependenciesNoDeps])
+        pip_satisfied = (
+            all([self._check_requirement(d, "pip", installed_packages) for d in pipDependencies + pipDependenciesNoDeps])
             if hasPipDependencies
             else True
         )
 
-        return condaSatisfied and pipSatisfied
+        return conda_satisfied and pip_satisfied
 
-    def environmentExists(self, environmentPath: Path) -> bool:
+    def environment_exists(self, environment_path: Path) -> bool:
         """Checks if a Conda environment exists.
 
         Args:
-                environmentPath: Environment name to check.
+                environment_path: Environment name to check.
 
         Returns:
                 True if environment exists, False otherwise.
         """
-        if self.settingsManager.usePixi:
-            condaMeta = environmentPath.parent / ".pixi" / "envs" / "default" / "conda-meta"
-            return environmentPath.is_file() and condaMeta.is_dir()
+        if self.settings_manager.use_pixi:
+            conda_meta = environment_path.parent / ".pixi" / "envs" / "default" / "conda-meta"
+            return environment_path.is_file() and conda_meta.is_dir()
         else:
-            condaMeta = environmentPath / "conda-meta"
-            return condaMeta.is_dir()
+            conda_meta = environment_path / "conda-meta"
+            return conda_meta.is_dir()
 
-    def _addDebugpyInDependencies(self, dependencies: Dependencies) -> None:
+    def _add_debugpy_in_dependencies(self, dependencies: Dependencies) -> None:
         """Add debugpy in the dependencies to be able to debug in debug mode. Does nothing when not in debug mode.
 
         Args:
@@ -317,9 +317,9 @@ class EnvironmentManager:
         if not self.debug:
             return
         # Check that debugpy is not already in dependencies
-        for packageManager in ["pip", "conda"]:
-            if packageManager in dependencies:
-                for dep in dependencies[packageManager]:
+        for package_manager in ["pip", "conda"]:
+            if package_manager in dependencies:
+                for dep in dependencies[package_manager]:
                     import re
 
                     pattern = r"debugpy(?==|$)"
@@ -337,18 +337,18 @@ class EnvironmentManager:
             dependencies["conda"] = [debugpy]
         return
 
-    def _parseDependenciesFromConfig(
+    def _parse_dependencies_from_config(
         self,
         config_path: Union[str, Path],
-        environmentName: str | None = None,
-        optionalDependencies: list[str] | None = None,
+        environment_name: str | None = None,
+        optional_dependencies: list[str] | None = None,
     ) -> Dependencies:
         """Parse dependencies from a config file (pixi.toml, pyproject.toml, or environment.yml).
 
         Args:
                 config_path: Path to configuration file
-                environmentName: Environment name for pixi/pyproject configs
-                optionalDependencies: Optional dependency groups for pyproject configs
+                environment_name: Environment name for pixi/pyproject configs
+                optional_dependencies: Optional dependency groups for pyproject configs
 
         Returns:
                 Dependencies dict
@@ -362,36 +362,36 @@ class EnvironmentManager:
 
         # Detect and validate config file type
         try:
-            file_type = parser.detectConfigFileType(config_path)
+            file_type = parser.detect_config_file_type(config_path)
         except ValueError as e:
             raise ValueError(f"Unsupported config file: {e}")
 
         # Validate required parameters for specific file types
-        if file_type == "pixi" and not environmentName:
+        if file_type == "pixi" and not environment_name:
             raise ValueError(
-                f"environmentName is required for pixi.toml files. "
+                f"environment_name is required for pixi.toml files. "
                 f"Please provide the environment name to extract dependencies from."
             )
 
-        if file_type == "pyproject" and not environmentName and not optionalDependencies:
+        if file_type == "pyproject" and not environment_name and not optional_dependencies:
             raise ValueError(
-                f"For pyproject.toml, provide either environmentName (for pixi config) "
-                f"or optionalDependencies (for optional dependency groups)."
+                f"For pyproject.toml, provide either environment_name (for pixi config) "
+                f"or optional_dependencies (for optional dependency groups)."
             )
 
         # Parse the config file
         return parser.parse(
             config_path,
-            environmentName=environmentName,
-            optionalDependencies=optionalDependencies,
+            environment_name=environment_name,
+            optional_dependencies=optional_dependencies,
         )
 
     def create(
         self,
         name: str,
         dependencies: Union[Dependencies, None] = None,
-        additionalInstallCommands: Commands = {},
-        useExisting: bool = False,
+        additional_install_commands: Commands = {},
+        use_existing: bool = False,
     ) -> Environment:
         """Creates a new Conda environment with specified dependencies or returns an existing one.
 
@@ -400,11 +400,11 @@ class EnvironmentManager:
                 dependencies: Dependencies to install. Can be one of:
                     - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
                     - None (no dependencies to install)
-                additionalInstallCommands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
-                useExisting: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
+                additional_install_commands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
+                use_existing: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
 
         Returns:
-                The created or existing environment (ExternalEnvironment if created, or an existing environment if useExisting=True and match found).
+                The created or existing environment (ExternalEnvironment if created, or an existing environment if use_existing=True and match found).
         """
         if isinstance(name, Path):
             raise Exception(
@@ -412,8 +412,8 @@ class EnvironmentManager:
             )
 
         # Check if environment already exists on disk
-        path = self.settingsManager.getEnvironmentPathFromName(name)
-        if self.environmentExists(path) and name not in self.environments:
+        path = self.settings_manager.get_environment_path_from_name(name)
+        if self.environment_exists(path) and name not in self.environments:
             logger.log_environment(f"Loading existing environment '{name}' from '{path}'", name, stage="create")
             self.environments[name] = ExternalEnvironment(name, path, self)
 
@@ -426,14 +426,14 @@ class EnvironmentManager:
         elif not isinstance(dependencies, dict):
             raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
 
-        self._addDebugpyInDependencies(dependencies)
+        self._add_debugpy_in_dependencies(dependencies)
 
-        # Try to find existing environment if useExisting=True
-        if useExisting:
-            envs = [self.mainEnvironment] + [env for env in self.environments.values() if env != self.mainEnvironment]
+        # Try to find existing environment if use_existing=True
+        if use_existing:
+            envs = [self.main_environment] + [env for env in self.environments.values() if env != self.main_environment]
             for env in envs:
                 try:
-                    if self._environmentValidatesRequirements(env, dependencies):
+                    if self._environment_validates_requirements(env, dependencies):
                         logger.log_environment(
                             f"Environment '{env.name}' satisfies dependencies for '{name}', returning it.",
                             name,
@@ -445,75 +445,75 @@ class EnvironmentManager:
                     continue
 
         # Create new environment
-        pythonVersion = dependencies.get("python", "").replace("=", "")
-        match = re.search(r"(\d+)\.(\d+)", pythonVersion)
+        python_version = dependencies.get("python", "").replace("=", "")
+        match = re.search(r"(\d+)\.(\d+)", python_version)
         if match and (int(match.group(1)) < 3 or int(match.group(2)) < 9):
             raise Exception("Python version must be greater than 3.8")
-        pythonRequirement = " python=" + (pythonVersion if len(pythonVersion) > 0 else platform.python_version())
-        createEnvCommands = self.commandGenerator.getActivateCondaCommands()
+        python_requirement = " python=" + (python_version if len(python_version) > 0 else platform.python_version())
+        create_env_commands = self.command_generator.get_activate_conda_commands()
 
-        if self.settingsManager.usePixi:
-            manifestPath = path
-            if not manifestPath.exists():
-                platformArgs = f"--platform win-64" if platform.system() == "Windows" else ""
-                createEnvCommands += [
-                    f'{self.settingsManager.condaBin} init --no-progress {platformArgs} "{manifestPath.parent}"'
+        if self.settings_manager.use_pixi:
+            manifest_path = path
+            if not manifest_path.exists():
+                platform_args = f"--platform win-64" if platform.system() == "Windows" else ""
+                create_env_commands += [
+                    f'{self.settings_manager.conda_bin} init --no-progress {platform_args} "{manifest_path.parent}"'
                 ]
-            createEnvCommands += [
-                f'{self.settingsManager.condaBin} add --no-progress --manifest-path "{manifestPath}" {pythonRequirement}'
+            create_env_commands += [
+                f'{self.settings_manager.conda_bin} add --no-progress --manifest-path "{manifest_path}" {python_requirement}'
             ]
         else:
-            createEnvCommands += [f"{self.settingsManager.condaBinConfig} create -n {name}{pythonRequirement} -y"]
+            create_env_commands += [f"{self.settings_manager.conda_bin_config} create -n {name}{python_requirement} -y"]
         environment = ExternalEnvironment(name, path, self)
         self.environments[name] = environment
-        createEnvCommands += self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
-        createEnvCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
+        create_env_commands += self.dependency_manager.get_install_dependencies_commands(environment, dependencies)
+        create_env_commands += self.command_generator.get_commands_for_current_platform(additional_install_commands)
 
         logger.log_environment(f"Creating environment '{name}'", name, stage="create")
         log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": name, "stage": "install"}
-        self.commandExecutor.executeCommands(createEnvCommands, wait=True, log_context=log_context)
+        self.command_executor.execute_commands(create_env_commands, wait=True, log_context=log_context)
         logger.log_environment(f"Environment '{name}' created successfully", name, stage="create")
         return self.environments[name]
 
-    def createFromConfig(
+    def create_from_config(
         self,
         name: str,
-        configPath: str | Path,
-        optionalDependencies: list[str] | None = None,
-        additionalInstallCommands: Commands = {},
-        useExisting: bool = False,
+        config_path: str | Path,
+        optional_dependencies: list[str] | None = None,
+        additional_install_commands: Commands = {},
+        use_existing: bool = False,
     ) -> Environment:
         """Creates a new Conda environment from a config file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt) or returns an existing one.
 
         Args:
                 name: Name for the new environment.
-                configPath: Path to configuration file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt).
-                optionalDependencies: List of optional dependency groups to extract from pyproject.toml.
-                additionalInstallCommands: Platform-specific commands during installation.
-                useExisting: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
+                config_path: Path to configuration file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt).
+                optional_dependencies: List of optional dependency groups to extract from pyproject.toml.
+                additional_install_commands: Platform-specific commands during installation.
+                use_existing: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
 
         Returns:
-                The created or existing environment (ExternalEnvironment if created, or an existing environment if useExisting=True and match found).
+                The created or existing environment (ExternalEnvironment if created, or an existing environment if use_existing=True and match found).
         """
 
         # Parse config file
-        dependencies = self._parseDependenciesFromConfig(
-            configPath, environmentName=name, optionalDependencies=optionalDependencies
+        dependencies = self._parse_dependencies_from_config(
+            config_path, environment_name=name, optional_dependencies=optional_dependencies
         )
 
         # Use create() with parsed dependencies
-        return self.create(name, dependencies, additionalInstallCommands, useExisting)
+        return self.create(name, dependencies, additional_install_commands, use_existing)
 
     def load(
         self,
         name: str,
-        environmentPath: Path,
+        environment_path: Path,
     ) -> Environment:
         """Load an existing Conda environment from disk.
 
         Args:
                 name: Name for the environment instance.
-                environmentPath: Path to an existing Conda environment, or the folder containing the pixi.toml/pyproject.toml when using Pixi.
+                environment_path: Path to an existing Conda environment, or the folder containing the pixi.toml/pyproject.toml when using Pixi.
 
         Returns:
                 The loaded environment (ExternalEnvironment if using Pixi or micromamba with a path, InternalEnvironment otherwise).
@@ -521,49 +521,49 @@ class EnvironmentManager:
         Raises:
                 Exception: If the environment does not exist.
         """
-        environmentPath = environmentPath.resolve()
+        environment_path = environment_path.resolve()
 
-        if not self.environmentExists(environmentPath):
-            raise Exception(f"The environment {environmentPath} was not found.")
+        if not self.environment_exists(environment_path):
+            raise Exception(f"The environment {environment_path} was not found.")
 
         if name not in self.environments:
-            self.environments[name] = ExternalEnvironment(name, environmentPath, self)
+            self.environments[name] = ExternalEnvironment(name, environment_path, self)
         return self.environments[name]
 
     def install(
-        self, environment: Environment, dependencies: Dependencies, additionalInstallCommands: Commands = {}
+        self, environment: Environment, dependencies: Dependencies, additional_install_commands: Commands = {}
     ) -> list[str]:
         """Installs dependencies.
-        See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additionalInstallCommands`` parameters.
+        See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additional_install_commands`` parameters.
 
         Args:
-                environmentName: The environment to install dependencies.
+                environment_name: The environment to install dependencies.
                 dependencies: Dependencies to install.
-                additionalInstallCommands: Platform-specific commands during installation.
+                additional_install_commands: Platform-specific commands during installation.
 
         Returns:
                 Output lines of the installation commands.
         """
-        if environment == self.mainEnvironment and self.settingsManager.usePixi:
+        if environment == self.main_environment and self.settings_manager.use_pixi:
             raise Exception("Cannot install packages in an InternalEnvironment when using Pixi.")
-        if environment == self.mainEnvironment and environment.path is None:
+        if environment == self.main_environment and environment.path is None:
             raise Exception("Cannot install packages in an InternalEnvironment with no conda path.")
 
-        installCommands = self.dependencyManager.getInstallDependenciesCommands(environment, dependencies)
-        installCommands += self.commandGenerator.getCommandsForCurrentPlatform(additionalInstallCommands)
+        install_commands = self.dependency_manager.get_install_dependencies_commands(environment, dependencies)
+        install_commands += self.command_generator.get_commands_for_current_platform(additional_install_commands)
 
         logger.log_environment(
             f"Installing dependencies in environment '{environment.name}'", environment.name, stage="install"
         )
         log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": environment.name, "stage": "install"}
-        return self.commandExecutor.executeCommandsAndGetOutput(installCommands, log_context=log_context)
+        return self.command_executor.execute_commands_and_get_output(install_commands, log_context=log_context)
 
-    def executeCommands(
+    def execute_commands(
         self,
         environment: Environment,
         commands: Commands,
-        additionalActivateCommands: Commands = {},
-        popenKwargs: dict[str, Any] = {},
+        additional_activate_commands: Commands = {},
+        popen_kwargs: dict[str, Any] = {},
         wait: bool = False,
         log_context: dict[str, Any] | None = None,
         log: bool = True,
@@ -573,21 +573,21 @@ class EnvironmentManager:
         Args:
                 environment: The environment in which to execute commands.
                 commands: The commands to execute in the environment.
-                additionalActivateCommands: Platform-specific activation commands.
-                popenKwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+                additional_activate_commands: Platform-specific activation commands.
+                popen_kwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
                 log_context: Optional context dict to attach to logs via ProcessLogger.
                 log: Whether to log the process output.
 
         Returns:
                 The launched process.
         """
-        activateCommands = self.commandGenerator.getActivateEnvironmentCommands(environment, additionalActivateCommands)
-        platformCommands = self.commandGenerator.getCommandsForCurrentPlatform(commands)
-        return self.commandExecutor.executeCommands(
-            activateCommands + platformCommands, popenKwargs=popenKwargs, wait=wait, log_context=log_context, log=log
+        activate_commands = self.command_generator.get_activate_environment_commands(environment, additional_activate_commands)
+        platform_commands = self.command_generator.get_commands_for_current_platform(commands)
+        return self.command_executor.execute_commands(
+            activate_commands + platform_commands, popen_kwargs=popen_kwargs, wait=wait, log_context=log_context, log=log
         )
     
-    def getProcessLogger(self, process: subprocess.Popen)-> ProcessLogger:
+    def get_process_logger(self, process: subprocess.Popen)-> ProcessLogger:
         """Get a ProcessLogger for the given process.
 
         Args:
@@ -595,19 +595,19 @@ class EnvironmentManager:
         Returns:
                 The created ProcessLogger.
         """
-        return self.commandExecutor.getProcessLogger(process)
+        return self.command_executor.get_process_logger(process)
 
-    def registerEnvironment(self, environment: ExternalEnvironment, debugPort: int, moduleExecutorPath: Path) -> None:
+    def register_environment(self, environment: ExternalEnvironment, debug_port: int, module_executor_path: Path) -> None:
         """
-        Register the environment (save its debug port to `wetlandsInstancePath / debug_ports.json`) so that it can be debugged later.
+        Register the environment (save its debug port to `wetlands_instance_path / debug_ports.json`) so that it can be debugged later.
 
         Args:
                 environment: The external environment object to register
-                debugPort: The debug port to save
+                debug_port: The debug port to save
         """
         if environment.process is None:
             return
-        wetlands_debug_ports_path = self.wetlandsInstancePath / "debug_ports.json"
+        wetlands_debug_ports_path = self.wetlands_instance_path / "debug_ports.json"
         wetlands_debug_ports_path.parent.mkdir(exist_ok=True, parents=True)
         wetlands_debug_ports = {}
         try:
@@ -615,7 +615,7 @@ class EnvironmentManager:
                 with open(wetlands_debug_ports_path, "r") as f:
                     wetlands_debug_ports = json.load(f)
             wetlands_debug_ports[environment.name] = dict(
-                debugPort=debugPort, moduleExecutorPath=moduleExecutorPath.as_posix()
+                debug_port=debug_port, module_executor_path=module_executor_path.as_posix()
             )
             with open(wetlands_debug_ports_path, "w") as f:
                 json.dump(wetlands_debug_ports, f)
@@ -624,7 +624,7 @@ class EnvironmentManager:
             raise e
         return
 
-    def _removeEnvironment(self, environment: Environment) -> None:
+    def _remove_environment(self, environment: Environment) -> None:
         """Remove an environment.
 
         Args:

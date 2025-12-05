@@ -6,11 +6,11 @@ from wetlands.environment import Environment
 
 
 class DummyEnvironment(Environment):
-    def launch(self, additionalActivateCommands={}, logOutputInThread=True):
+    def launch(self, additional_activate_commands={}, log_output_in_thread=True):
         pass
 
-    def execute(self, modulePath, function, args=[], kwargs={}):
-        return f"Executed {function} in {modulePath} with args {args} and kwargs {kwargs}"
+    def execute(self, module_path, function, args=[], kwargs={}):
+        return f"Executed {function} in {module_path} with args {args} and kwargs {kwargs}"
 
 
 @pytest.fixture
@@ -29,20 +29,20 @@ def test_importModule(mock_import_module, dummy_env):
     mock_mod = ModuleType("test_mod")
     mock_import_module.return_value = mock_mod
 
-    module = dummy_env._importModule("/path/to/test_mod.py")
+    module = dummy_env._import_module("/path/to/test_mod.py")
     assert module == mock_mod
     assert "test_mod" in dummy_env.modules
     assert dummy_env.modules["test_mod"] == mock_mod
 
 
-@patch("wetlands.environment.Environment._importModule")
-@patch("wetlands.environment.Environment._listFunctions")
+@patch("wetlands.environment.Environment._import_module")
+@patch("wetlands.environment.Environment._list_functions")
 def test_importModule_creates_fake_module(mock_listFunctions, mock_importModule, dummy_env):
     mock_mod = MagicMock()
     mock_importModule.return_value = mock_mod
     mock_listFunctions.return_value = ["func1", "func2"]
 
-    fake_module = dummy_env.importModule("/path/to/test_mod.py")
+    fake_module = dummy_env.import_module("/path/to/test_mod.py")
 
     assert hasattr(fake_module, "func1")
     assert hasattr(fake_module, "func2")
@@ -56,4 +56,4 @@ def test_importModule_creates_fake_module(mock_listFunctions, mock_importModule,
 
 def test_exit(dummy_env, mock_environment_manager):
     dummy_env.exit()
-    mock_environment_manager._removeEnvironment.assert_called_once_with(dummy_env)
+    mock_environment_manager._remove_environment.assert_called_once_with(dummy_env)

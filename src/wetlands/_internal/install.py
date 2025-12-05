@@ -28,124 +28,124 @@ VC_REDIST_CHECKSUM_PATH = CHECKSUMS_BASE_DIR / "vc_redist.x64.exe.sha256"
 # --- Helper Functions ---
 
 
-def downloadFile(url: str, destPath: Path, proxies: Optional[Dict[str, str]] = None) -> None:
+def downloadFile(url: str, dest_path: Path, proxies: Optional[Dict[str, str]] = None) -> None:
     """
     Downloads a file from a URL to a destination path using urllib.
 
     Note: For more complex scenarios, consider using the 'requests' library.
     """
-    print(f"Downloading {url} to {destPath}...")
-    destPath.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading {url} to {dest_path}...")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    proxyHandler = urllib.request.ProxyHandler(proxies)
-    opener = urllib.request.build_opener(proxyHandler)
+    proxy_handler = urllib.request.ProxyHandler(proxies)
+    opener = urllib.request.build_opener(proxy_handler)
     urllib.request.install_opener(opener)
 
     try:
-        with urllib.request.urlopen(url, timeout=120) as response, open(destPath, "wb") as outFile:
+        with urllib.request.urlopen(url, timeout=120) as response, open(dest_path, "wb") as outFile:
             shutil.copyfileobj(response, outFile)
-        print(f"Successfully downloaded {destPath.name}.")
+        print(f"Successfully downloaded {dest_path.name}.")
     except urllib.error.URLError as e:
         raise RuntimeError(f"Failed to download {url}. Reason: {e.reason}") from e
 
 
-def calculateSha256(filePath: Path) -> str:
+def calculate_sha256(file_path: Path) -> str:
     """Calculates the SHA256 checksum of a file."""
-    sha256Hash = hashlib.sha256()
+    sha256_hash = hashlib.sha256()
     try:
-        with open(filePath, "rb") as f:
+        with open(file_path, "rb") as f:
             # Read in chunks to handle large files efficiently.
             for byteBlock in iter(lambda: f.read(4096), b""):
-                sha256Hash.update(byteBlock)
-        return sha256Hash.hexdigest()
+                sha256_hash.update(byteBlock)
+        return sha256_hash.hexdigest()
     except FileNotFoundError as e:
-        raise FileNotFoundError(f"Cannot calculate checksum, file not found: {filePath}") from e
+        raise FileNotFoundError(f"Cannot calculate checksum, file not found: {file_path}") from e
 
 
-def verifyChecksum(filePath: Path, checksumFilePath: Path) -> None:
+def verify_checksum(file_path: Path, checksum_file_path: Path) -> None:
     """Verifies the SHA256 checksum of a file against an expected value from a file."""
-    print(f"Verifying checksum for {filePath.name} using {checksumFilePath}...")
+    print(f"Verifying checksum for {file_path.name} using {checksum_file_path}...")
 
     try:
-        with open(checksumFilePath, "r") as f:
-            expectedChecksum = f.read().strip().split()[0].lower()
+        with open(checksum_file_path, "r") as f:
+            expected_checksum = f.read().strip().split()[0].lower()
     except (FileNotFoundError, IndexError) as e:
-        raise ValueError(f"Could not read expected checksum from {checksumFilePath}") from e
+        raise ValueError(f"Could not read expected checksum from {checksum_file_path}") from e
 
-    actualChecksum = calculateSha256(filePath)
+    actual_checksum = calculate_sha256(file_path)
 
-    if actualChecksum == expectedChecksum:
-        print(f"Checksum OK for {filePath.name}.")
+    if actual_checksum == expected_checksum:
+        print(f"Checksum OK for {file_path.name}.")
     else:
         raise ValueError(
-            f"Checksum MISMATCH for {filePath.name}!\n  Expected: {expectedChecksum}\n  Actual:   {actualChecksum}"
+            f"Checksum MISMATCH for {file_path.name}!\n  Expected: {expected_checksum}\n  Actual:   {actual_checksum}"
         )
 
 
-def downloadAndVerify(url: str, downloadPath: Path, checksumPath: Path, proxies: Optional[Dict[str, str]]) -> None:
+def downloadAndVerify(url: str, download_path: Path, checksum_path: Path, proxies: Optional[Dict[str, str]]) -> None:
     """A helper to chain download and verification, with cleanup on failure."""
     try:
-        downloadFile(url, downloadPath, proxies)
-        verifyChecksum(downloadPath, checksumPath)
+        downloadFile(url, download_path, proxies)
+        verify_checksum(download_path, checksum_path)
     except (RuntimeError, ValueError) as e:
         print(f"Error during download or verification: {e}", file=sys.stderr)
         # Clean up partially downloaded file on failure
-        if downloadPath.exists():
-            downloadPath.unlink()
+        if download_path.exists():
+            download_path.unlink()
         raise
 
 
 # --- Micromamba ---
 
 
-def getMicromambaPlatformInfo() -> Tuple[str, str]:
+def get_micromamba_platform_info() -> Tuple[str, str]:
     """Determines the OS platform and architecture for micromamba URLs."""
     system = platform.system()
     arch = platform.machine().lower()
 
-    systemMap = {"Linux": "linux", "Darwin": "osx", "Windows": "win"}
-    platformOs = systemMap.get(system)
-    if not platformOs:
+    system_map = {"Linux": "linux", "Darwin": "osx", "Windows": "win"}
+    platform_os = system_map.get(system)
+    if not platform_os:
         raise ValueError(f"Unsupported operating system: {system}")
 
-    archMap = {
+    arch_map = {
         "aarch64": "aarch64",
         "ppc64le": "ppc64le",
         "arm64": "arm64",  # For macOS
         "x86_64": "64",
         "amd64": "64",
     }
-    platformArch = archMap.get(arch)
-    if (not platformArch) or (platformOs == "win" and platformArch != "64"):
+    platform_arch = arch_map.get(arch)
+    if (not platform_arch) or (platform_os == "win" and platform_arch != "64"):
         print(f"Warning: Detected architecture '{arch}', defaulting to '64'.")
-        platformArch = "64"
+        platform_arch = "64"
 
     # Validate the final combination
-    validCombinations = {"linux-aarch64", "linux-ppc64le", "linux-64", "osx-arm64", "osx-64", "win-64"}
-    if f"{platformOs}-{platformArch}" not in validCombinations:
-        raise ValueError(f"Unsupported OS-Architecture combination: {platformOs}-{platformArch}")
+    valid_combinations = {"linux-aarch64", "linux-ppc64le", "linux-64", "osx-arm64", "osx-64", "win-64"}
+    if f"{platform_os}-{platform_arch}" not in valid_combinations:
+        raise ValueError(f"Unsupported OS-Architecture combination: {platform_os}-{platform_arch}")
 
-    return platformOs, platformArch
+    return platform_os, platform_arch
 
 
-def getMicromambaUrl(platformOs: str, platformArch: str, version: str) -> Tuple[str, str]:
+def get_micromamba_url(platform_os: str, platform_arch: str, version: str) -> Tuple[str, str]:
     """Constructs the micromamba download URL."""
-    baseName = f"micromamba-{platformOs}-{platformArch}"
-    baseUrl = "https://github.com/mamba-org/micromamba-releases/releases"
+    base_name = f"micromamba-{platform_os}-{platform_arch}"
+    base_url = "https://github.com/mamba-org/micromamba-releases/releases"
 
     if version:
-        return f"{baseUrl}/download/{version}/{baseName}", baseName
-    return f"{baseUrl}/latest/download/{baseName}", baseName
+        return f"{base_url}/download/{version}/{base_name}", base_name
+    return f"{base_url}/latest/download/{base_name}", base_name
 
 
-def installVcRedistWindows(proxies: Optional[Dict[str, str]]) -> None:
+def install_vc_redist_windows(proxies: Optional[Dict[str, str]]) -> None:
     """Downloads, verifies, and silently installs VC Redistributable on Windows."""
     print("\n--- Starting VC Redistributable Setup ---")
 
     with tempfile.TemporaryDirectory() as tmpDir:
-        vcRedistPath = Path(tmpDir) / VC_REDIST_ARTIFACT_NAME
+        vc_redist_path = Path(tmpDir) / VC_REDIST_ARTIFACT_NAME
 
-        downloadAndVerify(VC_REDIST_URL_DEFAULT, vcRedistPath, VC_REDIST_CHECKSUM_PATH, proxies)
+        downloadAndVerify(VC_REDIST_URL_DEFAULT, vc_redist_path, VC_REDIST_CHECKSUM_PATH, proxies)
 
         print(f"Installing {VC_REDIST_ARTIFACT_NAME}...")
         try:
@@ -153,7 +153,7 @@ def installVcRedistWindows(proxies: Optional[Dict[str, str]]) -> None:
             ps_command = [
                 "powershell",
                 "-Command",
-                f"Start-Process -FilePath '{vcRedistPath}' -ArgumentList '/install','/passive','/norestart' -Wait -NoNewWindow",
+                f"Start-Process -FilePath '{vc_redist_path}' -ArgumentList '/install','/passive','/norestart' -Wait -NoNewWindow",
             ]
 
             result = subprocess.run(
@@ -177,125 +177,125 @@ def installVcRedistWindows(proxies: Optional[Dict[str, str]]) -> None:
             raise RuntimeError(error_message) from e
 
 
-def createMambaConfigFile(mambaPath):
-    """Create Mamba config file .mambarc in condaPath, with nodefaults and conda-forge channels."""
-    with open(mambaPath / ".mambarc", "w") as f:
-        mambaSettings = dict(
+def create_mamba_config_file(mamba_path):
+    """Create Mamba config file .mambarc in conda_path, with nodefaults and conda-forge channels."""
+    with open(mamba_path / ".mambarc", "w") as f:
+        mamba_settings = dict(
             channel_priority="flexible",
             channels=["conda-forge", "nodefaults"],
             default_channels=["conda-forge"],
         )
-        yaml.safe_dump(mambaSettings, f)
+        yaml.safe_dump(mamba_settings, f)
 
 
 def installMicromamba(
-    installPath: Path, version: str = MICROMAMBA_VERSION, proxies: Optional[Dict[str, str]] = None
+    install_path: Path, version: str = MICROMAMBA_VERSION, proxies: Optional[Dict[str, str]] = None
 ) -> Path:
     """High-level function to orchestrate Micromamba installation."""
-    currentOs, currentArch = getMicromambaPlatformInfo()
+    currentOs, currentArch = get_micromamba_platform_info()
 
     if currentOs == "win":
-        installVcRedistWindows(proxies)
+        install_vc_redist_windows(proxies)
 
     print(f"\n--- Starting Micromamba Setup for {currentOs}-{currentArch} ---")
-    micromambaUrl, micromambaBaseName = getMicromambaUrl(currentOs, currentArch, version)
+    micromambaUrl, micromambaBaseName = get_micromamba_url(currentOs, currentArch, version)
     print(f"Target Micromamba URL: {micromambaUrl}")
 
     suffix = ".exe" if currentOs == "win" else ""
-    micromambaFullPath = installPath / "bin" / f"micromamba{suffix}"
-    micromambaFullPath.parent.mkdir(exist_ok=True, parents=True)
+    micromamba_full_path = install_path / "bin" / f"micromamba{suffix}"
+    micromamba_full_path.parent.mkdir(exist_ok=True, parents=True)
 
     # Use the combined helper to download and verify
-    downloadAndVerify(micromambaUrl, micromambaFullPath, CHECKSUMS_BASE_DIR / f"{micromambaBaseName}.sha256", proxies)
+    downloadAndVerify(micromambaUrl, micromamba_full_path, CHECKSUMS_BASE_DIR / f"{micromambaBaseName}.sha256", proxies)
 
     # Ensure the file is executable and properly named on Windows
     if currentOs == "win":
         # On Windows, verify the file exists and has the correct extension
-        if not micromambaFullPath.exists():
-            raise Exception(f"Micromamba executable not found at {micromambaFullPath}")
+        if not micromamba_full_path.exists():
+            raise Exception(f"Micromamba executable not found at {micromamba_full_path}")
         # Make sure it's readable and not locked
         try:
-            micromambaFullPath.stat()
+            micromamba_full_path.stat()
         except Exception as e:
-            raise Exception(f"Failed to access micromamba executable at {micromambaFullPath}: {e}") from e
+            raise Exception(f"Failed to access micromamba executable at {micromamba_full_path}: {e}") from e
     else:
-        micromambaFullPath.chmod(0o755)  # rwxr-xr-x
-        print(f"Made {micromambaFullPath} executable.")
+        micromamba_full_path.chmod(0o755)  # rwxr-xr-x
+        print(f"Made {micromamba_full_path} executable.")
 
-    print(f"Micromamba successfully set up at {micromambaFullPath}")
+    print(f"Micromamba successfully set up at {micromamba_full_path}")
 
-    createMambaConfigFile(installPath)
-    return micromambaFullPath
+    create_mamba_config_file(install_path)
+    return micromamba_full_path
 
 
 # --- Pixi ---
 
 
-def getPixiTarget(architecture=None) -> str:
+def get_pixi_target(architecture=None) -> str:
     """
     Determines the target triple for Pixi downloads.
     """
-    platformSystem = platform.system()
-    platformMachine = platform.machine().lower()
+    platform_system = platform.system()
+    platform_machine = platform.machine().lower()
 
     if architecture is None:
         architecture = "x86_64"
-        if platformMachine in ("aarch64", "arm64"):
+        if platform_machine in ("aarch64", "arm64"):
             architecture = "aarch64"
 
-    platformName = "unknown-linux-musl"
-    archiveExtension = ".tar.gz"
-    if platformSystem == "Windows":
-        platformName = "pc-windows-msvc"
-        archiveExtension = ".zip"
-    elif platformSystem == "Darwin":
-        platformName = "apple-darwin"
+    platform_name = "unknown-linux-musl"
+    archive_extension = ".tar.gz"
+    if platform_system == "Windows":
+        platform_name = "pc-windows-msvc"
+        archive_extension = ".zip"
+    elif platform_system == "Darwin":
+        platform_name = "apple-darwin"
 
-    return f"pixi-{architecture}-{platformName}{archiveExtension}"
+    return f"pixi-{architecture}-{platform_name}{archive_extension}"
 
 
-def installPixi(installPath: Path, version: str = PIXI_VERSION, proxies: Optional[Dict[str, str]] = None) -> Path:
+def installPixi(install_path: Path, version: str = PIXI_VERSION, proxies: Optional[Dict[str, str]] = None) -> Path:
     """Downloads, verifies, and installs a specific version of Pixi."""
 
-    binaryFilename = getPixiTarget()
+    binary_filename = get_pixi_target()
 
-    pixiRepoUrl = "https://github.com/prefix-dev/pixi"
+    pixi_repo_url = "https://github.com/prefix-dev/pixi"
 
     if version == "latest":
-        downloadUrl = f"{pixiRepoUrl}/releases/latest/download/{binaryFilename}"
+        download_url = f"{pixi_repo_url}/releases/latest/download/{binary_filename}"
     else:
-        downloadUrl = f"{pixiRepoUrl}/releases/download/{version}/{binaryFilename}"
+        download_url = f"{pixi_repo_url}/releases/download/{version}/{binary_filename}"
 
-    binDir = installPath / "bin"
+    bin_dir = install_path / "bin"
 
-    print(f"Preparing to install Pixi ({version}, {binaryFilename}).")
-    print(f"  URL: {downloadUrl}")
-    print(f"  Destination: {binDir}")
+    print(f"Preparing to install Pixi ({version}, {binary_filename}).")
+    print(f"  URL: {download_url}")
+    print(f"  Destination: {bin_dir}")
 
-    checksumPath = CHECKSUMS_BASE_DIR / f"{binaryFilename}.sha256"
-    if not checksumPath.exists():
-        raise Exception(f"Error: Checksum file not found at {checksumPath}")
+    checksum_path = CHECKSUMS_BASE_DIR / f"{binary_filename}.sha256"
+    if not checksum_path.exists():
+        raise Exception(f"Error: Checksum file not found at {checksum_path}")
 
     try:
         with tempfile.TemporaryDirectory() as tmpDir:
-            archive_path = Path(tmpDir) / binaryFilename
-            downloadAndVerify(downloadUrl, archive_path, checksumPath, proxies)
+            archive_path = Path(tmpDir) / binary_filename
+            downloadAndVerify(download_url, archive_path, checksum_path, proxies)
 
-            print(f"Extracting {archive_path.name} to {binDir}...")
-            binDir.mkdir(parents=True, exist_ok=True)
+            print(f"Extracting {archive_path.name} to {bin_dir}...")
+            bin_dir.mkdir(parents=True, exist_ok=True)
 
-            if binaryFilename.endswith(".zip"):
+            if binary_filename.endswith(".zip"):
                 with zipfile.ZipFile(archive_path, "r") as zip_ref:
-                    zip_ref.extractall(binDir)
+                    zip_ref.extractall(bin_dir)
             else:  # .tar.gz
                 with tarfile.open(archive_path, "r:gz") as tar_ref:
                     if sys.version_info >= (3, 12):
-                        tar_ref.extractall(binDir, filter="data")
+                        tar_ref.extractall(bin_dir, filter="data")
                     else:
                         # Emulate 'filter="data"' for 3.10–3.11
                         for member in tar_ref.getmembers():
                             if member.isfile():  # Only extract files, not symlinks/devices/etc
-                                tar_ref.extract(member, path=binDir)
+                                tar_ref.extract(member, path=bin_dir)
 
             print("Pixi installed successfully.")
 
@@ -308,8 +308,8 @@ def installPixi(installPath: Path, version: str = PIXI_VERSION, proxies: Optiona
 
     # On Windows, the executable might be named just 'pixi' in the zip, so we need to rename it to 'pixi.exe'
     # to ensure it can be executed properly
-    pixi_without_ext = binDir / "pixi"
-    pixi_with_ext = binDir / "pixi.exe"
+    pixi_without_ext = bin_dir / "pixi"
+    pixi_with_ext = bin_dir / "pixi.exe"
 
     if pixi_without_ext.is_file():
         if is_windows:
@@ -337,10 +337,10 @@ def main():
     Main function to demonstrate script usage.
     """
     # Example: Install Micromamba
-    micromambaInstallDir = SCRIPT_DIR / "micromamba_install"
-    print(f"--- Example: Installing Micromamba to {micromambaInstallDir} ---")
+    micromamba_install_dir = SCRIPT_DIR / "micromamba_install"
+    print(f"--- Example: Installing Micromamba to {micromamba_install_dir} ---")
     try:
-        installMicromamba(micromambaInstallDir)
+        installMicromamba(micromamba_install_dir)
     except (RuntimeError, ValueError, FileNotFoundError) as e:
         print(f"\nFATAL ERROR during Micromamba setup: {e}", file=sys.stderr)
         sys.exit(1)
@@ -348,10 +348,10 @@ def main():
     print("\n" + "=" * 50 + "\n")
 
     # Example: Install Pixi
-    pixiInstallDir = SCRIPT_DIR / "pixi_install"
-    print(f"--- Example: Installing Pixi to {pixiInstallDir} ---")
+    pixi_install_dir = SCRIPT_DIR / "pixi_install"
+    print(f"--- Example: Installing Pixi to {pixi_install_dir} ---")
     try:
-        installPixi(pixiInstallDir, version="0.21.0")  # Use a specific version
+        installPixi(pixi_install_dir, version="0.21.0")  # Use a specific version
     except (RuntimeError, ValueError, FileNotFoundError) as e:
         print(f"\nFATAL ERROR during Pixi setup: {e}", file=sys.stderr)
         sys.exit(1)

@@ -20,17 +20,17 @@ def command_generator_micromamba(mock_settings_manager_micromamba):
 
 @patch("platform.system", return_value="Darwin")
 def test_get_platform_common_name_mac(mock_platform, command_generator_pixi):
-    assert command_generator_pixi.getPlatformCommonName() == "mac"
+    assert command_generator_pixi.get_platform_common_name() == "mac"
 
 
 @patch("platform.system", return_value="Linux")
 def test_get_platform_common_name_linux(mock_platform, command_generator_pixi):
-    assert command_generator_pixi.getPlatformCommonName() == "linux"
+    assert command_generator_pixi.get_platform_common_name() == "linux"
 
 
 @patch("platform.system", return_value="Windows")
 def test_get_platform_common_name_windows(mock_platform, command_generator_pixi):
-    assert command_generator_pixi.getPlatformCommonName() == "windows"
+    assert command_generator_pixi.get_platform_common_name() == "windows"
 
 
 @pytest.mark.parametrize(
@@ -48,7 +48,7 @@ def test_get_platform_common_name_windows(mock_platform, command_generator_pixi)
 )
 @patch("platform.system", return_value="Linux")
 def test_get_commands_for_current_platform(mock_platform, command_generator_pixi, additional_commands, expected):
-    assert command_generator_pixi.getCommandsForCurrentPlatform(additional_commands) == expected
+    assert command_generator_pixi.get_commands_for_current_platform(additional_commands) == expected
 
 
 def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
@@ -60,8 +60,8 @@ def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
     # Channels are sorted alphabetically and unique
     expected_channels = "conda-forge", "nvidia", "bioconda"
     expected_command = rf'pixi project channel add --manifest-path ".*" --no-progress --prepend'
-    commands = command_generator_pixi.getAddChannelsCommands(
-        environment, ["bioconda"], dependencies, activateConda=True
+    commands = command_generator_pixi.get_add_channels_commands(
+        environment, ["bioconda"], dependencies, activate_conda=True
     )
     assert re.search(expected_command, commands[-1])
     assert all(ec in commands[-1] for ec in expected_channels)
@@ -76,8 +76,8 @@ def test_mixed_dependencies_with_and_without_channels_micromamba(command_generat
     # Only bioconda will be added since the others are handled by conda for each package
     expected_channels = "bioconda"
     expected_command = rf"micromamba --rc-file ~/.mambarc config --add channels"
-    commands = command_generator_micromamba.getAddChannelsCommands(
-        environment, ["bioconda"], dependencies, activateConda=True
+    commands = command_generator_micromamba.get_add_channels_commands(
+        environment, ["bioconda"], dependencies, activate_conda=True
     )
     assert re.search(expected_command, commands[-1])
     assert all(ec in commands[-1] for ec in expected_channels)

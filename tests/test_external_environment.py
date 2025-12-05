@@ -29,13 +29,13 @@ def test_launch(mock_popen):
         # Mock the environment manager with a mock command executor
         mock_env_manager = MagicMock()
         mock_env_manager.debug = False
-        mock_env_manager.getProcessLogger = MagicMock(return_value=mock_process_logger)
-        mock_env_manager.wetlandsInstancePath = MagicMock()
-        mock_env_manager.wetlandsInstancePath.resolve.return_value = Path("/tmp/wetlands")
-        mock_env_manager.commandExecutor._process_loggers = {12345: mock_process_logger}
+        mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+        mock_env_manager.wetlands_instance_path = MagicMock()
+        mock_env_manager.wetlands_instance_path.resolve.return_value = Path("/tmp/wetlands")
+        mock_env_manager.command_executor._process_loggers = {12345: mock_process_logger}
 
         env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
-        env.executeCommands = MagicMock(return_value=mock_process)
+        env.execute_commands = MagicMock(return_value=mock_process)
         env.launch()
 
         assert env.port == 5000
@@ -53,7 +53,7 @@ def test_execute(mock_client):
 
     assert result == "success"
     env.connection.send.assert_called_once_with(
-        {"action": "execute", "modulePath": "module.py", "function": "func", "args": (1, 2, 3), "kwargs": {}}
+        {"action": "execute", "module_path": "module.py", "function": "func", "args": (1, 2, 3), "kwargs": {}}
     )
 
 
@@ -70,7 +70,7 @@ def test_execute_with_kwargs(mock_client):
     env.connection.send.assert_called_once_with(
         {
             "action": "execute",
-            "modulePath": "module.py",
+            "module_path": "module.py",
             "function": "func",
             "args": ("a",),
             "kwargs": {"one": 1, "two": 2},
@@ -97,7 +97,7 @@ def test_execute_error(mock_client, caplog):
     assert "line 2" in caplog.text
 
 
-@patch("wetlands._internal.command_executor.CommandExecutor.killProcess")
+@patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
 def test_exit(mock_kill):
     env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
     env.connection = MagicMock()

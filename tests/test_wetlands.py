@@ -30,7 +30,7 @@ def env_manager(request, tmp_path_factory):
     wetlands_instance_path = temp_root / "wetlands"
     logger.info(f"Creating test directory {temp_root}")
     # Basic environment configuration
-    manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=temp_root)
+    manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=temp_root)
     yield manager
 
     for env_name, env in manager.environments.copy().items():
@@ -50,8 +50,8 @@ def test_environment_creation(env_manager):
     env = env_manager.create(env_name, dependencies)
 
     # Verify that 'requests' is installed
-    installedPackages = env_manager.getInstalledPackages(env)
-    assert any(icp["name"] == "requests" for icp in installedPackages)
+    installed_packages = env_manager.get_installed_packages(env)
+    assert any(icp["name"] == "requests" for icp in installed_packages)
 
     # Verify that recreating the same env returns it
     same_env = env_manager.create(env_name, dependencies)
@@ -67,20 +67,20 @@ def test_dependency_installation(env_manager):
     """Test that EnvironmentManager.install() correctly installs dependencies (in existing env)."""
     env_name = "test_env_deps"
     logger.info(f"Testing dependency installation: {env_name}")
-    env = env_manager.create(env_name, useExisting=False)
+    env = env_manager.create(env_name, use_existing=False)
     dependencies = Dependencies({"pip": ["munch==4.0.0"], "conda": ["fastai::fastprogress==1.0.3"]})
 
     env.install(dependencies)
 
     # Verify that 'numpy' and 'noise2self' is installed
-    installedPackages = env_manager.getInstalledPackages(env)
+    installed_packages = env_manager.get_installed_packages(env)
     assert any(
         icp["name"] == "fastprogress" and icp["version"].startswith("1.0.3") and icp["kind"] == "conda"
-        for icp in installedPackages
+        for icp in installed_packages
     )
     assert any(
         icp["name"] == "munch" and icp["version"].startswith("4.0.0") and icp["kind"] == "pypi"
-        for icp in installedPackages
+        for icp in installed_packages
     )
 
     env.exit()
@@ -92,15 +92,15 @@ def test_internal_external_environment(env_manager):
 
     logger.info("Testing internal/external environment creation")
     # No dependencies: InternalEnvironment
-    env_internal = env_manager.create("test_env_internal", {}, useExisting=True)
+    env_internal = env_manager.create("test_env_internal", {}, use_existing=True)
     assert isinstance(env_internal, InternalEnvironment)
-    assert env_internal == env_manager.mainEnvironment
+    assert env_internal == env_manager.main_environment
 
     # With dependencies: ExternalEnvironment
     env_external = env_manager.create("test_env_external", {"conda": ["requests"]})
     assert isinstance(env_external, ExternalEnvironment)
 
-    env_external_forced = env_manager.create("test_env_external_forced", {}, useExisting=False)
+    env_external_forced = env_manager.create("test_env_external_forced", {}, use_existing=False)
     assert isinstance(env_external_forced, ExternalEnvironment)
 
     env_internal.exit()
@@ -138,13 +138,13 @@ def test_mambarc_modification(env_manager, tmp_path):
     """Test that proxy settings are correctly written to the .mambarc file."""
     logger.info("Testing .mambarc modification")
     proxies = {"http": "http://proxy.example.com", "https": "https://proxy.example.com"}
-    env_manager.setProxies(proxies)
-    if env_manager.settingsManager.usePixi:
-        assert env_manager.settingsManager.proxies == proxies
-        env_manager.setProxies({})
-        assert env_manager.settingsManager.proxies == {}
+    env_manager.set_proxies(proxies)
+    if env_manager.settings_manager.use_pixi:
+        assert env_manager.settings_manager.proxies == proxies
+        env_manager.set_proxies({})
+        assert env_manager.settings_manager.proxies == {}
         return
-    mambarc_path = Path(env_manager.settingsManager.condaPath) / ".mambarc"
+    mambarc_path = Path(env_manager.settings_manager.conda_path) / ".mambarc"
     assert os.path.exists(mambarc_path)
 
     with open(mambarc_path, "r") as f:
@@ -152,7 +152,7 @@ def test_mambarc_modification(env_manager, tmp_path):
         assert "http: http://proxy.example.com" in content
         assert "https: https://proxy.example.com" in content
 
-    env_manager.setProxies({})
+    env_manager.set_proxies({})
 
     with open(mambarc_path, "r") as f:
         content = f.read()
@@ -194,8 +194,8 @@ def prod(x=[], y=1):
     result = env.execute(str(module_path), "prod", [[1, 2, 3]], {"y": 2})
     assert result == 12
 
-    # Test with importModule
-    module = env.importModule(str(module_path))
+    # Test with import_module
+    module = env.import_module(str(module_path))
     result = module.sum([1, 2, 3])
     assert result == 6
     result = module.prod([1, 2, 3], y=3)
@@ -220,14 +220,14 @@ def double(x):
 """
         )
 
-    env = env_manager.create(env_name, {}, useExisting=True)  # No dependencies needed
+    env = env_manager.create(env_name, {}, use_existing=True)  # No dependencies needed
     # env.launch()
 
     with pytest.raises(Exception) as excinfo:
         env.execute(str(module_path), "non_existent_function", [1])
     assert "has no function" in str(excinfo.value)
 
-    module = env.importModule(str(module_path))
+    module = env.import_module(str(module_path))
     with pytest.raises(Exception) as excinfo:
         module.non_existent_function(1)
 
@@ -240,7 +240,7 @@ def double(x):
 def test_non_existent_module(env_manager):
     """Test that an exception is raised when importing a non-existent module."""
     env_name = "test_env_non_existent_module"
-    env = env_manager.create(env_name, {}, useExisting=True)
+    env = env_manager.create(env_name, {}, use_existing=True)
     # env.launch()
     logger.info(f"Testing non-existent module: {env_name}")
 
@@ -248,7 +248,7 @@ def test_non_existent_module(env_manager):
         env.execute("non_existent_module.py", "my_function", [1])
 
     with pytest.raises(ModuleNotFoundError):
-        env.importModule("non_existent_module.py")
+        env.import_module("non_existent_module.py")
 
     env.exit()
 
@@ -276,7 +276,7 @@ with Listener(("localhost", 0)) as listener:
                 sys.exit()
     """)
 
-    process = env.executeCommands([f"python -u {(tmp_path / 'test_module.py').resolve()}"], log=False)
+    process = env.execute_commands([f"python -u {(tmp_path / 'test_module.py').resolve()}"], log=False)
 
     port = 0
     if process.stdout is not None:
@@ -318,16 +318,16 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     wetlands_instance_path = temp_root / "wetlands"
     logger.info(f"Creating test directory {temp_root}")
     # Basic environment configuration
-    env_manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=temp_root)
+    env_manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=temp_root)
 
     env_name = "test_env_access_via_path"
     logger.info(f"Testing existing environment access via Path: {env_name}")
 
     # Get the conda root path
-    conda_root = Path(env_manager.settingsManager.condaPath)
+    conda_root = Path(env_manager.settings_manager.conda_path)
 
     env_path = tmp_path_factory.mktemp("test_envs") / "test_env"
-    conda_bin = env_manager.settingsManager.condaBin
+    conda_bin = env_manager.settings_manager.conda_bin
 
     # Step 1: Create environment directly with micromamba via subprocess
     logger.info(f"Creating environment at {env_path} using subprocess")
@@ -358,7 +358,7 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     assert isinstance(env_by_path, ExternalEnvironment)
 
     # Step 4: Verify dependency is still detected when accessed by path
-    installed_by_path = env_manager.getInstalledPackages(env_by_path)
+    installed_by_path = env_manager.get_installed_packages(env_by_path)
     assert any(pkg["name"] == "requests" for pkg in installed_by_path), (
         f"'requests' not found when accessing by path: {[p['name'] for p in installed_by_path]}"
     )
@@ -385,13 +385,13 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     temp_root = tmp_path_factory.mktemp("pixi_root")
     wetlands_instance_path = temp_root / "wetlands"
     logger.info(f"Creating test directory {temp_root}")
-    env_manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=temp_root)
+    env_manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=temp_root)
 
     env_name = "test_pixi_access_via_path"
     logger.info(f"Testing pixi environment access via Path: {env_name}")
 
     # Get paths
-    pixi_bin = env_manager.settingsManager.condaBin
+    pixi_bin = env_manager.settings_manager.conda_bin
     workspace_root = tmp_path_factory.mktemp("external_env")
     workspace_path = workspace_root / env_name
     manifest_path = workspace_path / "pixi.toml"
@@ -424,7 +424,7 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     assert isinstance(env_by_path, ExternalEnvironment)
 
     # Step 5: Verify dependencies are consistent
-    installed_by_path = env_manager.getInstalledPackages(env_by_path)
+    installed_by_path = env_manager.get_installed_packages(env_by_path)
     assert any(pkg["name"] == "requests" for pkg in installed_by_path), (
         f"'requests' not found when accessing via path: {[p['name'] for p in installed_by_path]}"
     )
@@ -444,7 +444,7 @@ def test_nonexistent_environment_path_raises_error(env_manager):
     logger.info("Testing error handling for nonexistent environment path")
 
     # Create a path that definitely doesn't exist
-    nonexistent_env_path = Path(env_manager.settingsManager.condaPath) / "envs" / "definitely_not_exists_xyz123"
+    nonexistent_env_path = Path(env_manager.settings_manager.conda_path) / "envs" / "definitely_not_exists_xyz123"
     assert not nonexistent_env_path.exists()
     logger.info(f"Verified nonexistent path: {nonexistent_env_path}")
 

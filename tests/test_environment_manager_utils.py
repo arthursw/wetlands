@@ -6,43 +6,43 @@ from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 
 
-# ---- _removeChannel Tests ----
+# ---- _remove_channel Tests ----
 
 
 class TestRemoveChannel:
     def test_remove_channel_with_channel(self):
-        """Test that _removeChannel removes channel prefix"""
+        """Test that _remove_channel removes channel prefix"""
         manager = MagicMock()
-        manager._removeChannel = EnvironmentManager._removeChannel.__get__(manager)
+        manager._remove_channel = EnvironmentManager._remove_channel.__get__(manager)
 
-        result = manager._removeChannel("conda-forge::numpy==1.2.3")
+        result = manager._remove_channel("conda-forge::numpy==1.2.3")
         assert result == "numpy==1.2.3"
 
     def test_remove_channel_without_channel(self):
-        """Test that _removeChannel returns unchanged string if no channel"""
+        """Test that _remove_channel returns unchanged string if no channel"""
         manager = MagicMock()
-        manager._removeChannel = EnvironmentManager._removeChannel.__get__(manager)
+        manager._remove_channel = EnvironmentManager._remove_channel.__get__(manager)
 
-        result = manager._removeChannel("numpy==1.2.3")
+        result = manager._remove_channel("numpy==1.2.3")
         assert result == "numpy==1.2.3"
 
 
-# ---- _addDebugpyInDependencies Tests ----
+# ---- _add_debugpy_in_dependencies Tests ----
 
 
 class TestAddDebugpyInDependencies:
     def test_add_debugpy_in_debug_mode(self):
         """Test that debugpy is added when debug mode is enabled"""
         manager = EnvironmentManager(
-            wetlandsInstancePath=Path("/tmp/wetlands_test"),
-            condaPath=Path("/tmp/test_conda"),
+            wetlands_instance_path=Path("/tmp/wetlands_test"),
+            conda_path=Path("/tmp/test_conda"),
             manager="micromamba",
             debug=True,
         )
 
-        with patch.object(manager, "installConda"):
+        with patch.object(manager, "install_conda"):
             dependencies = Dependencies({"pip": ["numpy"]})
-            manager._addDebugpyInDependencies(dependencies)
+            manager._add_debugpy_in_dependencies(dependencies)
 
             assert "conda" in dependencies
             assert "debugpy" in dependencies["conda"]
@@ -50,15 +50,15 @@ class TestAddDebugpyInDependencies:
     def test_add_debugpy_not_in_debug_mode(self):
         """Test that debugpy is not added when debug mode is disabled"""
         manager = EnvironmentManager(
-            wetlandsInstancePath=Path("/tmp/wetlands_test2"),
-            condaPath=Path("/tmp/test_conda"),
+            wetlands_instance_path=Path("/tmp/wetlands_test2"),
+            conda_path=Path("/tmp/test_conda"),
             manager="micromamba",
             debug=False,
         )
 
-        with patch.object(manager, "installConda"):
+        with patch.object(manager, "install_conda"):
             dependencies = Dependencies({"pip": ["numpy"]})
-            manager._addDebugpyInDependencies(dependencies)
+            manager._add_debugpy_in_dependencies(dependencies)
 
             # Conda deps should not be added if not in debug mode
             if "conda" in dependencies:
@@ -67,22 +67,22 @@ class TestAddDebugpyInDependencies:
     def test_add_debugpy_already_present(self):
         """Test that debugpy is not added twice if already present"""
         manager = EnvironmentManager(
-            wetlandsInstancePath=Path("/tmp/wetlands_test3"),
-            condaPath=Path("/tmp/test_conda"),
+            wetlands_instance_path=Path("/tmp/wetlands_test3"),
+            conda_path=Path("/tmp/test_conda"),
             manager="micromamba",
             debug=True,
         )
 
-        with patch.object(manager, "installConda"):
+        with patch.object(manager, "install_conda"):
             dependencies = Dependencies({"conda": ["debugpy==1.0.0"]})
-            manager._addDebugpyInDependencies(dependencies)
+            manager._add_debugpy_in_dependencies(dependencies)
 
             # Check debugpy appears only once
             count = sum(1 for dep in dependencies["conda"] if "debugpy" in str(dep))  # type: ignore
             assert count == 1
 
 
-# ---- getInstalledPackages Tests ----
+# ---- get_installed_packages Tests ----
 
 
 class TestGetInstalledPackages:
@@ -92,36 +92,36 @@ class TestGetInstalledPackages:
         wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance")
         main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
-        monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+        monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
         manager = EnvironmentManager(
-            wetlandsInstancePath=wetlands_instance_path,
-            condaPath=dummy_micromamba_path,
+            wetlands_instance_path=wetlands_instance_path,
+            conda_path=dummy_micromamba_path,
             manager="micromamba",
-            mainCondaEnvironmentPath=main_env_path,
+            main_conda_environment_path=main_env_path,
         )
-        manager.settingsManager.usePixi = False
+        manager.settings_manager.use_pixi = False
 
         mock_packages = [
             {"name": "numpy", "version": "1.2.3", "kind": "conda"},
             {"name": "pandas", "version": "2.0.0", "kind": "conda"},
         ]
 
-        manager.commandExecutor.executeCommandsAndGetJsonOutput = MagicMock(return_value=mock_packages)
-        manager.commandExecutor.executeCommandsAndGetOutput = MagicMock(return_value=[])
+        manager.command_executor.execute_commands_and_get_json_output = MagicMock(return_value=mock_packages)
+        manager.command_executor.execute_commands_and_get_output = MagicMock(return_value=[])
 
         # Create an environment object
         env_name = "test_env"
-        env = ExternalEnvironment(env_name, manager.settingsManager.getEnvironmentPathFromName(env_name), manager)
+        env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
         manager.environments[env_name] = env
 
-        result = manager.getInstalledPackages(env)
+        result = manager.get_installed_packages(env)
 
         # Should include conda packages
         assert any(p["name"] == "numpy" for p in result)
 
 
-# ---- _checkRequirement Tests ----
+# ---- _check_requirement Tests ----
 
 
 class TestCheckRequirement:
@@ -131,20 +131,20 @@ class TestCheckRequirement:
         wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance")
         main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
-        monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+        monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
         manager = EnvironmentManager(
-            wetlandsInstancePath=wetlands_instance_path,
-            condaPath=dummy_micromamba_path,
+            wetlands_instance_path=wetlands_instance_path,
+            conda_path=dummy_micromamba_path,
             manager="micromamba",
-            mainCondaEnvironmentPath=main_env_path,
+            main_conda_environment_path=main_env_path,
         )
 
         installed_packages = [
             {"name": "numpy", "version": "1.2.3", "kind": "conda"},
         ]
 
-        result = manager._checkRequirement("numpy==1.2.3", "conda", installed_packages)
+        result = manager._check_requirement("numpy==1.2.3", "conda", installed_packages)
         assert result is True
 
     def test_check_requirement_conda_version_mismatch(self, tmp_path_factory, monkeypatch):
@@ -153,20 +153,20 @@ class TestCheckRequirement:
         wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance")
         main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
-        monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+        monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
         manager = EnvironmentManager(
-            wetlandsInstancePath=wetlands_instance_path,
-            condaPath=dummy_micromamba_path,
+            wetlands_instance_path=wetlands_instance_path,
+            conda_path=dummy_micromamba_path,
             manager="micromamba",
-            mainCondaEnvironmentPath=main_env_path,
+            main_conda_environment_path=main_env_path,
         )
 
         installed_packages = [
             {"name": "numpy", "version": "1.2.3", "kind": "conda"},
         ]
 
-        result = manager._checkRequirement("numpy==2.0.0", "conda", installed_packages)
+        result = manager._check_requirement("numpy==2.0.0", "conda", installed_packages)
         assert result is False
 
     def test_check_requirement_pip_installed(self, tmp_path_factory, monkeypatch):
@@ -175,20 +175,20 @@ class TestCheckRequirement:
         wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance")
         main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
-        monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+        monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
         manager = EnvironmentManager(
-            wetlandsInstancePath=wetlands_instance_path,
-            condaPath=dummy_micromamba_path,
+            wetlands_instance_path=wetlands_instance_path,
+            conda_path=dummy_micromamba_path,
             manager="micromamba",
-            mainCondaEnvironmentPath=main_env_path,
+            main_conda_environment_path=main_env_path,
         )
 
         installed_packages = [
             {"name": "requests", "version": "2.28.0", "kind": "pypi"},
         ]
 
-        result = manager._checkRequirement("requests==2.28.0", "pip", installed_packages)
+        result = manager._check_requirement("requests==2.28.0", "pip", installed_packages)
         assert result is True
 
     def test_check_requirement_removes_channel(self, tmp_path_factory, monkeypatch):
@@ -197,18 +197,18 @@ class TestCheckRequirement:
         wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance")
         main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
-        monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+        monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
         manager = EnvironmentManager(
-            wetlandsInstancePath=wetlands_instance_path,
-            condaPath=dummy_micromamba_path,
+            wetlands_instance_path=wetlands_instance_path,
+            conda_path=dummy_micromamba_path,
             manager="micromamba",
-            mainCondaEnvironmentPath=main_env_path,
+            main_conda_environment_path=main_env_path,
         )
 
         installed_packages = [
             {"name": "numpy", "version": "1.2.3", "kind": "conda"},
         ]
 
-        result = manager._checkRequirement("conda-forge::numpy==1.2.3", "conda", installed_packages)
+        result = manager._check_requirement("conda-forge::numpy==1.2.3", "conda", installed_packages)
         assert result is True

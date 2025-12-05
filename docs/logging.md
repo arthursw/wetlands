@@ -25,7 +25,7 @@ Wetlands automatically logs all operations (environment creation, installation, 
 - ProcessLogger reads subprocess output in background threads for real-time logging
 
 !!! note
-    By default, `executeCommands()` functions read process stdout in a background thread via ProcessLogger. If you need to read stdout manually, pass `log=False` to disable automatic logging.
+    By default, `execute_commands()` functions read process stdout in a background thread via ProcessLogger. If you need to read stdout manually, pass `log=False` to disable automatic logging.
 
 ## Log Context
 
@@ -132,8 +132,8 @@ You can also use Wetlands ProcessLogger:
 
 ```python
 
-# Retrieve the ProcessLogger that was created by executeCommands
-process_logger = self.environment_manager.getProcessLogger(env.process.pid)
+# Retrieve the ProcessLogger that was created by execute_commands
+process_logger = self.environment_manager.get_process_logger(env.process.pid)
 
 # Subscribe to the process output
 def check_output(line: str, _context: dict) -> None:
@@ -244,7 +244,7 @@ from queue import Queue
 import threading
 
 from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import attachLogHandler
+from wetlands.logger import attach_log_handler
 
 class LogViewer:
     def __init__(self, root):
@@ -255,7 +255,7 @@ class LogViewer:
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Attach logging handler - runs in background thread
-        attachLogHandler(self.on_log)
+        attach_log_handler(self.on_log)
 
         # Poll queue from main thread
         self.poll_queue()
@@ -299,7 +299,7 @@ from PyQt6.QtCore import pyqtSignal, QObject
 import threading
 
 from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import attachLogHandler
+from wetlands.logger import attach_log_handler
 
 class LogSignals(QObject):
     log_signal = pyqtSignal(str)  # Signal for thread-safe communication
@@ -317,7 +317,7 @@ class LogViewer(QMainWindow):
         self.signals.log_signal.connect(self.append_log)
 
         # Attach handler - runs in background thread
-        attachLogHandler(self.on_log)
+        attach_log_handler(self.on_log)
 
     def on_log(self, message):
         """Called from ProcessLogger thread - emit signal."""

@@ -23,8 +23,8 @@ def mock_command_executor(monkeypatch):
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
 
     mocks = {
-        "executeCommands": mock_execute,
-        "executeCommandsAndGetOutput": mock_execute_output,
+        "execute_commands": mock_execute,
+        "execute_commands_and_get_output": mock_execute_output,
         "mock_process": mock_process,
     }
     return mocks
@@ -36,20 +36,20 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
     dummy_micromamba_path = tmp_path_factory.mktemp("conda_root")
     main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
-    monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+    monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
     manager = EnvironmentManager(
-        condaPath=dummy_micromamba_path, manager="micromamba", mainCondaEnvironmentPath=main_env_path
+        conda_path=dummy_micromamba_path, manager="micromamba", main_conda_environment_path=main_env_path
     )
 
-    monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])
+    monkeypatch.setattr(manager.command_executor, "execute_commands", mock_command_executor["execute_commands"])
     monkeypatch.setattr(
-        manager.commandExecutor, "executeCommandsAndGetOutput", mock_command_executor["executeCommandsAndGetOutput"]
+        manager.command_executor, "execute_commands_and_get_output", mock_command_executor["execute_commands_and_get_output"]
     )
 
-    monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+    monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommands"], mock_command_executor["executeCommandsAndGetOutput"]
+    return manager, mock_command_executor["execute_commands"], mock_command_executor["execute_commands_and_get_output"]
 
 
 @pytest.fixture
@@ -57,18 +57,18 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
     """Provides an EnvironmentManager instance with mocked CommandExecutor for Pixi."""
     dummy_pixi_path = tmp_path_factory.mktemp("pixi_root")
 
-    monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+    monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
-    manager = EnvironmentManager(condaPath=dummy_pixi_path, manager="pixi")
+    manager = EnvironmentManager(conda_path=dummy_pixi_path, manager="pixi")
 
-    monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_command_executor["executeCommands"])
+    monkeypatch.setattr(manager.command_executor, "execute_commands", mock_command_executor["execute_commands"])
     monkeypatch.setattr(
-        manager.commandExecutor, "executeCommandsAndGetOutput", mock_command_executor["executeCommandsAndGetOutput"]
+        manager.command_executor, "execute_commands_and_get_output", mock_command_executor["execute_commands_and_get_output"]
     )
 
-    monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+    monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
 
-    return manager, mock_command_executor["executeCommands"], mock_command_executor["executeCommandsAndGetOutput"]
+    return manager, mock_command_executor["execute_commands"], mock_command_executor["execute_commands_and_get_output"]
 
 
 # ---- install Tests (micromamba) ----
@@ -81,7 +81,7 @@ def test_install_in_existing_env(environment_manager_fixture):
     dependencies: Dependencies = {"conda": ["new_dep==1.0"]}
 
     # Create an environment object
-    env = ExternalEnvironment(env_name, manager.settingsManager.getEnvironmentPathFromName(env_name), manager)
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
     manager.environments[env_name] = env
 
     manager.install(env, dependencies)
@@ -104,7 +104,7 @@ def test_install_in_main_env(environment_manager_fixture):
     dependencies: Dependencies = {"pip": ["another_pip_dep"]}
 
     # Pass the main environment
-    manager.install(manager.mainEnvironment, dependencies)
+    manager.install(manager.main_environment, dependencies)
 
     mock_execute_output.assert_called_once()
     called_args, _ = mock_execute_output.call_args
@@ -124,7 +124,7 @@ def test_install_with_additional_commands(environment_manager_fixture):
     additional_commands: Commands = {"all": ["post-install script"]}
 
     # Create an environment object
-    env = ExternalEnvironment(env_name, manager.settingsManager.getEnvironmentPathFromName(env_name), manager)
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
     manager.environments[env_name] = env
 
     manager.install(env, dependencies, additional_commands)
@@ -149,7 +149,7 @@ def test_install_in_existing_env_pixi(environment_manager_pixi_fixture):
     dependencies: Dependencies = {"conda": ["new_dep==1.0"]}
 
     # Create an environment object
-    env = ExternalEnvironment(env_name, manager.settingsManager.getEnvironmentPathFromName(env_name), manager)
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
     manager.environments[env_name] = env
 
     manager.install(env, dependencies)

@@ -5,18 +5,18 @@ from multiprocessing.connection import Listener, Connection
 import example_module
 
 
-def downloadImage(imagePath: Path | str, connection: Connection):
+def download_image(image_path: Path | str, connection: Connection):
     # Download example image from cellpose
-    imageUrl = "https://www.cellpose.org/static/images/img02.png"
-    with urllib.request.urlopen(imageUrl) as response:
-        imageData = response.read()
-    with open(imagePath, "wb") as handler:
-        handler.write(imageData)
+    image_url = "https://www.cellpose.org/static/images/img02.png"
+    with urllib.request.urlopen(image_url) as response:
+        image_data = response.read()
+    with open(image_path, "wb") as handler:
+        handler.write(image_data)
     connection.send(dict(message="Image downloaded."))
 
 
-def segmentImage(imagePath: Path | str, segmentationPath: Path | str, connection: Connection):
-    diameters = example_module.segment(imagePath, segmentationPath)
+def segment_image(image_path: Path | str, segmentation_path: Path | str, connection: Connection):
+    diameters = example_module.segment(image_path, segmentation_path)
     connection.send(dict(message="Image segmented.", diameters=diameters))
 
 

@@ -31,7 +31,7 @@ wetlands list [-wip PATH]
 
 **Arguments:**
 
-- `-wip, --wetlandsInstancePath PATH` (optional): Path to the Wetlands instance folder (default: `wetlands`)
+- `-wip, --wetlands_instance_path PATH` (optional): Path to the Wetlands instance folder (default: `wetlands`)
 
 **Example:**
 
@@ -41,8 +41,8 @@ Running wetlands environments (for all wetlands instance):
 
 Command line | Process ID | Parent process ID
 ---
-python /path/to/wetlands/module_executor.py env1 --wetlandsInstancePath path/to/wetlands | 12345 | 12340
-python /path/to/wetlands/module_executor.py env2 --wetlandsInstancePath path/to/wetlands | 12346 | 12340
+python /path/to/wetlands/module_executor.py env1 --wetlands_instance_path path/to/wetlands | 12345 | 12340
+python /path/to/wetlands/module_executor.py env2 --wetlands_instance_path path/to/wetlands | 12346 | 12340
 
 Environments of the wetlands instance path/to/wetlands:
 
@@ -71,8 +71,8 @@ wetlands debug -s SOURCE_PATH -n ENV_NAME [-ide {vscode,pycharm}] [-wip PATH] [-
 - `-s, --sources SOURCE_PATH` (required): Path to the source code directory you want to debug
 - `-n, --name ENV_NAME` (required): Name of the environment to debug
 - `-ide, --ide {vscode,pycharm}` (optional): IDE to use (default: `vscode`)
-- `-wip, --wetlandsInstancePath PATH` (optional): Path to the Wetlands instance folder (default: `pixi/wetlands`)
-- `-jmc, --justMyCode` (optional, VS Code only): Only debug your source files, not library code
+- `-wip, --wetlands_instance_path PATH` (optional): Path to the Wetlands instance folder (default: `pixi/wetlands`)
+- `-jmc, --just_my_code` (optional, VS Code only): Only debug your source files, not library code
 
 **Example - VS Code:**
 
@@ -113,7 +113,7 @@ wetlands kill -n ENV_NAME [-wip PATH]
 **Arguments:**
 
 - `-n, --name ENV_NAME` (required): Name of the environment to kill
-- `-wip, --wetlandsInstancePath PATH` (optional): Path to the Wetlands instance folder (default: `pixi/wetlands`)
+- `-wip, --wetlands_instance_path PATH` (optional): Path to the Wetlands instance folder (default: `pixi/wetlands`)
 
 **Example:**
 
@@ -169,7 +169,7 @@ The `launch.json` file created by Wetlands for VS Code contains:
       "name": "Python Debugger: Remote Attach Wetlands",
       "type": "debugpy",
       "request": "attach",
-      "justMyCode": false,
+      "just_my_code": false,
       "connect": {
         "host": "localhost",
         "port": 5678
@@ -187,7 +187,7 @@ The `launch.json` file created by Wetlands for VS Code contains:
 
 - **type**: Uses `debugpy` for Python debugging
 - **connect**: Specifies `localhost` and the assigned debug port
-- **justMyCode**: Set to `true` if you used the `-jmc` flag
+- **just_my_code**: Set to `true` if you used the `-jmc` flag
 - **pathMappings**: Maps local source paths to remote paths in the environment
 
 ## Debugging with PyCharm
@@ -265,7 +265,7 @@ env = env_manager.create(
 env.launch()
 
 # Import module and call function
-my_module = env.importModule("module_to_debug.py")
+my_module = env.import_module("module_to_debug.py")
 result = my_module.process_data([1, 2, 3, 4, 5])
 
 print(f"Result: {result}")
@@ -401,7 +401,7 @@ Debug only your code, skipping library internals:
 wetlands debug -s /path/to/project -n my_env -jmc
 ```
 
-This sets `justMyCode: true` in the VS Code launch configuration, which speeds up debugging by not stepping into library code.
+This sets `just_my_code: true` in the VS Code launch configuration, which speeds up debugging by not stepping into library code.
 
 ## How It Works Under the Hood
 

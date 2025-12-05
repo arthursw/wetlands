@@ -33,23 +33,23 @@ class Dependencies(TypedDict):
 class DependencyManager:
     """Manage pip and conda dependencies."""
 
-    def __init__(self, commandGenerator: CommandGenerator):
-        self.installedPackages: dict[str, dict[str, str]] = {}
-        self.settingsManager = commandGenerator.settingsManager
-        self.commandGenerator = commandGenerator
+    def __init__(self, command_generator: CommandGenerator):
+        self.installed_packages: dict[str, dict[str, str]] = {}
+        self.settings_manager = command_generator.settings_manager
+        self.command_generator = command_generator
 
-    def _platformCondaFormat(self) -> str:
+    def _platform_conda_format(self) -> str:
         """Get conda-compatible platform string (e.g., 'linux-64', 'osx-arm64', 'win-64')."""
         machine = platform.machine()
         machine = "64" if machine == "x86_64" or machine == "AMD64" else machine
         system = dict(Darwin="osx", Windows="win", Linux="linux")[platform.system()]
         return f"{system}-{machine}"
 
-    def formatDependencies(
+    def format_dependencies(
         self,
         package_manager: str,
         dependencies: Dependencies,
-        raiseIncompatibilityError: bool = True,
+        raise_incompatibility_error: bool = True,
         quotes: bool = True,
     ) -> tuple[list[str], list[str], bool]:
         """Formats dependencies for installation with platform checks.
@@ -57,7 +57,7 @@ class DependencyManager:
         Args:
                 package_manager: 'conda' or 'pip'.
                 dependencies: Dependencies to process.
-                raiseIncompatibilityError: Whether to raise on incompatible platforms.
+                raise_incompatibility_error: Whether to raise on incompatible platforms.
                 quotes: Whether to put dependencies in quotes (required when installing extras on mac, e.g. `pip install "napari[pyqt5]"`)
 
         Returns:
@@ -66,41 +66,41 @@ class DependencyManager:
         Raises:
                 IncompatibilityException: For non-optional incompatible dependencies.
         """
-        dependencyList: list[str | Dependency] = dependencies.get(package_manager, [])  # type: ignore
-        finalDependencies: list[str] = []
-        finalDependenciesNoDeps: list[str] = []
-        for dependency in dependencyList:
+        dependency_list: list[str | Dependency] = dependencies.get(package_manager, [])  # type: ignore
+        final_dependencies: list[str] = []
+        final_dependencies_no_deps: list[str] = []
+        for dependency in dependency_list:
             if isinstance(dependency, str):
-                finalDependencies.append(dependency)
+                final_dependencies.append(dependency)
             else:
-                currentPlatform = self._platformCondaFormat()
+                current_platform = self._platform_conda_format()
                 platforms = dependency.get("platforms", "all")
                 if (
-                    currentPlatform in platforms
+                    current_platform in platforms
                     or platforms == "all"
                     or len(platforms) == 0
-                    or not raiseIncompatibilityError
+                    or not raise_incompatibility_error
                 ):
                     if "dependencies" not in dependency or dependency["dependencies"]:
-                        finalDependencies.append(dependency["name"])
+                        final_dependencies.append(dependency["name"])
                     else:
-                        finalDependenciesNoDeps.append(dependency["name"])
+                        final_dependencies_no_deps.append(dependency["name"])
                 elif not dependency.get("optional", False):
-                    platformsString = ", ".join(platforms)
+                    platforms_string = ", ".join(platforms)
                     raise IncompatibilityException(
-                        f"Error: the library {dependency['name']} is not available on this platform ({currentPlatform}). It is only available on the following platforms: {platformsString}."
+                        f"Error: the library {dependency['name']} is not available on this platform ({current_platform}). It is only available on the following platforms: {platforms_string}."
                     )
         if quotes:
-            finalDependencies = [f'"{d}"' for d in finalDependencies]
-            finalDependenciesNoDeps = [f'"{d}"' for d in finalDependenciesNoDeps]
+            final_dependencies = [f'"{d}"' for d in final_dependencies]
+            final_dependencies_no_deps = [f'"{d}"' for d in final_dependencies_no_deps]
         return (
-            finalDependencies,
-            finalDependenciesNoDeps,
-            len(finalDependencies) + len(finalDependenciesNoDeps) > 0,
+            final_dependencies,
+            final_dependencies_no_deps,
+            len(final_dependencies) + len(final_dependencies_no_deps) > 0,
         )
 
-    def getInstallDependenciesCommands(self, environment: "Environment", dependencies: Dependencies) -> list[str]:
-        """Generates commands to install dependencies in the given environment. Note: this does not activate conda, use self.getActivateCondaCommands() first.
+    def get_install_dependencies_commands(self, environment: "Environment", dependencies: Dependencies) -> list[str]:
+        """Generates commands to install dependencies in the given environment. Note: this does not activate conda, use self.get_activate_conda_commands() first.
 
         Args:
                 environment: Target environment name. If none, no conda environment will be activated, only pip dependencies will be installed in the current python environemnt ; conda dependencies will be ignored.
@@ -112,10 +112,10 @@ class DependencyManager:
         Raises:
                 Exception: If pip dependencies contain Conda channel syntax.
         """
-        condaDependencies, condaDependenciesNoDeps, hasCondaDependencies = self.formatDependencies(
+        conda_dependencies, condaDependenciesNoDeps, hasCondaDependencies = self.format_dependencies(
             "conda", dependencies
         )
-        pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.formatDependencies("pip", dependencies)
+        pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.format_dependencies("pip", dependencies)
 
         if hasCondaDependencies and not environment:
             raise Exception(
@@ -125,63 +125,63 @@ class DependencyManager:
             raise Exception(
                 f'One pip dependency has a channel specifier "::". Is it a conda dependency?\n\n({dependencies.get("pip")})'
             )
-        installDepsCommands = self.settingsManager.getProxyEnvironmentVariablesCommands()
+        install_deps_commands = self.settings_manager.get_proxy_environment_variables_commands()
 
-        installDepsCommands += self.commandGenerator.getActivateCondaCommands()
+        install_deps_commands += self.command_generator.get_activate_conda_commands()
 
         if environment:
-            installDepsCommands += self.commandGenerator.getActivateEnvironmentCommands(
-                environment, activateConda=False
+            install_deps_commands += self.command_generator.get_activate_environment_commands(
+                environment, activate_conda=False
             )
-            installDepsCommands += self.commandGenerator.getAddChannelsCommands(
-                environment, dependencies.get("channels", []), condaDependencies, activateConda=False
+            install_deps_commands += self.command_generator.get_add_channels_commands(
+                environment, dependencies.get("channels", []), conda_dependencies, activate_conda=False
             )
 
-        proxyString = self.settingsManager.getProxyString()
-        proxyArgs = f"--proxy {proxyString}" if proxyString is not None else ""
-        if self.settingsManager.usePixi:
+        proxy_string = self.settings_manager.get_proxy_string()
+        proxy_args = f"--proxy {proxy_string}" if proxy_string is not None else ""
+        if self.settings_manager.use_pixi:
             if environment is None:
                 raise Exception(
                     "Use micromamba if you want to install a pip dependency without specifying a conda environment."
                 )
             if hasPipDependencies:
-                installDepsCommands += [
+                install_deps_commands += [
                     f'echo "Installing pip dependencies..."',
-                    f'{self.settingsManager.condaBin} add --manifest-path "{environment.path}" --pypi {" ".join(pipDependencies)}',
+                    f'{self.settings_manager.conda_bin} add --manifest-path "{environment.path}" --pypi {" ".join(pipDependencies)}',
                 ]
             if hasCondaDependencies:
-                installDepsCommands += [
+                install_deps_commands += [
                     f'echo "Installing conda dependencies..."',
-                    f'{self.settingsManager.condaBin} add --manifest-path "{environment.path}" {" ".join(condaDependencies)}',
+                    f'{self.settings_manager.conda_bin} add --manifest-path "{environment.path}" {" ".join(conda_dependencies)}',
                 ]
             if len(condaDependenciesNoDeps) > 0:
                 raise Exception(f"Use micromamba to be able to install conda packages without their dependencies.")
             if len(pipDependenciesNoDeps) > 0:
-                installDepsCommands += [
+                install_deps_commands += [
                     f'echo "Installing pip dependencies without their dependencies..."',
-                    f"pip install {proxyArgs} --no-deps {' '.join(pipDependenciesNoDeps)}",
+                    f"pip install {proxy_args} --no-deps {' '.join(pipDependenciesNoDeps)}",
                 ]
-            return installDepsCommands
+            return install_deps_commands
 
-        if len(condaDependencies) > 0:
-            installDepsCommands += [
+        if len(conda_dependencies) > 0:
+            install_deps_commands += [
                 f'echo "Installing conda dependencies..."',
-                f"{self.settingsManager.condaBinConfig} install {' '.join(condaDependencies)} -y",
+                f"{self.settings_manager.conda_bin_config} install {' '.join(conda_dependencies)} -y",
             ]
         if len(condaDependenciesNoDeps) > 0:
-            installDepsCommands += [
+            install_deps_commands += [
                 f'echo "Installing conda dependencies without their dependencies..."',
-                f"{self.settingsManager.condaBinConfig} install --no-deps {' '.join(condaDependenciesNoDeps)} -y",
+                f"{self.settings_manager.conda_bin_config} install --no-deps {' '.join(condaDependenciesNoDeps)} -y",
             ]
 
         if len(pipDependencies) > 0:
-            installDepsCommands += [
+            install_deps_commands += [
                 f'echo "Installing pip dependencies..."',
-                f"pip install {proxyArgs} {' '.join(pipDependencies)}",
+                f"pip install {proxy_args} {' '.join(pipDependencies)}",
             ]
         if len(pipDependenciesNoDeps) > 0:
-            installDepsCommands += [
+            install_deps_commands += [
                 f'echo "Installing pip dependencies without their dependencies..."',
-                f"pip install {proxyArgs} --no-deps {' '.join(pipDependenciesNoDeps)}",
+                f"pip install {proxy_args} --no-deps {' '.join(pipDependenciesNoDeps)}",
             ]
-        return installDepsCommands
+        return install_deps_commands

@@ -20,7 +20,7 @@ def test_platform_conda_format(mock_command_generator_micromamba):
     machine = "64" if machine in ["x86_64", "AMD64"] else machine
     expected = f"{expected_platform}-{machine}"
 
-    assert dependency_manager._platformCondaFormat() == expected
+    assert dependency_manager._platform_conda_format() == expected
 
 
 def test_format_dependencies(mock_command_generator_micromamba):
@@ -47,9 +47,9 @@ def test_format_dependencies(mock_command_generator_micromamba):
     # Test case where platform is incompatible and optional
     platform_mock = MagicMock()
     platform_mock.return_value = "linux-64"
-    dependency_manager._platformCondaFormat = platform_mock
+    dependency_manager._platform_conda_format = platform_mock
 
-    deps, deps_no_deps, has_deps = dependency_manager.formatDependencies("conda", dependencies)
+    deps, deps_no_deps, has_deps = dependency_manager.format_dependencies("conda", dependencies)
 
     assert '"numpy"' in deps
     assert '"tensorflow"' in deps  # tensorflow should be included as platform matches
@@ -60,7 +60,7 @@ def test_format_dependencies(mock_command_generator_micromamba):
     # Test case where platform is incompatible and non-optional
     dependencies["conda"][2]["optional"] = False  # type: ignore
     with pytest.raises(IncompatibilityException):
-        dependency_manager.formatDependencies("conda", dependencies)
+        dependency_manager.format_dependencies("conda", dependencies)
 
 
 def test_get_install_dependencies_commands_micromamba(mock_command_generator_micromamba):
@@ -73,19 +73,19 @@ def test_get_install_dependencies_commands_micromamba(mock_command_generator_mic
 
     platform_mock = MagicMock()
     platform_mock.return_value = "linux-64"
-    dependency_manager._platformCondaFormat = platform_mock
+    dependency_manager._platform_conda_format = platform_mock
 
     environment = MagicMock()
     environment.name = "envName"
     environment.path = Path("/tmp/envName")
 
-    commands = dependency_manager.getInstallDependenciesCommands(environment, dependencies)
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
 
     assert any(
-        re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install "numpy" -y', cmd) for cmd in commands
+        re.match(rf'{dependency_manager.settings_manager.conda_bin_config} install "numpy" -y', cmd) for cmd in commands
     )
     assert any(
-        re.match(rf'{dependency_manager.settingsManager.condaBinConfig} install --no-deps "stardist==0.9.1" -y', cmd)
+        re.match(rf'{dependency_manager.settings_manager.conda_bin_config} install --no-deps "stardist==0.9.1" -y', cmd)
         for cmd in commands
     )
     assert any(re.match(r'pip\s+install\s+"requests"', cmd) for cmd in commands)
@@ -102,13 +102,13 @@ def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
 
     platform_mock = MagicMock()
     platform_mock.return_value = "linux-64"
-    dependency_manager._platformCondaFormat = platform_mock
+    dependency_manager._platform_conda_format = platform_mock
 
     environment = MagicMock()
     environment.name = "envName"
     environment.path = Path("/tmp/envName")
 
-    commands = dependency_manager.getInstallDependenciesCommands(environment, dependencies)
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
 
     assert any("pixi add" in cmd and '"numpy"' in cmd for cmd in commands)
     assert any("pixi add" in cmd and '--pypi "requests"' in cmd for cmd in commands)

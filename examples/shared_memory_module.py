@@ -7,16 +7,16 @@ import example_module
 shm: shared_memory.SharedMemory | None = None
 
 
-def segment(imagePath: Path | str):
+def segment(image_path: Path | str):
     global shm
     # Segment the image with example_module.py
-    masks, flows, styles, diams = example_module.segment(imagePath)
+    masks, flows, styles, diams = example_module.segment(image_path)
     # Create the shared memory
     shm = shared_memory.SharedMemory(create=True, size=masks.nbytes)
     # Create a NumPy array backed by shared memory
-    masksShared = np.ndarray(masks.shape, dtype=masks.dtype, buffer=shm.buf)
+    masks_shared = np.ndarray(masks.shape, dtype=masks.dtype, buffer=shm.buf)
     # Copy the masks into the shared memory
-    masksShared[:] = masks[:]
+    masks_shared[:] = masks[:]
     # Return the shape, dtype and shared memory name to recreate the numpy array on the other side
     return masks.shape, masks.dtype, shm.name
 

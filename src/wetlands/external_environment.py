@@ -36,38 +36,38 @@ class ExternalEnvironment(Environment):
     process: subprocess.Popen | None = None
     connection: Connection | None = None
 
-    def __init__(self, name: str, path: Path, environmentManager: "EnvironmentManager") -> None:
-        super().__init__(name, path, environmentManager)
+    def __init__(self, name: str, path: Path, environment_manager: "EnvironmentManager") -> None:
+        super().__init__(name, path, environment_manager)
         self._lock = threading.RLock()
         self._process_logger: ProcessLogger | None = None
 
     @synchronized
-    def launch(self, additionalActivateCommands: Commands = {}, logOutputInThread: bool = True) -> None:
+    def launch(self, additional_activate_commands: Commands = {}, log_output_in_thread: bool = True) -> None:
         """Launches a server listening for orders in the environment.
 
         Args:
-                additionalActivateCommands: Platform-specific activation commands.
-                logOutputInThread: Deprecated parameter, kept for backwards compatibility. ProcessLogger always runs in background.
+                additional_activate_commands: Platform-specific activation commands.
+                log_output_in_thread: Deprecated parameter, kept for backwards compatibility. ProcessLogger always runs in background.
         """
 
         if self.launched():
             return
 
-        moduleExecutorPath = Path(__file__).parent.resolve() / "_internal" / MODULE_EXECUTOR_FILE
+        module_executor_path = Path(__file__).parent.resolve() / "_internal" / MODULE_EXECUTOR_FILE
 
-        debugArgs = f" --debugPort 0" if self.environmentManager.debug else ""
+        debug_args = f" --debug_port 0" if self.environment_manager.debug else ""
         commands = [
-            f'python -u "{moduleExecutorPath}" {self.name} --wetlandsInstancePath {self.environmentManager.wetlandsInstancePath.resolve()}{debugArgs}'
+            f'python -u "{module_executor_path}" {self.name} --wetlands_instance_path {self.environment_manager.wetlands_instance_path.resolve()}{debug_args}'
         ]
 
         # Create log context for the module executor process
         log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}
 
-        # Pass log_context to executeCommands so ProcessLogger is created with proper context
-        self.process = self.executeCommands(commands, additionalActivateCommands, log_context=log_context)
+        # Pass log_context to execute_commands so ProcessLogger is created with proper context
+        self.process = self.execute_commands(commands, additional_activate_commands, log_context=log_context)
 
-        # Retrieve the ProcessLogger that was already created and started by executeCommands
-        self._process_logger = self.environmentManager.getProcessLogger(self.process)
+        # Retrieve the ProcessLogger that was already created and started by execute_commands
+        self._process_logger = self.environment_manager.get_process_logger(self.process)
         if self._process_logger is None:
             raise Exception("Failed to retrieve ProcessLogger for module executor process")
 
@@ -80,15 +80,15 @@ class ExternalEnvironment(Environment):
             self.port = int(port_line.replace("Listening port ", ""))
 
         # Handle debug port if needed
-        if self.environmentManager.debug:
+        if self.environment_manager.debug:
 
             def debug_predicate(line: str) -> bool:
                 return line.startswith("Listening debug port ")
 
             debug_line = self._process_logger.wait_for_line(debug_predicate, timeout=5)
             if debug_line:
-                debugPort = int(debug_line.replace("Listening debug port ", ""))
-                self.environmentManager.registerEnvironment(self, debugPort, moduleExecutorPath)
+                debug_port = int(debug_line.replace("Listening debug port ", ""))
+                self.environment_manager.register_environment(self, debug_port, module_executor_path)
 
         if self.process.poll() is not None:
             raise Exception(f"Process exited with return code {self.process.returncode}.")
@@ -97,7 +97,7 @@ class ExternalEnvironment(Environment):
 
         self.connection = Client(("localhost", self.port))
 
-    def _sendAndWait(self, payload: dict) -> Any:
+    def _send_and_wait(self, payload: dict) -> Any:
         """Send a payload to the remote environment and wait for its response."""
         connection = self.connection
         if connection is None or connection.closed:
@@ -132,12 +132,12 @@ class ExternalEnvironment(Environment):
         return None
 
     @synchronized
-    def execute(self, modulePath: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
+    def execute(self, module_path: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
         """Executes a function in the given module and return the result.
         Warning: all arguments (args and kwargs) must be picklable (since they will be send with [multiprocessing.connection.Connection.send](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send))!
 
         Args:
-                modulePath: the path to the module to import
+                module_path: the path to the module to import
                 function: the name of the function to execute
                 args: the argument list for the function
                 kwargs: the keyword arguments for the function
@@ -148,7 +148,7 @@ class ExternalEnvironment(Environment):
             OSError when raised by the communication.
         """
         # Update log context to reflect the function being executed
-        module_name = Path(modulePath).stem
+        module_name = Path(module_path).stem
         call_target = f"{module_name}:{function}"
         if self._process_logger:
             self._process_logger.update_log_context({"call_target": call_target})
@@ -156,25 +156,25 @@ class ExternalEnvironment(Environment):
         try:
             payload = dict(
                 action="execute",
-                modulePath=str(modulePath),
+                module_path=str(module_path),
                 function=function,
                 args=args,
                 kwargs=kwargs,
             )
-            return self._sendAndWait(payload)
+            return self._send_and_wait(payload)
         finally:
             # Reset to module_executor after execution
             if self._process_logger:
                 self._process_logger.update_log_context({"call_target": MODULE_EXECUTOR_FILE})
 
     @synchronized
-    def runScript(self, scriptPath: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
+    def run_script(self, script_path: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
         """
         Runs a Python script remotely using runpy.run_path(), simulating
         'python script.py arg1 arg2 ...'
 
         Args:
-            scriptPath: Path to the script to execute.
+            script_path: Path to the script to execute.
             args: List of arguments to pass (becomes sys.argv[1:] remotely).
             run_name: Value for runpy.run_path(run_name=...); defaults to "__main__".
 
@@ -182,18 +182,18 @@ class ExternalEnvironment(Environment):
             The resulting globals dict from the executed script, or None on failure.
         """
         # Update log context to reflect the script being executed
-        script_name = Path(scriptPath).name
+        script_name = Path(script_path).name
         if self._process_logger:
             self._process_logger.update_log_context({"call_target": script_name})
 
         try:
             payload = dict(
                 action="run",
-                scriptPath=str(scriptPath),
+                script_path=str(script_path),
                 args=args,
                 run_name=run_name,
             )
-            return self._sendAndWait(payload)
+            return self._send_and_wait(payload)
         finally:
             # Reset to module_executor after execution
             if self._process_logger:
@@ -228,7 +228,7 @@ class ExternalEnvironment(Environment):
         # ProcessLogger runs in a daemon thread, so it will be cleaned up automatically
         self._process_logger = None
 
-        CommandExecutor.killProcess(self.process)
+        CommandExecutor.kill_process(self.process)
 
     @synchronized
     def delete(self) -> None:
@@ -239,13 +239,13 @@ class ExternalEnvironment(Environment):
 
         Side Effects:
                 - If the environment is running, calls _exit() on it
-                - Removes environment from environmentManager.environments dict
+                - Removes environment from environment_manager.environments dict
                 - Deletes the environment directory using appropriate conda manager
         """
         if self.path is None:
             raise Exception("Cannot delete an environment with no path.")
 
-        if not self.environmentManager.environmentExists(self.path):
+        if not self.environment_manager.environment_exists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
 
         # Exit the environment if it's running
@@ -253,21 +253,21 @@ class ExternalEnvironment(Environment):
             self._exit()
 
         # Generate delete commands based on conda manager type
-        if self.environmentManager.settingsManager.usePixi:
+        if self.environment_manager.settings_manager.use_pixi:
             send2trash(self.path.parent)
         else:
             send2trash(self.path)
 
         # Remove from environments dict
-        if self.name in self.environmentManager.environments:
-            del self.environmentManager.environments[self.name]
+        if self.name in self.environment_manager.environments:
+            del self.environment_manager.environments[self.name]
 
     @synchronized
     def update(
         self,
         dependencies: Union[Dependencies, None] = None,
-        additionalInstallCommands: Commands = {},
-        useExisting: bool = False,
+        additional_install_commands: Commands = {},
+        use_existing: bool = False,
     ) -> "Environment":
         """Updates this external environment by deleting it and recreating it with new dependencies.
 
@@ -275,8 +275,8 @@ class ExternalEnvironment(Environment):
                 dependencies: New dependencies to install. Can be one of:
                     - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
                     - None (no dependencies to install)
-                additionalInstallCommands: Platform-specific commands during installation.
-                useExisting: use existing environment if it exists instead of recreating it.
+                additional_install_commands: Platform-specific commands during installation.
+                use_existing: use existing environment if it exists instead of recreating it.
 
         Returns:
                 The recreated environment.
@@ -291,16 +291,16 @@ class ExternalEnvironment(Environment):
         if not self.path:
             raise Exception("Cannot update an environment with no path.")
 
-        if not self.environmentManager.environmentExists(self.path):
+        if not self.environment_manager.environment_exists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
 
         # Delete the existing environment
         self.delete()
 
         # Use create for direct Dependencies dict
-        return self.environmentManager.create(
+        return self.environment_manager.create(
             str(self.name),
             dependencies=dependencies,
-            additionalInstallCommands=additionalInstallCommands,
-            useExisting=useExisting,
+            additional_install_commands=additional_install_commands,
+            use_existing=use_existing,
         )

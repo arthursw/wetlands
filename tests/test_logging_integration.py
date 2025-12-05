@@ -227,7 +227,7 @@ class TestCommandExecutor:
             log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": "test_env", "stage": "install"}
 
             # Execute simple command
-            process = executor.executeCommands(["echo 'test'"], log_context=log_context, wait=True)
+            process = executor.execute_commands(["echo 'test'"], log_context=log_context, wait=True)
 
             # Wait for logging to complete
             time.sleep(0.1)
@@ -248,16 +248,16 @@ class TestCommandExecutor:
             logger.logger.removeHandler(handler)
 
     def test_command_executor_get_output(self):
-        """Test CommandExecutor.executeCommandsAndGetOutput() captures output correctly."""
+        """Test CommandExecutor.execute_commands_and_get_output() captures output correctly."""
         executor = CommandExecutor()
 
-        output = executor.executeCommandsAndGetOutput(["echo 'line1'", "echo 'line2'"])
+        output = executor.execute_commands_and_get_output(["echo 'line1'", "echo 'line2'"])
 
         assert "line1" in output
         assert "line2" in output
 
     def test_command_executor_get_json_output(self):
-        """Test CommandExecutor.executeCommandsAndGetJsonOutput() parses JSON."""
+        """Test CommandExecutor.execute_commands_and_get_json_output() parses JSON."""
         executor = CommandExecutor()
 
         import json
@@ -265,7 +265,7 @@ class TestCommandExecutor:
         test_data = {"key": "value", "number": 42}
         json_str = json.dumps(test_data)
 
-        output = executor.executeCommandsAndGetJsonOutput([f"echo '{json_str}'"])
+        output = executor.execute_commands_and_get_json_output([f"echo '{json_str}'"])
 
         # output is parsed JSON (could be dict or list depending on input)
         assert isinstance(output, dict)
@@ -323,11 +323,11 @@ class TestLogContextPropagation:
 
         try:
             # Execute commands in different contexts
-            process1 = executor.executeCommands(
+            process1 = executor.execute_commands(
                 ["python", "-c", "print('env1_output')"], log_context={"env_name": "env1"}, wait=True
             )
 
-            process2 = executor.executeCommands(
+            process2 = executor.execute_commands(
                 ["python", "-c", "print('env2_output')"], log_context={"env_name": "env2"}, wait=True
             )
 

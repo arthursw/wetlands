@@ -45,14 +45,14 @@ Here is a minimal example usage:
 from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager
-environmentManager = EnvironmentManager("pixi/")
+environment_manager = EnvironmentManager("pixi/")
 
 # Create and launch a Conda environment named "numpy_env"
-env = environmentManager.create("numpy_env", {"pip": ["numpy==2.2.4"]})
+env = environment_manager.create("numpy_env", {"pip": ["numpy==2.2.4"]})
 env.launch()
 
 # Import minimal_module in the environment (see minimal_module.py below)
-minimal_module = env.importModule("minimal_module.py")
+minimal_module = env.import_module("minimal_module.py")
 # minimal_module is a proxy to minimal_module.py in the environment
 array = [1, 2, 3]
 # Execute the sum() function in the numpy_env environment and get the result
@@ -76,8 +76,8 @@ def sum(x):
 
 Wetlands allows you to interact with isolated Conda environments in two main ways:
 
-1.  **Simplified Execution ([`env.importModule`][wetlands.environment.Environment.importModule] / [`env.execute`][wetlands.environment.Environment.execute]):** Wetlands manages the communication details, providing a proxy object to call functions within the environment seamlessly. See [Getting started](getting_started.md).
-2.  **Manual Control ([`env.executeCommands`][wetlands.environment.Environment.executeCommands]):** You run specific commands (like starting a Python script that listens for connections) and manage the inter-process communication yourself. See [Advanced example](advanced_example.md).
+1.  **Simplified Execution ([`env.import_module`][wetlands.environment.Environment.import_module] / [`env.execute`][wetlands.environment.Environment.execute]):** Wetlands manages the communication details, providing a proxy object to call functions within the environment seamlessly. See [Getting started](getting_started.md).
+2.  **Manual Control ([`env.execute_commands`][wetlands.environment.Environment.execute_commands]):** You run specific commands (like starting a Python script that listens for connections) and manage the inter-process communication yourself. See [Advanced example](advanced_example.md).
 
 You can run those examples form the [`examples/` folder](https://github.com/arthursw/wetlands/tree/main/examples) in the repository.
 

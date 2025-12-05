@@ -33,7 +33,7 @@ import numpy as np
 import getting_started
 
 # Create a Conda environment from getting_started.py
-imagePath, segmentationPath, env = getting_started.initialize()
+image_path, segmentation_path, env = getting_started.initialize()
 ```
 
 Then, it imports `shared_memory_module.py` to perform a `cellpose` segmentation, and creates a shared memory for the resulting masks.
@@ -41,19 +41,19 @@ Then, it imports `shared_memory_module.py` to perform a `cellpose` segmentation,
 ```python
 
 # Import shared_memory_module in the environment
-sharedMemoryModule = env.importModule("shared_memory_module.py")
+shared_memory_module = env.import_module("shared_memory_module.py")
 # run env.execute(module_name, function_name, args)
-diameters, masksShape, masksDtype, shmName = sharedMemoryModule.segment(imagePath)
+diameters, masks_shape, masks_dtype, shm_name = shared_memory_module.segment(image_path)
 ```
 
 This shared memory can now be used in the main process, for example to save the masks as a numpy binary file:
 
 ```python
 # Save the segmentation from the shared memory
-shm = shared_memory.SharedMemory(name=shmName)
-masks = np.ndarray(masksShape, dtype=masksDtype, buffer=shm.buf)
-segmentationPath = imagePath.parent / f"{imagePath.stem}_segmentation.bin"
-masks.tofile(segmentationPath)
+shm = shared_memory.SharedMemory(name=shm_name)
+masks = np.ndarray(masks_shape, dtype=masks_dtype, buffer=shm.buf)
+segmentation_path = image_path.parent / f"{image_path.stem}_segmentation.bin"
+masks.tofile(segmentation_path)
     
 print(f"Found diameters of {diameters} pixels.")
 

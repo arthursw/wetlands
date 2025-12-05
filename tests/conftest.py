@@ -143,12 +143,12 @@ def pytest_runtest_teardown(item):
 def mock_settings_manager_micromamba(tmp_path_factory):
     temp_dir = tmp_path_factory.mktemp("conda_env")  # Creates a unique temp directory
     mock = MagicMock(spec=SettingsManager)
-    mock.usePixi = False
-    mock.getCondaPaths.return_value = (temp_dir, Path("bin/micromamba"))
-    mock.getProxyEnvironmentVariablesCommands.return_value = []
-    mock.getProxyString.return_value = None
-    mock.condaBin = "micromamba"
-    mock.condaBinConfig = "micromamba --rc-file ~/.mambarc"
+    mock.use_pixi = False
+    mock.get_conda_paths.return_value = (temp_dir, Path("bin/micromamba"))
+    mock.get_proxy_environment_variables_commands.return_value = []
+    mock.get_proxy_string.return_value = None
+    mock.conda_bin = "micromamba"
+    mock.conda_bin_config = "micromamba --rc-file ~/.mambarc"
     return mock
 
 
@@ -156,12 +156,12 @@ def mock_settings_manager_micromamba(tmp_path_factory):
 def mock_settings_manager_pixi(tmp_path_factory):
     temp_dir = tmp_path_factory.mktemp("conda_env")  # Creates a unique temp directory
     mock = MagicMock(spec=SettingsManager)
-    mock.usePixi = True
-    mock.getCondaPaths.return_value = (temp_dir, Path("bin/pixi"))
-    mock.getProxyEnvironmentVariablesCommands.return_value = []
-    mock.getProxyString.return_value = None
-    mock.condaBin = "pixi"
-    mock.condaBinConfig = "pixi --manifest-path pixi.toml"
+    mock.use_pixi = True
+    mock.get_conda_paths.return_value = (temp_dir, Path("bin/pixi"))
+    mock.get_proxy_environment_variables_commands.return_value = []
+    mock.get_proxy_string.return_value = None
+    mock.conda_bin = "pixi"
+    mock.conda_bin_config = "pixi --manifest-path pixi.toml"
     return mock
 
 

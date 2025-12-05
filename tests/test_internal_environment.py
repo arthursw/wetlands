@@ -18,8 +18,8 @@ def test_execute_function_success():
     setattr(mock_module, function_name, mock_function)
 
     with (
-        patch.object(internal_env, "_importModule", return_value=mock_module),
-        patch.object(internal_env, "_isModFunction", return_value=True),
+        patch.object(internal_env, "_import_module", return_value=mock_module),
+        patch.object(internal_env, "_is_mod_function", return_value=True),
     ):
         result = internal_env.execute(module_path, function_name, args)
 
@@ -36,8 +36,8 @@ def test_execute_raises_exception_for_missing_function():
     mock_module = MagicMock()
 
     with (
-        patch.object(internal_env, "_importModule", return_value=mock_module),
-        patch.object(internal_env, "_isModFunction", return_value=False),
+        patch.object(internal_env, "_import_module", return_value=mock_module),
+        patch.object(internal_env, "_is_mod_function", return_value=False),
     ):
         with pytest.raises(Exception, match=f"Module {module_path} has no function {function_name}."):
             internal_env.execute(module_path, function_name, ())
@@ -49,7 +49,7 @@ def test_run_script_success():
     script_path = "/path/to/script.py"
 
     with patch("runpy.run_path") as mock_run_path:
-        result = internal_env.runScript(script_path)
+        result = internal_env.run_script(script_path)
 
     mock_run_path.assert_called_once_with(script_path, run_name="__main__")
     assert result is None
@@ -63,7 +63,7 @@ def test_run_script_with_arguments():
     args = ("arg1", "arg2", "arg3")
 
     with patch("runpy.run_path") as mock_run_path:
-        result = internal_env.runScript(script_path, args=args)
+        result = internal_env.run_script(script_path, args=args)
 
     mock_run_path.assert_called_once_with(script_path, run_name="__main__")
     assert result is None
@@ -77,7 +77,7 @@ def test_run_script_with_custom_run_name():
     run_name = "custom_name"
 
     with patch("runpy.run_path") as mock_run_path:
-        result = internal_env.runScript(script_path, run_name=run_name)
+        result = internal_env.run_script(script_path, run_name=run_name)
 
     mock_run_path.assert_called_once_with(script_path, run_name=run_name)
     assert result is None

@@ -191,7 +191,7 @@ class TestConfigParserPixiToml:
     def test_parse_pixi_toml_basic(self, sample_pixi_toml):
         """Test parsing basic pixi.toml file."""
         parser = ConfigParser()
-        deps = parser.parsePixiToml(sample_pixi_toml, "default")
+        deps = parser.parse_pixi_toml(sample_pixi_toml, "default")
 
         assert deps is not None
         assert "python" in deps
@@ -204,7 +204,7 @@ class TestConfigParserPixiToml:
     def test_parse_pixi_toml_with_features(self, sample_pixi_toml):
         """Test parsing pixi.toml with features."""
         parser = ConfigParser()
-        deps = parser.parsePixiToml(sample_pixi_toml, "default")
+        deps = parser.parse_pixi_toml(sample_pixi_toml, "default")
 
         # default environment includes dev feature
         assert "pytest" in deps["conda"]
@@ -215,7 +215,7 @@ class TestConfigParserPixiToml:
         parser = ConfigParser()
 
         # Non-existent environment should fall back to default
-        deps = parser.parsePixiToml(sample_pixi_toml, "nonexistent")
+        deps = parser.parse_pixi_toml(sample_pixi_toml, "nonexistent")
         assert isinstance(deps, dict)
         assert "python" in deps or "conda" in deps or "pip" in deps
 
@@ -225,7 +225,7 @@ class TestConfigParserPixiToml:
         missing_file = temp_config_dir / "nonexistent.toml"
 
         with pytest.raises(FileNotFoundError):
-            parser.parsePixiToml(missing_file, "default")
+            parser.parse_pixi_toml(missing_file, "default")
 
     def test_parse_pixi_toml_invalid_toml(self, temp_config_dir):
         """Test parsing invalid TOML file."""
@@ -234,7 +234,7 @@ class TestConfigParserPixiToml:
 
         parser = ConfigParser()
         with pytest.raises(Exception):  # TOML parsing error
-            parser.parsePixiToml(bad_toml, "default")
+            parser.parse_pixi_toml(bad_toml, "default")
 
 
 class TestConfigParserPyprojectToml:
@@ -243,7 +243,7 @@ class TestConfigParserPyprojectToml:
     def test_parse_pyproject_with_pixi_dependencies(self, sample_pyproject_toml_with_pixi):
         """Test parsing pyproject.toml with pixi dependencies."""
         parser = ConfigParser()
-        deps = parser.parsePyprojectToml(sample_pyproject_toml_with_pixi, environmentName="default")
+        deps = parser.parse_pyproject_toml(sample_pyproject_toml_with_pixi, environment_name="default")
 
         assert deps is not None
         assert "python" in deps
@@ -255,7 +255,7 @@ class TestConfigParserPyprojectToml:
     def test_parse_pyproject_with_pixi_features(self, sample_pyproject_toml_with_pixi):
         """Test parsing pyproject.toml with pixi features."""
         parser = ConfigParser()
-        deps = parser.parsePyprojectToml(sample_pyproject_toml_with_pixi, environmentName="default")
+        deps = parser.parse_pyproject_toml(sample_pyproject_toml_with_pixi, environment_name="default")
 
         # default environment includes dev feature
         assert "pytest" in deps["conda"]
@@ -264,7 +264,7 @@ class TestConfigParserPyprojectToml:
     def test_parse_pyproject_with_optional_dependencies(self, sample_pyproject_toml_with_pixi):
         """Test parsing pyproject.toml with optional dependencies group."""
         parser = ConfigParser()
-        deps = parser.parsePyprojectToml(sample_pyproject_toml_with_pixi, optionalDependencies=["dev", "docs"])
+        deps = parser.parse_pyproject_toml(sample_pyproject_toml_with_pixi, optional_dependencies=["dev", "docs"])
 
         assert deps is not None
         # Should include dev dependencies
@@ -275,7 +275,7 @@ class TestConfigParserPyprojectToml:
     def test_parse_pyproject_no_pixi_standard_deps(self, sample_pyproject_toml_no_pixi):
         """Test parsing pyproject.toml without pixi config (standard deps)."""
         parser = ConfigParser()
-        deps = parser.parsePyprojectToml(sample_pyproject_toml_no_pixi, optionalDependencies=["dev"])
+        deps = parser.parse_pyproject_toml(sample_pyproject_toml_no_pixi, optional_dependencies=["dev"])
 
         assert deps is not None
         # Standard pyproject.toml uses pip for main dependencies
@@ -287,7 +287,7 @@ class TestConfigParserPyprojectToml:
         parser = ConfigParser()
 
         # Non-existent environment should fall back to default
-        deps = parser.parsePyprojectToml(sample_pyproject_toml_with_pixi, environmentName="nonexistent")
+        deps = parser.parse_pyproject_toml(sample_pyproject_toml_with_pixi, environment_name="nonexistent")
         assert isinstance(deps, dict)
         assert "python" in deps or "conda" in deps or "pip" in deps
 
@@ -296,7 +296,7 @@ class TestConfigParserPyprojectToml:
         parser = ConfigParser()
 
         with pytest.raises(ValueError, match="Optional dependency group.*not found"):
-            parser.parsePyprojectToml(sample_pyproject_toml_no_pixi, optionalDependencies=["nonexistent"])
+            parser.parse_pyproject_toml(sample_pyproject_toml_no_pixi, optional_dependencies=["nonexistent"])
 
     def test_parse_pyproject_missing_file(self, temp_config_dir):
         """Test parsing non-existent pyproject.toml file."""
@@ -304,7 +304,7 @@ class TestConfigParserPyprojectToml:
         missing_file = temp_config_dir / "nonexistent.toml"
 
         with pytest.raises(FileNotFoundError):
-            parser.parsePyprojectToml(missing_file)
+            parser.parse_pyproject_toml(missing_file)
 
 
 class TestConfigParserEnvironmentYml:
@@ -313,7 +313,7 @@ class TestConfigParserEnvironmentYml:
     def test_parse_environment_yml_basic(self, sample_environment_yml):
         """Test parsing basic environment.yml file."""
         parser = ConfigParser()
-        deps = parser.parseEnvironmentYml(sample_environment_yml)
+        deps = parser.parse_environment_yml(sample_environment_yml)
 
         assert deps is not None
         assert "conda" in deps
@@ -335,7 +335,7 @@ dependencies:
   - scipy
 """)
         parser = ConfigParser()
-        deps = parser.parseEnvironmentYml(env_yml)
+        deps = parser.parse_environment_yml(env_yml)
 
         assert "conda" in deps
         assert "python=3.10" in deps["conda"]
@@ -354,7 +354,7 @@ dependencies:
     - numpy
 """)
         parser = ConfigParser()
-        deps = parser.parseEnvironmentYml(env_yml)
+        deps = parser.parse_environment_yml(env_yml)
 
         assert "pip" in deps
         assert "requests" in deps["pip"]
@@ -366,7 +366,7 @@ dependencies:
         missing_file = temp_config_dir / "nonexistent.yml"
 
         with pytest.raises(FileNotFoundError):
-            parser.parseEnvironmentYml(missing_file)
+            parser.parse_environment_yml(missing_file)
 
     def test_parse_environment_yml_invalid_yaml(self, temp_config_dir):
         """Test parsing invalid YAML file."""
@@ -375,7 +375,7 @@ dependencies:
 
         parser = ConfigParser()
         with pytest.raises(Exception):  # YAML parsing error
-            parser.parseEnvironmentYml(bad_yml)
+            parser.parse_environment_yml(bad_yml)
 
 
 class TestConfigParserRequirementsTxt:
@@ -384,7 +384,7 @@ class TestConfigParserRequirementsTxt:
     def test_parse_requirements_txt_basic(self, sample_requirements_txt):
         """Test parsing basic requirements.txt file."""
         parser = ConfigParser()
-        deps = parser.parseRequirementsTxt(sample_requirements_txt)
+        deps = parser.parse_requirements_txt(sample_requirements_txt)
 
         assert deps is not None
         assert "pip" in deps
@@ -398,7 +398,7 @@ class TestConfigParserRequirementsTxt:
     def test_parse_requirements_txt_with_markers(self, sample_requirements_txt_with_markers):
         """Test parsing requirements.txt with environment markers."""
         parser = ConfigParser()
-        deps = parser.parseRequirementsTxt(sample_requirements_txt_with_markers)
+        deps = parser.parse_requirements_txt(sample_requirements_txt_with_markers)
 
         assert deps is not None
         assert "pip" in deps
@@ -417,7 +417,7 @@ class TestConfigParserRequirementsTxt:
         missing_file = temp_config_dir / "nonexistent.txt"
 
         with pytest.raises(FileNotFoundError):
-            parser.parseRequirementsTxt(missing_file)
+            parser.parse_requirements_txt(missing_file)
 
     def test_parse_requirements_txt_empty(self, temp_config_dir):
         """Test parsing empty requirements.txt file."""
@@ -425,7 +425,7 @@ class TestConfigParserRequirementsTxt:
         empty_req.write_text("")
 
         parser = ConfigParser()
-        deps = parser.parseRequirementsTxt(empty_req)
+        deps = parser.parse_requirements_txt(empty_req)
 
         assert deps == {} or "pip" not in deps or len(deps.get("pip", [])) == 0
 
@@ -438,7 +438,7 @@ class TestConfigParserRequirementsTxt:
 """)
 
         parser = ConfigParser()
-        deps = parser.parseRequirementsTxt(req_file)
+        deps = parser.parse_requirements_txt(req_file)
 
         assert deps == {} or "pip" not in deps or len(deps.get("pip", [])) == 0
 
@@ -449,31 +449,31 @@ class TestConfigParserDetection:
     def test_detect_pixi_toml(self, sample_pixi_toml):
         """Test detection of pixi.toml file."""
         parser = ConfigParser()
-        file_type = parser.detectConfigFileType(sample_pixi_toml)
+        file_type = parser.detect_config_file_type(sample_pixi_toml)
         assert file_type == "pixi"
 
     def test_detect_pyproject_toml(self, sample_pyproject_toml_no_pixi):
         """Test detection of pyproject.toml file."""
         parser = ConfigParser()
-        file_type = parser.detectConfigFileType(sample_pyproject_toml_no_pixi)
+        file_type = parser.detect_config_file_type(sample_pyproject_toml_no_pixi)
         assert file_type == "pyproject"
 
     def test_detect_environment_yml(self, sample_environment_yml):
         """Test detection of environment.yml file."""
         parser = ConfigParser()
-        file_type = parser.detectConfigFileType(sample_environment_yml)
+        file_type = parser.detect_config_file_type(sample_environment_yml)
         assert file_type == "environment"
 
     def test_detect_pyproject_with_pixi(self, sample_pyproject_toml_with_pixi):
         """Test detection of pyproject.toml with pixi config."""
         parser = ConfigParser()
-        file_type = parser.detectConfigFileType(sample_pyproject_toml_with_pixi)
+        file_type = parser.detect_config_file_type(sample_pyproject_toml_with_pixi)
         assert file_type == "pyproject"
 
     def test_detect_requirements_txt(self, sample_requirements_txt):
         """Test detection of requirements.txt file."""
         parser = ConfigParser()
-        file_type = parser.detectConfigFileType(sample_requirements_txt)
+        file_type = parser.detect_config_file_type(sample_requirements_txt)
         assert file_type == "requirements"
 
     def test_detect_invalid_file_type(self, temp_config_dir):
@@ -483,7 +483,7 @@ class TestConfigParserDetection:
 
         parser = ConfigParser()
         with pytest.raises(ValueError, match="Unsupported config file type"):
-            parser.detectConfigFileType(invalid_file)
+            parser.detect_config_file_type(invalid_file)
 
 
 class TestConfigParserUnifiedInterface:
@@ -492,7 +492,7 @@ class TestConfigParserUnifiedInterface:
     def test_parse_config_pixi(self, sample_pixi_toml):
         """Test unified parse() method with pixi.toml."""
         parser = ConfigParser()
-        deps = parser.parse(sample_pixi_toml, environmentName="default")
+        deps = parser.parse(sample_pixi_toml, environment_name="default")
 
         assert deps is not None
         assert "conda" in deps
@@ -500,7 +500,7 @@ class TestConfigParserUnifiedInterface:
     def test_parse_config_pyproject_with_env(self, sample_pyproject_toml_with_pixi):
         """Test unified parse() method with pyproject.toml (environment)."""
         parser = ConfigParser()
-        deps = parser.parse(sample_pyproject_toml_with_pixi, environmentName="default")
+        deps = parser.parse(sample_pyproject_toml_with_pixi, environment_name="default")
 
         assert deps is not None
         assert "python" in deps
@@ -508,7 +508,7 @@ class TestConfigParserUnifiedInterface:
     def test_parse_config_pyproject_with_optional(self, sample_pyproject_toml_no_pixi):
         """Test unified parse() method with pyproject.toml (optional deps)."""
         parser = ConfigParser()
-        deps = parser.parse(sample_pyproject_toml_no_pixi, optionalDependencies=["dev"])
+        deps = parser.parse(sample_pyproject_toml_no_pixi, optional_dependencies=["dev"])
 
         assert deps is not None
         assert "pip" in deps

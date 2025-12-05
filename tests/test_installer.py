@@ -38,8 +38,8 @@ def test_install_micromamba(tmp_path: Path):
 
     # Assert that the command's output is what we expect.
     stdout = result.stdout.strip().lower()
-    versionNumber = version.split("-")[0]
-    assert versionNumber in stdout, f"The output of '--version' should contain {versionNumber}"
+    version_number = version.split("-")[0]
+    assert version_number in stdout, f"The output of '--version' should contain {version_number}"
 
     print(f"--- Test successful. Micromamba version output: {result.stdout.strip()} ---")
 
@@ -76,7 +76,7 @@ def test_install_pixi(tmp_path: Path):
 
     # Assert that the command's output is what we expect.
     stdout = result.stdout.strip().lower()
-    versionNumber = version[1:]
-    assert versionNumber in stdout, f"The output of '--version' should contain {versionNumber}"
+    version_number = version[1:]
+    assert version_number in stdout, f"The output of '--version' should contain {version_number}"
 
     print(f"--- Test successful. Micromamba version output: {result.stdout.strip()} ---")

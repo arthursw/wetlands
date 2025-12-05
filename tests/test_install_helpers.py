@@ -58,7 +58,7 @@ class TestDownloadFile:
 
 class TestDownloadAndVerify:
     @patch("wetlands._internal.install.downloadFile")
-    @patch("wetlands._internal.install.verifyChecksum")
+    @patch("wetlands._internal.install.verify_checksum")
     def test_download_and_verify_success(self, mock_verify, mock_download, tmp_path):
         """Test successful download and verification"""
         dest_path = tmp_path / "file.bin"
@@ -70,7 +70,7 @@ class TestDownloadAndVerify:
         mock_verify.assert_called_once()
 
     @patch("wetlands._internal.install.downloadFile")
-    @patch("wetlands._internal.install.verifyChecksum")
+    @patch("wetlands._internal.install.verify_checksum")
     def test_download_and_verify_download_failure(self, mock_verify, mock_download, tmp_path):
         """Test handling download failure"""
         dest_path = tmp_path / "file.bin"
@@ -86,7 +86,7 @@ class TestDownloadAndVerify:
         assert not dest_path.exists()
 
     @patch("wetlands._internal.install.downloadFile")
-    @patch("wetlands._internal.install.verifyChecksum")
+    @patch("wetlands._internal.install.verify_checksum")
     def test_download_and_verify_checksum_failure(self, mock_verify, mock_download, tmp_path):
         """Test handling checksum verification failure"""
         dest_path = tmp_path / "file.bin"

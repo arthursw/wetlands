@@ -11,8 +11,8 @@ def process_match(process_args_list: list[str], name: str | None = None):
     # Ignore non python processes
     if process_args_list[0] != "python":
         return False
-    # --wetlandsInstancePath must be given
-    if "--wetlandsInstancePath" not in process_args_list:
+    # --wetlands_instance_path must be given
+    if "--wetlands_instance_path" not in process_args_list:
         return False
     # For all processes: find wetlands ones in debug mode, and matching with the name
     for i, item in enumerate(process_args_list):
@@ -38,7 +38,7 @@ def get_matching_processes(name: str | None = None):
 
 
 def get_wetlands_instance_paths(processes: list[dict]):
-    return [p["args"][p["args"].index("--wetlandsInstancePath") + 1] for p in processes]
+    return [p["args"][p["args"].index("--wetlands_instance_path") + 1] for p in processes]
 
 
 def setup_and_launch_vscode(args):
@@ -49,15 +49,15 @@ def setup_and_launch_vscode(args):
     processes = get_matching_processes(args.name)
     wetlands_instance_paths = get_wetlands_instance_paths(processes)
 
-    wetlands_instance_path = args.wetlandsInstancePath.resolve()
-    # If a single process matches the given environment: use it for wetlandsInstancePath
+    wetlands_instance_path = args.wetlands_instance_path.resolve()
+    # If a single process matches the given environment: use it for wetlands_instance_path
     if len(wetlands_instance_paths) == 1:
         wetlands_instance_path = Path(wetlands_instance_paths[0])
         print(
-            f'Found a single process matching with environment {args.name} with wetlandsInstancePath "{wetlands_instance_path}".'
+            f'Found a single process matching with environment {args.name} with wetlands_instance_path "{wetlands_instance_path}".'
         )
-        if args.wetlandsInstancePath.resolve() != wetlands_instance_path:
-            print("Ignoring {args.wetlandsInstancePath}, using {wetlands_instance_path} instead.")
+        if args.wetlands_instance_path.resolve() != wetlands_instance_path:
+            print("Ignoring {args.wetlands_instance_path}, using {wetlands_instance_path} instead.")
 
     # Read the debug port for the given environment
     debug_ports_path = wetlands_instance_path / "debug_ports.json"
@@ -69,15 +69,15 @@ def setup_and_launch_vscode(args):
         debug_ports = json5.load(f)
 
     port = None
-    moduleExecutorPath = None
+    module_executor_path = None
 
     for env, detail in debug_ports.items():
         if env == args.name:
-            port = detail["debugPort"]
-            moduleExecutorPath = Path(detail["moduleExecutorPath"])
+            port = detail["debug_port"]
+            module_executor_path = Path(detail["module_executor_path"])
             break
 
-    if port is None or moduleExecutorPath is None:
+    if port is None or module_executor_path is None:
         print(f"Error, debug port not found in {debug_ports_path} for environment {args.name}.")
         return
 
@@ -87,9 +87,9 @@ def setup_and_launch_vscode(args):
         "name": configuration_name,
         "type": "debugpy",
         "request": "attach",
-        "justMyCode": args.justMyCode,
+        "just_my_code": args.just_my_code,
         "connect": {"host": "localhost", "port": port},
-        "pathMappings": [{"localRoot": str(moduleExecutorPath.parent), "remoteRoot": str(moduleExecutorPath.parent)}],
+        "pathMappings": [{"localRoot": str(module_executor_path.parent), "remoteRoot": str(module_executor_path.parent)}],
     }
     launch_configs = {"version": "0.2.0", "configurations": [new_config]}
 
@@ -122,7 +122,7 @@ def setup_and_launch_vscode(args):
         json5.dump(launch_configs, f, indent=4)
 
     # Open VS Code in new window
-    subprocess.run(["code", "--new-window", str(args.sources), str(moduleExecutorPath)])
+    subprocess.run(["code", "--new-window", str(args.sources), str(module_executor_path)])
 
     # # Wait for VS Code to start
     # time.sleep(1)
@@ -146,15 +146,15 @@ def setup_and_launch_pycharm(args):
     processes = get_matching_processes(args.name)
     wetlands_instance_paths = get_wetlands_instance_paths(processes)
 
-    wetlands_instance_path = args.wetlandsInstancePath.resolve()
-    # If a single process matches the given environment: use it for wetlandsInstancePath
+    wetlands_instance_path = args.wetlands_instance_path.resolve()
+    # If a single process matches the given environment: use it for wetlands_instance_path
     if len(wetlands_instance_paths) == 1:
         wetlands_instance_path = Path(wetlands_instance_paths[0])
         print(
-            f'Found a single process matching with environment {args.name} with wetlandsInstancePath "{wetlands_instance_path}".'
+            f'Found a single process matching with environment {args.name} with wetlands_instance_path "{wetlands_instance_path}".'
         )
-        if args.wetlandsInstancePath.resolve() != wetlands_instance_path:
-            print("Ignoring {args.wetlandsInstancePath}, using {wetlands_instance_path} instead.")
+        if args.wetlands_instance_path.resolve() != wetlands_instance_path:
+            print("Ignoring {args.wetlands_instance_path}, using {wetlands_instance_path} instead.")
 
     # Read the debug port for the given environment
     debug_ports_path = wetlands_instance_path / "debug_ports.json"
@@ -166,15 +166,15 @@ def setup_and_launch_pycharm(args):
         debug_ports = json5.load(f)
 
     port = None
-    moduleExecutorPath = None
+    module_executor_path = None
 
     for env, detail in debug_ports.items():
         if env == args.name:
-            port = detail["debugPort"]
-            moduleExecutorPath = Path(detail["moduleExecutorPath"])
+            port = detail["debug_port"]
+            module_executor_path = Path(detail["module_executor_path"])
             break
 
-    if port is None or moduleExecutorPath is None:
+    if port is None or module_executor_path is None:
         print(f"Error, debug port not found in {debug_ports_path} for environment {args.name}.")
         return
 
@@ -225,7 +225,7 @@ def setup_and_launch_pycharm(args):
     # Add path mappings as method options (PyCharm stores these in a special way)
     path_mapping = ET.SubElement(config, "option", name="PATH_MAPPINGS")
     path_pair = ET.SubElement(path_mapping, "list")
-    ET.SubElement(path_pair, "item", index="0", itemvalue=f"{moduleExecutorPath.parent}:{moduleExecutorPath.parent}")
+    ET.SubElement(path_pair, "item", index="0", itemvalue=f"{module_executor_path.parent}:{module_executor_path.parent}")
 
     # Format XML nicely
     xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
@@ -260,7 +260,7 @@ def list_environments(args):
         for ps in process_strings:
             print(ps)
 
-    debug_ports_path = args.wetlandsInstancePath.resolve() / "debug_ports.json"
+    debug_ports_path = args.wetlands_instance_path.resolve() / "debug_ports.json"
     if not debug_ports_path.exists():
         print(f"The file {debug_ports_path} does not exist.")
         return
@@ -268,16 +268,16 @@ def list_environments(args):
     with open(debug_ports_path, "r") as f:
         debug_ports = json5.load(f)
     if len(debug_ports) == 0:
-        print(f"No environments for instance {args.wetlandsInstancePath.resolve()} ({debug_ports_path} is empty).")
+        print(f"No environments for instance {args.wetlands_instance_path.resolve()} ({debug_ports_path} is empty).")
         return
-    print(f"\n\nEnvironments of the wetlands instance {args.wetlandsInstancePath.resolve()}:\n")
+    print(f"\n\nEnvironments of the wetlands instance {args.wetlands_instance_path.resolve()}:\n")
     print("Environment | Debug Port | Path")
     print("---")
     new_debug_ports = {}
     for environment, detail in debug_ports.items():
         # Only keep environments matching with the running processes
         if process_match(processes, environment):
-            print(environment, "|", detail["debugPort"], "|", detail["moduleExecutorPath"])
+            print(environment, "|", detail["debug_port"], "|", detail["module_executor_path"])
             new_debug_ports[environment] = detail
     # Update the debug_ports.json to only keep running environments
     with open(debug_ports_path, "w") as f:
@@ -294,12 +294,12 @@ def kill_environment(args):
         process = processes[0]["process"]
     elif len(processes) > 1:
         for i, wetlands_instance_path in enumerate(wetlands_instance_paths):
-            if wetlands_instance_path == str(args.wetlandsInstancePath.resolve()):
+            if wetlands_instance_path == str(args.wetlands_instance_path.resolve()):
                 process = processes[i]["process"]
                 break
     if process is None:
         print(
-            f"No wetlands process with environment name {args.name} for instance {args.wetlandsInstancePath.resolve()} found."
+            f"No wetlands process with environment name {args.name} for instance {args.wetlands_instance_path.resolve()} found."
         )
         return
 
@@ -320,7 +320,7 @@ def main():
     )
     main_parser.add_argument(
         "-wip",
-        "--wetlandsInstancePath",
+        "--wetlands_instance_path",
         help="The Wetlands instance folder path. Required only when multiple wetlands instances are running and two environments have the same name.",
         default=Path("wetlands/"),
         type=Path,
@@ -342,8 +342,8 @@ def main():
     )
     debug_parser.add_argument(
         "-jmc",
-        "--justMyCode",
-        help="Only debug the given sources files, not used libraries. Sets the justMyCode property to true in the VS Code launch.json configuration.",
+        "--just_my_code",
+        help="Only debug the given sources files, not used libraries. Sets the just_my_code property to true in the VS Code launch.json configuration.",
         action="store_true",
     )
 

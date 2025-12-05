@@ -50,25 +50,25 @@ If the user doesn't have pixi or micromamba installed, Wetlands will download an
 from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager with a wetlands instance path
-# The wetlandsInstancePath will contain logs, debug information, and by default the conda installation
+# The wetlands_instance_path will contain logs, debug information, and by default the conda installation
 # Wetlands will use the existing Pixi or Micromamba installation if available;
 # otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
-environmentManager = EnvironmentManager()
+environment_manager = EnvironmentManager()
 
 # Create and launch an isolated Conda environment named "numpy"
-env = environmentManager.create("numpy", {"pip":["numpy==2.2.4"]})
+env = environment_manager.create("numpy", {"pip":["numpy==2.2.4"]})
 env.launch()
 
 # Import example_module in the environment, see example_module.py below
-minimal_module = env.importModule("minimal_module.py")
+minimal_module = env.import_module("minimal_module.py")
 # example_module is a proxy to example_module.py in the environment
 array = [1,2,3]
 result = minimal_module.sum(array)
 
 print(f"Sum of {array} is {result}.")
 
-# You can also run Python scripts directly using runScript()
-# env.runScript("script.py", args=("arg1", "arg2"))
+# You can also run Python scripts directly using run_script()
+# env.run_script("script.py", args=("arg1", "arg2"))
 
 # Clean up and exit the environment
 env.exit()

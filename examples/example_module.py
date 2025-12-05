@@ -5,36 +5,36 @@ model = None
 
 
 def segment(
-    inputImage: Path | str,
+    input_image: Path | str,
     segmentation: Path | str | None = None,
-    modelType="cyto",
-    useGPU=False,
+    model_type="cyto",
+    use_gpu=False,
     channels=[0, 0],
-    autoDiameter=True,
+    auto_diameter=True,
     diameter=30,
 ) -> Any:
     global model
 
-    inputImage = Path(inputImage)
-    if not inputImage.exists():
-        raise Exception(f"Error: input image {inputImage} does not exist.")
+    input_image = Path(input_image)
+    if not input_image.exists():
+        raise Exception(f"Error: input image {input_image} does not exist.")
 
-    print(f"[[1/4]] Load libraries and model {modelType}")
+    print(f"[[1/4]] Load libraries and model {model_type}")
     print("Loading libraries...")
     import cellpose.models  # type: ignore
     import cellpose.io  # type: ignore
     import numpy as np  # type: ignore
 
-    if model is None or model.cp.model_type != modelType:
+    if model is None or model.cp.model_type != model_type:
         print("Loading model...")
-        model = cellpose.models.Cellpose(gpu=True if useGPU == "True" else False, model_type=modelType)
+        model = cellpose.models.Cellpose(gpu=True if use_gpu == "True" else False, model_type=model_type)
 
-    print(f"[[2/4]] Load image {inputImage}")
-    image = cast(np.ndarray, cellpose.io.imread(str(inputImage)))
+    print(f"[[2/4]] Load image {input_image}")
+    image = cast(np.ndarray, cellpose.io.imread(str(input_image)))
 
     print("[[3/4]] Compute segmentation", image.shape)
     try:
-        kwargs: Any = dict(diameter=int(diameter)) if autoDiameter else {}
+        kwargs: Any = dict(diameter=int(diameter)) if auto_diameter else {}
         masks, flows, styles, diams = model.eval(image, channels=channels, **kwargs)
     except Exception as e:
         print(e)
@@ -48,8 +48,8 @@ def segment(
     segmentation = Path(segmentation)
     print(f"[[4/4]] Save segmentation {segmentation}")
     # save results as png
-    cellpose.io.save_masks(image, masks, flows, str(inputImage), png=True)
-    output_mask = inputImage.parent / f"{inputImage.stem}_cp_masks.png"
+    cellpose.io.save_masks(image, masks, flows, str(input_image), png=True)
+    output_mask = input_image.parent / f"{input_image.stem}_cp_masks.png"
     if output_mask.exists():
         if segmentation.exists():
             segmentation.unlink()

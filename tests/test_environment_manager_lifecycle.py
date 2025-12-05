@@ -19,21 +19,21 @@ def environment_manager_fixture(tmp_path_factory, monkeypatch):
     wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance")
     main_env_path = dummy_micromamba_path / "envs" / "main_test_env"
 
-    monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+    monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
     manager = EnvironmentManager(
-        wetlandsInstancePath=wetlands_instance_path,
-        condaPath=dummy_micromamba_path,
+        wetlands_instance_path=wetlands_instance_path,
+        conda_path=dummy_micromamba_path,
         manager="micromamba",
-        mainCondaEnvironmentPath=main_env_path,
+        main_conda_environment_path=main_env_path,
     )
 
     mock_execute = MagicMock(spec=subprocess.Popen)
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
 
-    monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_execute)
-    monkeypatch.setattr(manager.commandExecutor, "executeCommandsAndGetOutput", mock_execute_output)
-    monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+    monkeypatch.setattr(manager.command_executor, "execute_commands", mock_execute)
+    monkeypatch.setattr(manager.command_executor, "execute_commands_and_get_output", mock_execute_output)
+    monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
 
     return manager
 
@@ -46,28 +46,28 @@ def environment_manager_pixi_fixture(tmp_path_factory, monkeypatch):
     dummy_pixi_path = tmp_path_factory.mktemp("pixi_root")
     wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance_pixi")
 
-    monkeypatch.setattr(EnvironmentManager, "installConda", MagicMock())
+    monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
-    manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=dummy_pixi_path, manager="pixi")
+    manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=dummy_pixi_path, manager="pixi")
 
     mock_execute = MagicMock(spec=subprocess.Popen)
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
 
-    monkeypatch.setattr(manager.commandExecutor, "executeCommands", mock_execute)
-    monkeypatch.setattr(manager.commandExecutor, "executeCommandsAndGetOutput", mock_execute_output)
-    monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+    monkeypatch.setattr(manager.command_executor, "execute_commands", mock_execute)
+    monkeypatch.setattr(manager.command_executor, "execute_commands_and_get_output", mock_execute_output)
+    monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
 
     return manager
 
 
-# ---- registerEnvironment Tests ----
+# ---- register_environment Tests ----
 
 
 class TestRegisterEnvironment:
     def test_register_environment_creates_debug_ports_file(self, environment_manager_fixture, tmp_path, monkeypatch):
-        """Test that registerEnvironment creates debug_ports.json"""
+        """Test that register_environment creates debug_ports.json"""
         manager = environment_manager_fixture
-        manager.wetlandsInstancePath = tmp_path / "wetlands"
+        manager.wetlands_instance_path = tmp_path / "wetlands"
 
         mock_process = MagicMock()
         mock_process.pid = 12345
@@ -77,7 +77,7 @@ class TestRegisterEnvironment:
         debug_port = 5678
         executor_path = Path("/path/to/module_executor.py")
 
-        manager.registerEnvironment(env, debug_port, executor_path)
+        manager.register_environment(env, debug_port, executor_path)
 
         debug_ports_file = tmp_path / "wetlands" / "debug_ports.json"
         assert debug_ports_file.exists()
@@ -86,20 +86,20 @@ class TestRegisterEnvironment:
             content = json.load(f)
 
         assert "test_env" in content
-        assert content["test_env"]["debugPort"] == 5678
-        assert content["test_env"]["moduleExecutorPath"] == "/path/to/module_executor.py"
+        assert content["test_env"]["debug_port"] == 5678
+        assert content["test_env"]["module_executor_path"] == "/path/to/module_executor.py"
 
     def test_register_environment_appends_to_existing_file(self, environment_manager_fixture, tmp_path):
-        """Test that registerEnvironment appends to existing debug_ports.json"""
+        """Test that register_environment appends to existing debug_ports.json"""
         manager = environment_manager_fixture
-        manager.wetlandsInstancePath = tmp_path / "wetlands"
+        manager.wetlands_instance_path = tmp_path / "wetlands"
 
         # Create existing file with one env
         debug_ports_dir = tmp_path / "wetlands"
         debug_ports_dir.mkdir(exist_ok=True, parents=True)
         debug_ports_file = debug_ports_dir / "debug_ports.json"
 
-        existing_data = {"env1": {"debugPort": 1111, "moduleExecutorPath": "/path/to/exec1"}}
+        existing_data = {"env1": {"debug_port": 1111, "module_executor_path": "/path/to/exec1"}}
         with open(debug_ports_file, "w") as f:
             json.dump(existing_data, f)
 
@@ -108,27 +108,27 @@ class TestRegisterEnvironment:
         env = ExternalEnvironment("env2", Path("/tmp/env2"), manager)
         env.process = mock_process
 
-        manager.registerEnvironment(env, 2222, Path("/path/to/exec2"))
+        manager.register_environment(env, 2222, Path("/path/to/exec2"))
 
         # Verify both envs are in file
         with open(debug_ports_file, "r") as f:
             content = json.load(f)
 
         assert len(content) == 2
-        assert content["env1"]["debugPort"] == 1111
-        assert content["env2"]["debugPort"] == 2222
+        assert content["env1"]["debug_port"] == 1111
+        assert content["env2"]["debug_port"] == 2222
 
     def test_register_environment_overwrites_existing_env(self, environment_manager_fixture, tmp_path):
-        """Test that registerEnvironment overwrites entry for existing environment"""
+        """Test that register_environment overwrites entry for existing environment"""
         manager = environment_manager_fixture
-        manager.wetlandsInstancePath = tmp_path / "wetlands"
+        manager.wetlands_instance_path = tmp_path / "wetlands"
 
         debug_ports_dir = tmp_path / "wetlands"
         debug_ports_dir.mkdir(exist_ok=True, parents=True)
         debug_ports_file = debug_ports_dir / "debug_ports.json"
 
         # Create file with old data
-        old_data = {"test_env": {"debugPort": 9999, "moduleExecutorPath": "/old/path"}}
+        old_data = {"test_env": {"debug_port": 9999, "module_executor_path": "/old/path"}}
         with open(debug_ports_file, "w") as f:
             json.dump(old_data, f)
 
@@ -137,47 +137,47 @@ class TestRegisterEnvironment:
         env = ExternalEnvironment("test_env", Path("/tmp/test_env"), manager)
         env.process = mock_process
 
-        manager.registerEnvironment(env, 5555, Path("/new/path"))
+        manager.register_environment(env, 5555, Path("/new/path"))
 
         with open(debug_ports_file, "r") as f:
             content = json.load(f)
 
-        assert content["test_env"]["debugPort"] == 5555
-        assert content["test_env"]["moduleExecutorPath"] == "/new/path"
+        assert content["test_env"]["debug_port"] == 5555
+        assert content["test_env"]["module_executor_path"] == "/new/path"
 
     def test_register_environment_with_no_process(self, environment_manager_fixture):
-        """Test that registerEnvironment returns early if process is None"""
+        """Test that register_environment returns early if process is None"""
         manager = environment_manager_fixture
 
         env = ExternalEnvironment("test_env", Path("/tmp/test_env"), manager)
         env.process = None  # No process
 
         # Should return without error
-        manager.registerEnvironment(env, 5678, Path("/path/to/executor"))
+        manager.register_environment(env, 5678, Path("/path/to/executor"))
 
 
-# ---- _removeEnvironment Tests ----
+# ---- _remove_environment Tests ----
 
 
 class TestRemoveEnvironment:
     def test_remove_environment_existing(self, environment_manager_fixture):
-        """Test that _removeEnvironment removes environment from dict"""
+        """Test that _remove_environment removes environment from dict"""
         manager = environment_manager_fixture
         env_name = "test_env"
         env = ExternalEnvironment(env_name, Path("/tmp/test_env"), manager)
         manager.environments[env_name] = env
 
         assert env_name in manager.environments
-        manager._removeEnvironment(env)
+        manager._remove_environment(env)
         assert env_name not in manager.environments
 
     def test_remove_environment_non_existing(self, environment_manager_fixture):
-        """Test that _removeEnvironment handles non-existing environment gracefully"""
+        """Test that _remove_environment handles non-existing environment gracefully"""
         manager = environment_manager_fixture
         env = ExternalEnvironment("non_existing", Path("/tmp/non_existing"), manager)
 
         # Should not raise error
-        manager._removeEnvironment(env)
+        manager._remove_environment(env)
 
 
 # ---- delete Tests ----
@@ -191,8 +191,8 @@ class TestDeleteEnvironment:
         manager = environment_manager_fixture
         env_name = "nonexistent-env"
 
-        # Mock environmentExists to return False
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+        # Mock environment_exists to return False
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
 
         # Create external environment and call delete on it
         env = ExternalEnvironment(env_name, Path(f"/tmp/{env_name}"), manager)
@@ -207,8 +207,8 @@ class TestDeleteEnvironment:
         env_name = "test-env"
         env_path = tmp_path / env_name
 
-        # Mock environmentExists to return True
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+        # Mock environment_exists to return True
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=True))
 
         # Mock send2trash
         mock_send2trash = MagicMock()
@@ -231,8 +231,8 @@ class TestDeleteEnvironment:
         env_name = "test-env"
         env_path = tmp_path / env_name
 
-        # Mock environmentExists to return True
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+        # Mock environment_exists to return True
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=True))
 
         # Mock send2trash
         mock_send2trash = MagicMock()
@@ -253,8 +253,8 @@ class TestDeleteEnvironment:
         env_name = "running-env"
         env_path = tmp_path / env_name
 
-        # Mock environmentExists
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+        # Mock environment_exists
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=True))
 
         # Mock send2trash
         mock_send2trash = MagicMock()
@@ -294,8 +294,8 @@ class TestUpdateEnvironment:
         env_name = "nonexistent-env"
         dependencies: Dependencies = {"pip": ["numpy"]}
 
-        # Mock environmentExists to return False
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=False))
+        # Mock environment_exists to return False
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
 
         # Create external environment and call update on it
         env = ExternalEnvironment(env_name, Path(f"/tmp/{env_name}"), manager)
@@ -310,8 +310,8 @@ class TestUpdateEnvironment:
         env_name = "test-env"
         new_dependencies: Dependencies = {"pip": ["numpy==1.0"]}
 
-        # Mock environmentExists to return True
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+        # Mock environment_exists to return True
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=True))
 
         # Create external environment
         env = ExternalEnvironment(env_name, Path(f"/tmp/{env_name}"), manager)
@@ -345,8 +345,8 @@ class TestUpdateEnvironment:
         dependencies: Dependencies = {"pip": ["requests>=2.25"]}
         additional_commands: Commands = CommandsDict({"all": ["echo 'installing'"], "mac": ["echo 'macOS only'"]})
 
-        # Mock environmentExists
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+        # Mock environment_exists
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=True))
 
         # Create external environment
         env = ExternalEnvironment(env_name, Path(f"/tmp/{env_name}"), manager)
@@ -361,7 +361,7 @@ class TestUpdateEnvironment:
         create_mock = MagicMock(return_value=new_env)
         monkeypatch.setattr(manager, "create", create_mock)
 
-        result = env.update(dependencies, additionalInstallCommands=additional_commands)
+        result = env.update(dependencies, additional_install_commands=additional_commands)
 
         # Should call delete
         delete_mock.assert_called_once()
@@ -370,18 +370,18 @@ class TestUpdateEnvironment:
         call_args, call_kwargs = create_mock.call_args
         assert call_args[0] == env_name
         assert call_kwargs.get("dependencies") == dependencies
-        assert call_kwargs.get("additionalInstallCommands") == additional_commands
+        assert call_kwargs.get("additional_install_commands") == additional_commands
         # Should return the created environment
         assert result == new_env
 
     def test_update_with_force_external(self, environment_manager_fixture, monkeypatch):
-        """Test that update works with useExisting flag to False."""
+        """Test that update works with use_existing flag to False."""
         manager = environment_manager_fixture
         env_name = "test-env"
         dependencies: Dependencies = {"pip": ["numpy>=1.20"]}
 
-        # Mock environmentExists
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+        # Mock environment_exists
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=True))
 
         # Create external environment
         env = ExternalEnvironment(env_name, Path(f"/tmp/{env_name}"), manager)
@@ -396,16 +396,16 @@ class TestUpdateEnvironment:
         create_mock = MagicMock(return_value=new_env)
         monkeypatch.setattr(manager, "create", create_mock)
 
-        result = env.update(dependencies, useExisting=False)
+        result = env.update(dependencies, use_existing=False)
 
         # Should call delete
         delete_mock.assert_called_once()
-        # Should call create with useExisting flag
+        # Should call create with use_existing flag
         create_mock.assert_called_once()
         call_args, call_kwargs = create_mock.call_args
         assert call_args[0] == env_name
         assert call_kwargs.get("dependencies") == dependencies
-        assert call_kwargs.get("useExisting") is False
+        assert call_kwargs.get("use_existing") is False
         # Should return the created environment
         assert result == new_env
 
@@ -416,8 +416,8 @@ class TestUpdateEnvironment:
         dependencies: Dependencies = {"pip": ["requests"]}
         additional_commands: Commands = {"mac": ["echo 'test'"]}
 
-        # Mock environmentExists
-        monkeypatch.setattr(manager, "environmentExists", MagicMock(return_value=True))
+        # Mock environment_exists
+        monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=True))
 
         # Create external environment
         env = ExternalEnvironment(env_name, Path(f"/tmp/{env_name}"), manager)
@@ -432,12 +432,12 @@ class TestUpdateEnvironment:
         create_mock = MagicMock(return_value=new_env)
         monkeypatch.setattr(manager, "create", create_mock)
 
-        env.update(dependencies, additionalInstallCommands=additional_commands)
+        env.update(dependencies, additional_install_commands=additional_commands)
 
         # Should pass additional commands to create
         create_mock.assert_called_once()
         call_args = create_mock.call_args
-        assert call_args[1].get("additionalInstallCommands") == additional_commands
+        assert call_args[1].get("additional_install_commands") == additional_commands
 
 
 # ---- Environment Access Tests ----
@@ -447,12 +447,12 @@ class TestExistingEnvironmentAccess:
     """Tests for accessing existing environments via Path objects."""
 
     def test_environment_exists_with_path_not_found(self, tmp_path):
-        """Test that environmentExists() returns False for nonexistent Path."""
+        """Test that environment_exists() returns False for nonexistent Path."""
         nonexistent = tmp_path / "nonexistent"
         manager = EnvironmentManager(
-            wetlandsInstancePath=tmp_path / "wetlands", condaPath=tmp_path, manager="micromamba"
+            wetlands_instance_path=tmp_path / "wetlands", conda_path=tmp_path, manager="micromamba"
         )
-        assert not manager.environmentExists(nonexistent)
+        assert not manager.environment_exists(nonexistent)
 
     def test_load_nonexistent_path_raises_error(self, tmp_path_factory):
         """Test that load() raises an error when given a nonexistent Path."""
@@ -460,8 +460,8 @@ class TestExistingEnvironmentAccess:
         wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance_test")
         nonexistent = tmp / "nonexistent"
 
-        manager = EnvironmentManager(wetlandsInstancePath=wetlands_instance_path, condaPath=tmp, manager="micromamba")
+        manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=tmp, manager="micromamba")
 
         # Should raise because the environment doesn't exist
         with pytest.raises(Exception, match="was not found"):
-            manager.load(name="test_env", environmentPath=nonexistent)
+            manager.load(name="test_env", environment_path=nonexistent)

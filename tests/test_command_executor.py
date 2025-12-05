@@ -9,7 +9,7 @@ def executor():
 
 def test_execute_commands_success(executor):
     # Use log=False to prevent ProcessLogger from consuming stdout
-    process = executor.executeCommands(["echo HelloWorld"], log=False)
+    process = executor.execute_commands(["echo HelloWorld"], log=False)
     with process:
         output = process.stdout.read().strip()
     assert output == "HelloWorld"
@@ -17,21 +17,21 @@ def test_execute_commands_success(executor):
 
 
 def test_execute_commands_failure(executor):
-    process = executor.executeCommands(["exit 1"])
+    process = executor.execute_commands(["exit 1"])
     process.wait()
     assert process.returncode == 1
 
 
 def test_get_output_success(executor):
-    output = executor.executeCommandsAndGetOutput(["echo Hello"])
+    output = executor.execute_commands_and_get_output(["echo Hello"])
     assert output == ["Hello"]
 
 
 def test_get_output_failure(executor):
     with pytest.raises(Exception, match="failed"):
-        executor.executeCommandsAndGetOutput(["exit 1"])
+        executor.execute_commands_and_get_output(["exit 1"])
 
 
 def test_conda_system_exit(executor):
     with pytest.raises(Exception, match="failed"):
-        executor.executeCommandsAndGetOutput(["echo CondaSystemExit"])
+        executor.execute_commands_and_get_output(["echo CondaSystemExit"])
