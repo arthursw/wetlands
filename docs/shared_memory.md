@@ -1,11 +1,17 @@
 # Sharing memory among processes
 
 The Python [`multiprocessing.shared_memory`](https://docs.python.org/3/library/multiprocessing.shared_memory.html) module enables to share memory among processes.
-
 The `shared_memory_example.py` script demonstrate this.
 
+Wetlands provides [NDArray][wetlands.ndarray.NDArray] to automatically convert numpy arrays to shared memory objects and send them between environments. 
+The `shared_memory_example_minimal.py` script demonstrate this.
+
 !!!note
-    Please see the shared memory helpers in the [`shared_memory` module][wetlands.shared_memory], even though there are not used in the examples.
+    You can find more shared memory helpers in the [`ndarray` module][wetlands.ndarray] module.
+
+## Standalone example
+
+Fist, let see the use of shared memory without the Wetlands NDArray helper.
 
 !!!note
 
@@ -64,3 +70,22 @@ env.exit()
 !!!note
 
     Changes to the shared memory made by one process will be refelcted in the other process. You can update the memory from both processes and perform more sofisticated operations.
+
+## NDArray example
+
+NDArray is a helper class that:
+- Stores a NumPy array backed by a SharedMemory block.
+- On pickling, becomes a small JSON-serializable dict `{"name": shm.name, "shape": ..., "dtype": ...}`.
+- On unpickling, automatically recreates the NDArray instance and re-attaches to the shared memory buffer.
+
+The equivalent example with the NDArray helper is pretty straight-forward:
+
+`shared_memory_example_minimal.py`:
+```python
+{% include "../examples/shared_memory_example_minimal.py" %}
+```
+
+And `shared_memory_module_minimal.py`:
+```python
+{% include "../examples/shared_memory_module_minimal.py" %}
+```

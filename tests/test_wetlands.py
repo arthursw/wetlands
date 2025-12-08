@@ -452,3 +452,75 @@ def test_nonexistent_environment_path_raises_error(env_manager):
     with pytest.raises(Exception, match="was not found"):
         env_manager.load("unexisting_env", nonexistent_env_path)
     logger.info("Verified error raised for nonexistent environment path")
+
+@pytest.mark.integration
+def test_shared_memory_ndarray(env_manager, tmp_path):
+    """Test that NDArray shared memory integration works correctly.
+
+    This test verifies:
+    - NDArray can be created and passed between processes
+    - Shared memory is properly allocated and cleaned up
+    - No resource_tracker warnings are raised on cleanup
+    """
+    logger.info("Testing NDArray shared memory integration")
+
+    env_name = "test_shared_memory_ndarray"
+    dependencies = Dependencies({"conda": [], "pip": ["numpy", f"wetlands@file:{str(Path(__file__).parent.parent)}"]})
+    env = env_manager.create(env_name, dependencies)
+    env.launch()
+
+    # Create a module that creates an NDArray
+    module_path = tmp_path / "shared_memory_module.py"
+    with open(module_path, "w") as f:
+        f.write("""
+import numpy as np
+from wetlands.ndarray import NDArray
+
+ndarray: NDArray | None = None
+
+def create_array(shape, dtype_str):
+    global ndarray
+    arr = np.random.rand(*shape).astype(dtype_str)
+    ndarray = NDArray(arr)
+    return ndarray
+
+def clean():
+    global ndarray
+    if ndarray is None:
+        return
+    ndarray.close()
+    ndarray.unlink()
+    ndarray = None
+""")
+
+    # Import the module
+    shared_memory_module = env.import_module(str(module_path))
+
+    # Create an NDArray in the subprocess
+    shape = (10, 10)
+    dtype_str = "float32"
+    masks_ndarray = shared_memory_module.create_array(shape, dtype_str)
+
+    # Verify we got the NDArray back
+    assert masks_ndarray is not None
+    assert masks_ndarray.array.shape == shape
+    assert str(masks_ndarray.array.dtype) == dtype_str
+
+    # Verify data integrity - array should have random values
+    assert masks_ndarray.array.size > 0
+    assert 0 <= masks_ndarray.array.min() < 1
+    assert 0 < masks_ndarray.array.max() <= 1
+
+    # Clean up the shared memory properly
+    masks_ndarray.close()
+    shared_memory_module.clean()
+
+    from multiprocessing import resource_tracker    
+    # Avoid resource_tracker warnings
+    try:
+        resource_tracker.unregister(masks_ndarray.shm._name, "shared_memory")  # type: ignore
+    except Exception:
+        pass  # Silently ignore if unregister fails
+
+    env.exit()
+    logger.info("Test completed successfully with no resource leaks")

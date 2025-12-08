@@ -14,6 +14,13 @@ from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.process_logger import ProcessLogger
 
+try:
+    from wetlands.ndarray import register_ndarray_pickle
+    register_ndarray_pickle()
+except ImportError:
+    # Do not support ndarray if numpy is not installed
+    pass
+
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
 
@@ -53,7 +60,7 @@ class ExternalEnvironment(Environment):
         if self.launched():
             return
 
-        module_executor_path = Path(__file__).parent.resolve() / "_internal" / MODULE_EXECUTOR_FILE
+        module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
 
         debug_args = f" --debug_port 0" if self.environment_manager.debug else ""
         commands = [

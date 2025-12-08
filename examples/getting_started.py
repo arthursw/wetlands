@@ -4,7 +4,7 @@ import urllib.request
 import logging
 
 
-def initialize():
+def initialize(pip_deps=[]):
     # Initialize the environment manager
     # Wetlands will store logs and state in the wetlands_instance_path (defaults to "wetlands/")
     # Pixi/Micromamba will be installed in wetlands_instance_path/pixi by default
@@ -12,7 +12,7 @@ def initialize():
     environment_manager = EnvironmentManager()
 
     # Create and launch an isolated Conda environment named "cellpose"
-    env = environment_manager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
+    env = environment_manager.create("cellpose", {"conda": ["cellpose==3.1.0"], "pip": pip_deps})
     env.launch()
 
     # Download example image from cellpose

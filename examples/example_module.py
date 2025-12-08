@@ -15,9 +15,10 @@ def segment(
 ) -> Any:
     global model
 
-    input_image = Path(input_image)
-    if not input_image.exists():
-        raise Exception(f"Error: input image {input_image} does not exist.")
+    if isinstance(input_image, (Path, str)):
+        input_image = Path(input_image)
+        if not input_image.exists():
+            raise Exception(f"Error: input image {input_image} does not exist.")
 
     print(f"[[1/4]] Load libraries and model {model_type}")
     print("Loading libraries...")
@@ -30,7 +31,7 @@ def segment(
         model = cellpose.models.Cellpose(gpu=True if use_gpu == "True" else False, model_type=model_type)
 
     print(f"[[2/4]] Load image {input_image}")
-    image = cast(np.ndarray, cellpose.io.imread(str(input_image)))
+    image = cast(np.ndarray, cellpose.io.imread(str(input_image) if isinstance(input_image, Path) else input_image))
 
     print("[[3/4]] Compute segmentation", image.shape)
     try:

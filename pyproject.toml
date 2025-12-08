@@ -1,6 +1,6 @@
 [project]
 name = "wetlands"
-version = "0.4.0"
+version = "0.4.2"
 description = "Wetlands is a lightweight library to create conda environment and execute code inside them."
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
@@ -41,7 +41,7 @@ docs = [
     "mkdocs-material>=9.6.11",
     "mkdocstrings[python]>=0.29.1",
 ]
-# Problem: we might want shared memory for other things than numpy, in which case we don't need numpy
+
 shared-memory = [
     "numpy>=1.26",
 ]

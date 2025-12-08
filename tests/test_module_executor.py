@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 import threading
 import pytest
 
-from wetlands._internal import module_executor
+from wetlands import module_executor
 
 
 class TestSendMessage:
@@ -27,7 +27,7 @@ class TestHandleExecutionError:
         mock_connection = MagicMock()
         exception = Exception("Test error")
 
-        with patch("wetlands._internal.module_executor.send_message") as mock_send:
+        with patch("wetlands.module_executor.send_message") as mock_send:
             module_executor.handle_execution_error(mock_lock, mock_connection, exception)
             mock_send.assert_called_once()
             call_args = mock_send.call_args
@@ -38,7 +38,7 @@ class TestHandleExecutionError:
 
 
 class TestExecuteFunction:
-    @patch("wetlands._internal.module_executor.import_module")
+    @patch("wetlands.module_executor.importlib.import_module")
     def test_execute_function_success(self, mock_import):
         """Test executing a function from imported module"""
         mock_module = MagicMock()
@@ -52,13 +52,12 @@ class TestExecuteFunction:
             "kwargs": {"key": "value"},
         }
 
-        with patch("sys.path"):
-            result = module_executor.execute_function(message)
+        result = module_executor.execute_function(message)
 
         assert result == 42
         mock_module.test_func.assert_called_once_with(1, 2, key="value")
 
-    @patch("wetlands._internal.module_executor.import_module")
+    @patch("wetlands.module_executor.importlib.import_module")
     def test_execute_function_missing_function(self, mock_import):
         """Test error when function doesn't exist in module"""
         mock_module = MagicMock(spec=[])  # No attributes
@@ -69,11 +68,10 @@ class TestExecuteFunction:
             "function": "nonexistent_func",
         }
 
-        with patch("sys.path"):
-            with pytest.raises(Exception, match="has no function"):
-                module_executor.execute_function(message)
+        with pytest.raises(Exception, match="has no function"):
+            module_executor.execute_function(message)
 
-    @patch("wetlands._internal.module_executor.import_module")
+    @patch("wetlands.module_executor.importlib.import_module")
     def test_execute_function_system_exit(self, mock_import):
         """Test error when function raises SystemExit"""
         mock_module = MagicMock()
@@ -85,13 +83,12 @@ class TestExecuteFunction:
             "function": "test_func",
         }
 
-        with patch("sys.path"):
-            with pytest.raises(Exception, match="SystemExit"):
-                module_executor.execute_function(message)
+        with pytest.raises(Exception, match="SystemExit"):
+            module_executor.execute_function(message)
 
 
 class TestRunScript:
-    @patch("wetlands._internal.module_executor.runpy.run_path")
+    @patch("wetlands.module_executor.runpy.run_path")
     def test_run_script_success(self, mock_run_path):
         """Test running a script with runpy"""
         message = {"script_path": "/path/to/script.py", "args": ["arg1", "arg2"], "run_name": "__main__"}
@@ -106,7 +103,7 @@ class TestRunScript:
         assert Path(actual_path).as_posix() == "/path/to/script.py"
         assert mock_run_path.call_args[1] == {"run_name": "__main__"}
 
-    @patch("wetlands._internal.module_executor.runpy.run_path")
+    @patch("wetlands.module_executor.runpy.run_path")
     def test_run_script_default_run_name(self, mock_run_path):
         """Test running script with default run_name"""
         message = {"script_path": "/path/to/script.py", "args": []}
@@ -122,8 +119,8 @@ class TestRunScript:
 
 
 class TestExecutionWorker:
-    @patch("wetlands._internal.module_executor.execute_function")
-    @patch("wetlands._internal.module_executor.send_message")
+    @patch("wetlands.module_executor.execute_function")
+    @patch("wetlands.module_executor.send_message")
     def test_execution_worker_execute_action(self, mock_send, mock_execute):
         """Test worker handles execute action"""
         mock_execute.return_value = "result"
@@ -136,8 +133,8 @@ class TestExecutionWorker:
         mock_execute.assert_called_once()
         mock_send.assert_called_once()
 
-    @patch("wetlands._internal.module_executor.run_script")
-    @patch("wetlands._internal.module_executor.send_message")
+    @patch("wetlands.module_executor.run_script")
+    @patch("wetlands.module_executor.send_message")
     def test_execution_worker_run_action(self, mock_send, mock_run):
         """Test worker handles run action"""
         mock_lock = MagicMock(spec=threading.Lock)
@@ -149,7 +146,7 @@ class TestExecutionWorker:
         mock_run.assert_called_once()
         mock_send.assert_called_once()
 
-    @patch("wetlands._internal.module_executor.handle_execution_error")
+    @patch("wetlands.module_executor.handle_execution_error")
     def test_execution_worker_unknown_action(self, mock_error):
         """Test worker handles unknown action"""
         mock_lock = MagicMock(spec=threading.Lock)
@@ -177,8 +174,8 @@ class TestLaunchListener:
     def test_launch_listener_exit_action(self):
         """Test listener exits on exit action"""
         with (
-            patch("wetlands._internal.module_executor.Listener") as MockListener,
-            patch("wetlands._internal.module_executor.get_message", side_effect=[{"action": "exit"}]),
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.get_message", side_effect=[{"action": "exit"}]),
         ):
             mock_listener = MockListener.return_value.__enter__.return_value
             mock_connection = mock_listener.accept.return_value.__enter__.return_value
@@ -190,12 +187,12 @@ class TestLaunchListener:
     def test_launch_listener_execute_action(self):
         """Test listener handles execute action"""
         with (
-            patch("wetlands._internal.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.Listener") as MockListener,
             patch(
-                "wetlands._internal.module_executor.get_message",
+                "wetlands.module_executor.get_message",
                 side_effect=[{"action": "execute", "module_path": "/path/to/module.py"}, {"action": "exit"}],
             ),
-            patch("wetlands._internal.module_executor.execution_worker"),
+            patch("wetlands.module_executor.execution_worker"),
         ):
             mock_listener = MockListener.return_value.__enter__.return_value
             mock_connection = mock_listener.accept.return_value.__enter__.return_value
