@@ -285,7 +285,9 @@ class EnvironmentManager:
             else True
         )
         pip_satisfied = (
-            all([self._check_requirement(d, "pip", installed_packages) for d in pipDependencies + pipDependenciesNoDeps])
+            all(
+                [self._check_requirement(d, "pip", installed_packages) for d in pipDependencies + pipDependenciesNoDeps]
+            )
             if hasPipDependencies
             else True
         )
@@ -581,23 +583,31 @@ class EnvironmentManager:
         Returns:
                 The launched process.
         """
-        activate_commands = self.command_generator.get_activate_environment_commands(environment, additional_activate_commands)
+        activate_commands = self.command_generator.get_activate_environment_commands(
+            environment, additional_activate_commands
+        )
         platform_commands = self.command_generator.get_commands_for_current_platform(commands)
         return self.command_executor.execute_commands(
-            activate_commands + platform_commands, popen_kwargs=popen_kwargs, wait=wait, log_context=log_context, log=log
+            activate_commands + platform_commands,
+            popen_kwargs=popen_kwargs,
+            wait=wait,
+            log_context=log_context,
+            log=log,
         )
-    
-    def get_process_logger(self, process: subprocess.Popen)-> ProcessLogger:
+
+    def get_process_logger(self, process: subprocess.Popen) -> ProcessLogger:
         """Get a ProcessLogger for the given process.
 
         Args:
-                process: The process to create a ProcessLogger for. 
+                process: The process to create a ProcessLogger for.
         Returns:
                 The created ProcessLogger.
         """
         return self.command_executor.get_process_logger(process)
 
-    def register_environment(self, environment: ExternalEnvironment, debug_port: int, module_executor_path: Path) -> None:
+    def register_environment(
+        self, environment: ExternalEnvironment, debug_port: int, module_executor_path: Path
+    ) -> None:
         """
         Register the environment (save its debug port to `wetlands_instance_path / debug_ports.json`) so that it can be debugged later.
 

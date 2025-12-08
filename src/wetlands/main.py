@@ -89,7 +89,9 @@ def setup_and_launch_vscode(args):
         "request": "attach",
         "just_my_code": args.just_my_code,
         "connect": {"host": "localhost", "port": port},
-        "pathMappings": [{"localRoot": str(module_executor_path.parent), "remoteRoot": str(module_executor_path.parent)}],
+        "pathMappings": [
+            {"localRoot": str(module_executor_path.parent), "remoteRoot": str(module_executor_path.parent)}
+        ],
     }
     launch_configs = {"version": "0.2.0", "configurations": [new_config]}
 
@@ -225,7 +227,9 @@ def setup_and_launch_pycharm(args):
     # Add path mappings as method options (PyCharm stores these in a special way)
     path_mapping = ET.SubElement(config, "option", name="PATH_MAPPINGS")
     path_pair = ET.SubElement(path_mapping, "list")
-    ET.SubElement(path_pair, "item", index="0", itemvalue=f"{module_executor_path.parent}:{module_executor_path.parent}")
+    ET.SubElement(
+        path_pair, "item", index="0", itemvalue=f"{module_executor_path.parent}:{module_executor_path.parent}"
+    )
 
     # Format XML nicely
     xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")

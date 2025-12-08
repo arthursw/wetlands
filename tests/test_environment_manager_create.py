@@ -51,7 +51,9 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 
     monkeypatch.setattr(manager.command_executor, "execute_commands", mock_command_executor["execute_commands"])
     monkeypatch.setattr(
-        manager.command_executor, "execute_commands_and_get_output", mock_command_executor["execute_commands_and_get_output"]
+        manager.command_executor,
+        "execute_commands_and_get_output",
+        mock_command_executor["execute_commands_and_get_output"],
     )
 
     monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
@@ -67,11 +69,15 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
 
     monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
-    manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=dummy_pixi_path, manager="pixi")
+    manager = EnvironmentManager(
+        wetlands_instance_path=wetlands_instance_path, conda_path=dummy_pixi_path, manager="pixi"
+    )
 
     monkeypatch.setattr(manager.command_executor, "execute_commands", mock_command_executor["execute_commands"])
     monkeypatch.setattr(
-        manager.command_executor, "execute_commands_and_get_output", mock_command_executor["execute_commands_and_get_output"]
+        manager.command_executor,
+        "execute_commands_and_get_output",
+        mock_command_executor["execute_commands_and_get_output"],
     )
 
     monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))

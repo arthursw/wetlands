@@ -53,7 +53,9 @@ def environment_manager_for_config_tests(tmp_path_factory, mock_command_executor
     # Apply the mocks to the specific instance's command_executor
     monkeypatch.setattr(manager.command_executor, "execute_commands", mock_command_executor["execute_commands"])
     monkeypatch.setattr(
-        manager.command_executor, "execute_commands_and_get_output", mock_command_executor["execute_commands_and_get_output"]
+        manager.command_executor,
+        "execute_commands_and_get_output",
+        mock_command_executor["execute_commands_and_get_output"],
     )
 
     # Mock environment_exists to simplify create tests

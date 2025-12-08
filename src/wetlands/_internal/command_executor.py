@@ -117,7 +117,7 @@ class CommandExecutor:
                 ProcessLogger instance if found, raise exception if not found.
         """
         return self._process_loggers[process.pid]
-    
+
     def _get_complete_process_logger(self, process: subprocess.Popen) -> ProcessLogger | None:
         """Get the process logger and wait for the reader thread to finish processing all output.
 

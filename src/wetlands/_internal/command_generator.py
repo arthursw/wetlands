@@ -131,7 +131,11 @@ class CommandGenerator:
         return commands + self.get_commands_for_current_platform(additional_activate_commands)
 
     def get_add_channels_commands(
-        self, environment: "Environment", channels: list[str], conda_dependencies: list[str], activate_conda: bool = True
+        self,
+        environment: "Environment",
+        channels: list[str],
+        conda_dependencies: list[str],
+        activate_conda: bool = True,
     ) -> list[str]:
         """Add Conda channels in manifest file when using Pixi (`pixi add channelName::packageName` is not enough, channelName must be in manifest file).
         The returned command will be something like `pixi project add --manifest-path "/path/to/pixi.toml" --prepend channel1 channel2`.

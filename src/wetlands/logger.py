@@ -82,7 +82,10 @@ class CustomHandler(logging.Handler):
             formatter = logging.Formatter("%(levelname)s: %(message)s")
         self.log(formatter.format(record))
 
-def attach_log_handler(log: Callable[[str], None], log_level=logging.INFO, filter:logging.Filter | None=None) -> CustomHandler:
+
+def attach_log_handler(
+    log: Callable[[str], None], log_level=logging.INFO, filter: logging.Filter | None = None
+) -> CustomHandler:
     _base.setLevel(log_level)
     ch = CustomHandler(log)
     if filter is not None:

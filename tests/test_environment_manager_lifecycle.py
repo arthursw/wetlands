@@ -48,7 +48,9 @@ def environment_manager_pixi_fixture(tmp_path_factory, monkeypatch):
 
     monkeypatch.setattr(EnvironmentManager, "install_conda", MagicMock())
 
-    manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=dummy_pixi_path, manager="pixi")
+    manager = EnvironmentManager(
+        wetlands_instance_path=wetlands_instance_path, conda_path=dummy_pixi_path, manager="pixi"
+    )
 
     mock_execute = MagicMock(spec=subprocess.Popen)
     mock_execute_output = MagicMock(return_value=["output line 1", "output line 2"])
@@ -460,7 +462,9 @@ class TestExistingEnvironmentAccess:
         wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance_test")
         nonexistent = tmp / "nonexistent"
 
-        manager = EnvironmentManager(wetlands_instance_path=wetlands_instance_path, conda_path=tmp, manager="micromamba")
+        manager = EnvironmentManager(
+            wetlands_instance_path=wetlands_instance_path, conda_path=tmp, manager="micromamba"
+        )
 
         # Should raise because the environment doesn't exist
         with pytest.raises(Exception, match="was not found"):

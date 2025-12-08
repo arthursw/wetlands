@@ -78,7 +78,9 @@ def environment_manager_fixture(tmp_path_factory, mock_command_executor, monkeyp
 
     monkeypatch.setattr(manager.command_executor, "execute_commands", mock_command_executor["execute_commands"])
     monkeypatch.setattr(
-        manager.command_executor, "execute_commands_and_get_output", mock_command_executor["execute_commands_and_get_output"]
+        manager.command_executor,
+        "execute_commands_and_get_output",
+        mock_command_executor["execute_commands_and_get_output"],
     )
 
     monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))

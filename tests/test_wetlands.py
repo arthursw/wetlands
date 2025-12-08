@@ -453,6 +453,7 @@ def test_nonexistent_environment_path_raises_error(env_manager):
         env_manager.load("unexisting_env", nonexistent_env_path)
     logger.info("Verified error raised for nonexistent environment path")
 
+
 @pytest.mark.integration
 def test_shared_memory_ndarray(env_manager, tmp_path):
     """Test that NDArray shared memory integration works correctly.
@@ -515,7 +516,8 @@ def clean():
     masks_ndarray.close()
     shared_memory_module.clean()
 
-    from multiprocessing import resource_tracker    
+    from multiprocessing import resource_tracker
+
     # Avoid resource_tracker warnings
     try:
         resource_tracker.unregister(masks_ndarray.shm._name, "shared_memory")  # type: ignore

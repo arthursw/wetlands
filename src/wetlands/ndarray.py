@@ -1,7 +1,9 @@
+import copyreg
 from contextlib import contextmanager, suppress
 from multiprocessing import resource_tracker, shared_memory
 
 import numpy as np
+
 
 class NDArray:
     """
@@ -29,11 +31,7 @@ class NDArray:
         Returns a tuple describing how to reconstruct the object:
          (callable, args)
         """
-        state = {
-            "name": self.shm.name,
-            "shape": self.array.shape,
-            "dtype": str(self.array.dtype)
-        }
+        state = {"name": self.shm.name, "shape": self.array.shape, "dtype": str(self.array.dtype)}
 
         return (self._reconstruct, (state,))
 
@@ -57,9 +55,9 @@ class NDArray:
     def __repr__(self):
         return f"NDArray(shape={self.array.shape}, dtype={self.array.dtype}, shm={self.shm.name})"
 
-import copyreg
 
 _registered = False
+
 
 def register_ndarray_pickle():
     """
@@ -87,9 +85,6 @@ def _pickle_ndarray(obj: NDArray):
     return NDArray._reconstruct, (state,)
 
 
-
-
-
 def create_shared_array(shape: tuple, dtype: str | type):
     # Create the shared memory
     shm = shared_memory.SharedMemory(create=True, size=int(np.prod(shape) * np.dtype(dtype).itemsize))
@@ -108,13 +103,16 @@ def share_array(
     # Return the shape, dtype and shared memory name to recreate the numpy array on the other side
     return shared, shm
 
+
 def wrap(shared: np.ndarray, shm: shared_memory.SharedMemory):
     return {"name": shm.name, "shape": shared.shape, "dtype": shared.dtype}
+
 
 def unwrap(shmw: dict):
     shm = shared_memory.SharedMemory(name=shmw["name"])
     shared_array = np.ndarray(shmw["shape"], dtype=shmw["dtype"], buffer=shm.buf)
     return shared_array, shm
+
 
 def release_shared_memory(
     shm: shared_memory.SharedMemory | None,
@@ -126,6 +124,7 @@ def release_shared_memory(
         shm.unlink()
     shm.close()
 
+
 @contextmanager
 def share_manage_array(original_array: np.ndarray, unlink_on_exit: bool = True):
     shm = None
@@ -134,6 +133,7 @@ def share_manage_array(original_array: np.ndarray, unlink_on_exit: bool = True):
         yield wrap(shared, shm)
     finally:
         release_shared_memory(shm, unlink_on_exit)
+
 
 @contextmanager
 def get_shared_array(wrapper: dict):
@@ -144,6 +144,7 @@ def get_shared_array(wrapper: dict):
     finally:
         if shm is not None:
             shm.close()
+
 
 def unregister(shm: shared_memory.SharedMemory):
     # Avoid resource_tracker warnings

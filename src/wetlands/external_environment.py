@@ -16,6 +16,7 @@ from wetlands._internal.process_logger import ProcessLogger
 
 try:
     from wetlands.ndarray import register_ndarray_pickle
+
     register_ndarray_pickle()
 except ImportError:
     # Do not support ndarray if numpy is not installed

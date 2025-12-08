@@ -21,14 +21,18 @@ import importlib
 import importlib.util
 from multiprocessing.connection import Listener, Connection
 
+
 def import_from_path(name: str, file_path: str | Path):
     file_path = Path(file_path)
     spec = importlib.util.spec_from_file_location(name, file_path)
-    if spec is None: return None
+    if spec is None:
+        return None
     module = importlib.util.module_from_spec(spec)
-    if spec.loader is None: return None
+    if spec.loader is None:
+        return None
     spec.loader.exec_module(module)
     return module
+
 
 try:
     ndarray_mod = import_from_path("wetlands_ndarray", Path(__file__).parent / "ndarray.py")
@@ -73,7 +77,7 @@ if __name__ == "__main__":
     if args.debug_port is not None:
         logger.setLevel(logging.DEBUG)
         try:
-            import debugpy   # type: ignore[unused-import]
+            import debugpy  # type: ignore[unused-import]
 
             logger.debug(f"Starting {args.environment} with python {sys.version}")
             _, debug_port = debugpy.listen(args.debug_port)
