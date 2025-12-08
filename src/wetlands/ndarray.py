@@ -48,9 +48,35 @@ class NDArray:
         """Close shared memory view (but keep block alive)."""
         self.shm.close()
 
-    def unlink(self):
+    def unlink(self, close=True):
         """Free the shared memory block."""
+        if close:
+            self.shm.close()
         self.shm.unlink()
+
+    def unregister(self):
+        # Avoid resource_tracker warnings
+        # Silently ignore if unregister fails
+        with suppress(Exception):
+            resource_tracker.unregister(shm._name, "shared_memory")  # type: ignore
+    
+    def dispose(self, unregister=True):
+        """Close, free, and unregister the shared memory block.
+            Best-effort teardown.
+            Intended for shutdown, not for regular resource management.
+        """
+        # close should run first
+        with suppress(Exception):
+            self.close()
+
+        # then unlink
+        with suppress(Exception):
+            self.unlink()
+
+        # only unregister if requested
+        if unregister:
+            with suppress(Exception):
+                self.unregister()
 
     def __repr__(self):
         return f"NDArray(shape={self.array.shape}, dtype={self.array.dtype}, shm={self.shm.name})"
@@ -84,7 +110,15 @@ def _pickle_ndarray(obj: NDArray):
     }
     return NDArray._reconstruct, (state,)
 
-
+def initialize_ndarray(array: np.ndarray, ndarray:NDArray):
+    if ndarray is not None:
+        if ndarray.array.dtype == array.dtype and ndarray.array.shape == array.shape:
+            ndarray.array[:] = array[:]
+            return
+        else:
+            ndarray.dispose()
+        return NDArray(array)
+    
 def create_shared_array(shape: tuple, dtype: str | type):
     # Create the shared memory
     shm = shared_memory.SharedMemory(create=True, size=int(np.prod(shape) * np.dtype(dtype).itemsize))

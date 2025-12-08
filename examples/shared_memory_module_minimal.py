@@ -24,6 +24,5 @@ def clean():
     global ndarray
     if ndarray is None:
         return
-    ndarray.close()
-    ndarray.unlink()
+    ndarray.dispose()
     ndarray = None

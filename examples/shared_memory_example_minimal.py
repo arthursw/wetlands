@@ -27,11 +27,5 @@ masks_ndarray.close()
 # Clean up the shared memory in the other process
 shared_memory_module.clean()
 
-# Avoid resource_tracker warnings
-try:
-    resource_tracker.unregister(masks_ndarray.shm._name, "shared_memory")  # type: ignore
-except Exception:
-    pass  # Silently ignore if unregister fails
-
 # Clean up and exit the environment
 env.exit()
