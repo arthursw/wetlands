@@ -111,7 +111,7 @@ def _pickle_ndarray(obj: NDArray):
     return NDArray._reconstruct, (state,)
 
 
-def update_ndarray(array: np.ndarray, ndarray: NDArray):
+def update_ndarray(array: np.ndarray, ndarray: NDArray | None):
     """updates ndarray from array:
     if ndarray is None: create an NDArray from array
     else:
