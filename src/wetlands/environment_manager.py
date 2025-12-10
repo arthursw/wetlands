@@ -1,4 +1,3 @@
-import json
 import re
 import platform
 from importlib import metadata
@@ -6,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import Any, Literal, cast, Union
+import json5
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion
 
@@ -623,12 +623,12 @@ class EnvironmentManager:
         try:
             if wetlands_debug_ports_path.exists():
                 with open(wetlands_debug_ports_path, "r") as f:
-                    wetlands_debug_ports = json.load(f)
+                    wetlands_debug_ports = json5.load(f)
             wetlands_debug_ports[environment.name] = dict(
                 debug_port=debug_port, module_executor_path=module_executor_path.as_posix()
             )
             with open(wetlands_debug_ports_path, "w") as f:
-                json.dump(wetlands_debug_ports, f)
+                json5.dump(wetlands_debug_ports, f, indent=4, quote_keys=True)
         except Exception as e:
             e.add_note(f"Error while updating the debug ports file {wetlands_debug_ports_path}.")
             raise e
@@ -642,9 +642,8 @@ class EnvironmentManager:
         """
         if environment.name in self.environments:
             del self.environments[environment.name]
-    
+
     def exit(self) -> None:
-        """Exit all environments
-        """
+        """Exit all environments"""
         for env in self.environments.values():
             env.exit()

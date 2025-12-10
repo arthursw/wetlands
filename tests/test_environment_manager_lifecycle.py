@@ -1,7 +1,7 @@
-import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import json5
 import pytest
 
 from wetlands.environment_manager import EnvironmentManager
@@ -85,7 +85,7 @@ class TestRegisterEnvironment:
         assert debug_ports_file.exists()
 
         with open(debug_ports_file, "r") as f:
-            content = json.load(f)
+            content = json5.load(f)
 
         assert "test_env" in content
         assert content["test_env"]["debug_port"] == 5678
@@ -103,7 +103,7 @@ class TestRegisterEnvironment:
 
         existing_data = {"env1": {"debug_port": 1111, "module_executor_path": "/path/to/exec1"}}
         with open(debug_ports_file, "w") as f:
-            json.dump(existing_data, f)
+            json5.dump(existing_data, f, index=4, quote_keys=True)
 
         # Register new environment
         mock_process = MagicMock()
@@ -114,7 +114,7 @@ class TestRegisterEnvironment:
 
         # Verify both envs are in file
         with open(debug_ports_file, "r") as f:
-            content = json.load(f)
+            content = json5.load(f)
 
         assert len(content) == 2
         assert content["env1"]["debug_port"] == 1111
@@ -132,7 +132,7 @@ class TestRegisterEnvironment:
         # Create file with old data
         old_data = {"test_env": {"debug_port": 9999, "module_executor_path": "/old/path"}}
         with open(debug_ports_file, "w") as f:
-            json.dump(old_data, f)
+            json5.dump(old_data, f, index=4, quote_keys=True)
 
         # Register with new data
         mock_process = MagicMock()
@@ -142,7 +142,7 @@ class TestRegisterEnvironment:
         manager.register_environment(env, 5555, Path("/new/path"))
 
         with open(debug_ports_file, "r") as f:
-            content = json.load(f)
+            content = json5.load(f)
 
         assert content["test_env"]["debug_port"] == 5555
         assert content["test_env"]["module_executor_path"] == "/new/path"

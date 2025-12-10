@@ -107,9 +107,9 @@ def setup_and_launch_vscode(args):
                 raise e
             # Find the config "Python Debugger: Remote Attach Wetlands" and replace it
             # If the config does not exist: append it to the configs
-            if "configuration" in existing_launch_configs:
+            if "configurations" in existing_launch_configs:
                 found = False
-                for i, configuration in enumerate(existing_launch_configs["configuration"]):
+                for i, configuration in enumerate(existing_launch_configs["configurations"]):
                     if "name" in configuration and configuration["name"] == configuration_name:
                         existing_launch_configs[i] = new_config
                         found = True
@@ -121,7 +121,7 @@ def setup_and_launch_vscode(args):
             launch_configs = existing_launch_configs
 
     with open(launch_json_path, "w") as f:
-        json5.dump(launch_configs, f, indent=4)
+        json5.dump(launch_configs, f, indent=4, quote_keys=True)
 
     # Open VS Code in new window
     subprocess.run(["code", "--new-window", str(args.sources), str(module_executor_path)])
@@ -286,7 +286,7 @@ def list_environments(args):
                 new_debug_ports[environment] = detail
     # Update the debug_ports.json to only keep running environments
     with open(debug_ports_path, "w") as f:
-        json5.dump(new_debug_ports, f, indent=4)
+        json5.dump(new_debug_ports, f, indent=4, quote_keys=True)
 
     return
 
