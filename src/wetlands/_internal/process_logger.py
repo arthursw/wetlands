@@ -36,14 +36,18 @@ class ProcessLogger:
         self._lock = threading.Lock()
         self._output: list[str] = []  # Accumulate all output lines
 
-    def subscribe(self, callback: CallableType[[str, dict], None]) -> None:
+    def subscribe(self, callback: CallableType[[str, dict], None], include_history=True) -> None:
         """Register a callback to be notified of each log line.
 
         Args:
             callback: Function with signature callback(line: str, context: dict) called for each log line
+            include_history: whether to execute callback on all messages which where produced by the process until now (True), or only the futur ones (False)
         """
         with self._lock:
             self._subscribers.append(callback)
+            if include_history:
+                for line in self._output:
+                    callback(line, self.log_context)
 
     def update_log_context(self, context_update: dict[str, Any]) -> None:
         """Update log context with thread safety.

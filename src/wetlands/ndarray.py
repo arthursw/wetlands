@@ -123,7 +123,7 @@ def update_ndarray(array: np.ndarray, ndarray: NDArray | None):
         if ndarray.array.dtype == array.dtype and ndarray.array.shape == array.shape:
             ndarray.array[:] = array[:]
             return ndarray
-        ndarray.dispose()
+        ndarray.dispose(unregister=False)
     return NDArray(array)
 
 

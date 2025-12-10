@@ -79,14 +79,6 @@ class ExternalEnvironment(Environment):
         if self._process_logger is None:
             raise Exception("Failed to retrieve ProcessLogger for module executor process")
 
-        # Wait for port announcement with timeout
-        def port_predicate(line: str) -> bool:
-            return line.startswith("Listening port ")
-
-        port_line = self._process_logger.wait_for_line(port_predicate, timeout=30)
-        if port_line:
-            self.port = int(port_line.replace("Listening port ", ""))
-
         # Handle debug port if needed
         if self.environment_manager.debug:
 
@@ -97,6 +89,14 @@ class ExternalEnvironment(Environment):
             if debug_line:
                 debug_port = int(debug_line.replace("Listening debug port ", ""))
                 self.environment_manager.register_environment(self, debug_port, module_executor_path)
+
+        # Wait for port announcement with timeout
+        def port_predicate(line: str) -> bool:
+            return line.startswith("Listening port ")
+
+        port_line = self._process_logger.wait_for_line(port_predicate, timeout=30)
+        if port_line:
+            self.port = int(port_line.replace("Listening port ", ""))
 
         if self.process.poll() is not None:
             raise Exception(f"Process exited with return code {self.process.returncode}.")

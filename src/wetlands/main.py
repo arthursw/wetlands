@@ -280,9 +280,10 @@ def list_environments(args):
     new_debug_ports = {}
     for environment, detail in debug_ports.items():
         # Only keep environments matching with the running processes
-        if process_match(processes, environment):
-            print(environment, "|", detail["debug_port"], "|", detail["module_executor_path"])
-            new_debug_ports[environment] = detail
+        for process in processes:
+            if process_match(process["process"].cmdline(), environment):
+                print(environment, "|", detail["debug_port"], "|", detail["module_executor_path"])
+                new_debug_ports[environment] = detail
     # Update the debug_ports.json to only keep running environments
     with open(debug_ports_path, "w") as f:
         json5.dump(new_debug_ports, f, indent=4)

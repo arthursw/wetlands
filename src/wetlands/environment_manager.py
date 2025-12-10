@@ -642,3 +642,9 @@ class EnvironmentManager:
         """
         if environment.name in self.environments:
             del self.environments[environment.name]
+    
+    def exit(self) -> None:
+        """Exit all environments
+        """
+        for env in self.environments.values():
+            env.exit()

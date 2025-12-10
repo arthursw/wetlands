@@ -24,7 +24,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "list"
+                // "--wetlands_instance_path", "~/napari-wsegmenter/wetlands/",
+                "list",
             ]
         },
         {
