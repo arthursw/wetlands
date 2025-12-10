@@ -87,5 +87,5 @@ jobs:
         run: mike set-default --push latest
 
       - name: Deploy version with mike (update gh-pages branch and push it)
-        run: mike deploy --push --update-aliases 0.4.4 latest
+        run: mike deploy --push --update-aliases 0.4.5 latest
 
