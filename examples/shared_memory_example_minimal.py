@@ -1,4 +1,3 @@
-from multiprocessing import resource_tracker
 from wetlands.ndarray import NDArray
 
 import getting_started

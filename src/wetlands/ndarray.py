@@ -58,12 +58,12 @@ class NDArray:
         # Avoid resource_tracker warnings
         # Silently ignore if unregister fails
         with suppress(Exception):
-            resource_tracker.unregister(shm._name, "shared_memory")  # type: ignore
-    
+            resource_tracker.unregister(self.shm._name, "shared_memory")  # type: ignore
+
     def dispose(self, unregister=True):
         """Close, free, and unregister the shared memory block.
-            Best-effort teardown.
-            Intended for shutdown, not for regular resource management.
+        Best-effort teardown.
+        Intended for shutdown, not for regular resource management.
         """
         # close should run first
         with suppress(Exception):
@@ -110,15 +110,23 @@ def _pickle_ndarray(obj: NDArray):
     }
     return NDArray._reconstruct, (state,)
 
-def initialize_ndarray(array: np.ndarray, ndarray:NDArray):
+
+def update_ndarray(array: np.ndarray, ndarray: NDArray):
+    """updates ndarray from array:
+    if ndarray is None: create an NDArray from array
+    else:
+        if array has the same shape and size as ndarray:
+            update the ndarray values and return it
+        else: delete the ndarray and create a new one from array
+    """
     if ndarray is not None:
         if ndarray.array.dtype == array.dtype and ndarray.array.shape == array.shape:
             ndarray.array[:] = array[:]
-            return
-        else:
-            ndarray.dispose()
-        return NDArray(array)
-    
+            return ndarray
+        ndarray.dispose()
+    return NDArray(array)
+
+
 def create_shared_array(shape: tuple, dtype: str | type):
     # Create the shared memory
     shm = shared_memory.SharedMemory(create=True, size=int(np.prod(shape) * np.dtype(dtype).itemsize))
