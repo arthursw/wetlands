@@ -111,7 +111,7 @@ def setup_and_launch_vscode(args):
                 found = False
                 for i, configuration in enumerate(existing_launch_configs["configurations"]):
                     if "name" in configuration and configuration["name"] == configuration_name:
-                        existing_launch_configs[i] = new_config
+                        existing_launch_configs["configurations"][i] = new_config
                         found = True
                         break
                 if not found:
