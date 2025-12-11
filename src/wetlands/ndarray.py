@@ -14,6 +14,8 @@ class NDArray:
     1. With an array: NDArray(array=my_array) - creates shared memory and copies data
     2. With shape and dtype: NDArray(shape=(100, 100), dtype='float32') -
        creates shared memory but defers numpy array creation until first access (lazy)
+       WARNING: the numpy array values will be UNDEFINED, 
+                you MUST set `array.fill(0)` or `array[:] = otherArray` before using it
 
     Args:
         array: numpy array to wrap (mutually exclusive with shape/dtype)
@@ -42,20 +44,20 @@ class NDArray:
                 # Use existing shared memory
                 shm_arr = np.ndarray(array.shape, dtype=array.dtype, buffer=shm.buf)
             self._array = shm_arr
-            self._shape = array.shape
-            self._dtype = array.dtype
+            self.shape = array.shape
+            self.dtype = array.dtype
         else:
             # Lazy initialization with shape and dtype
             if shape is None or dtype is None:
                 raise ValueError("Either 'array' or both 'shape' and 'dtype' must be provided")
-            resolved_dtype = np.dtype(dtype) if not isinstance(dtype, np.dtype) else dtype
+            resolveddtype = np.dtype(dtype) if not isinstance(dtype, np.dtype) else dtype
             if shm is None:
                 # Allocate shared memory
-                size = int(np.prod(shape) * resolved_dtype.itemsize)
+                size = int(np.prod(shape) * resolveddtype.itemsize)
                 shm = shared_memory.SharedMemory(create=True, size=size)
             self._array = None
-            self._shape = shape
-            self._dtype = resolved_dtype
+            self.shape = shape
+            self.dtype = resolveddtype
 
         self.shm = shm
         self.unregister_on_exit = unregister_on_exit
@@ -64,7 +66,7 @@ class NDArray:
     def array(self) -> np.ndarray:
         """Lazily create the numpy array from shared memory on first access."""
         if self._array is None:
-            self._array = np.ndarray(self._shape, dtype=self._dtype, buffer=self.shm.buf)
+            self._array = np.ndarray(self.shape, dtype=self.dtype, buffer=self.shm.buf)
         return self._array
 
     def __reduce__(self):
@@ -74,7 +76,7 @@ class NDArray:
          (callable, args)
         """
         assert self.shm is not None, "shm must not be None for pickling"
-        state = {"name": self.shm.name, "shape": self._shape, "dtype": str(self._dtype)}
+        state = {"name": self.shm.name, "shape": self.shape, "dtype": str(self.dtype)}
 
         return (self._reconstruct, (state,))
 
@@ -135,7 +137,7 @@ class NDArray:
 
     def __repr__(self):
         shm_name = self.shm.name if self.shm is not None else "None"
-        return f"NDArray(shape={self._shape}, dtype={self._dtype}, shm={shm_name})"
+        return f"NDArray(shape={self.shape}, dtype={self.dtype}, shm={shm_name})"
 
 
 _registered = False
@@ -167,20 +169,31 @@ def _pickle_ndarray(obj: NDArray):
     return NDArray._reconstruct, (state,)
 
 
-def update_ndarray(array: np.ndarray, ndarray: NDArray | None):
+def update_ndarray(array: np.ndarray | None=None, 
+                   ndarray: NDArray | None=None, 
+                   shape: tuple | None = None,
+                   dtype: str | type | None = None,):
     """updates ndarray from array:
     if ndarray is None: create an NDArray from array
+    else:
+    if dtype and shape are same of ndarray: return ndarray
     else:
         if array has the same shape and size as ndarray:
             update the ndarray values and return it
         else: delete the ndarray and create a new one from array
     """
     if ndarray is not None:
-        if ndarray.array.dtype == array.dtype and ndarray.array.shape == array.shape:
+        if shape == ndarray.shape and dtype == ndarray.shape:
+            return ndarray
+        if array is not None and ndarray.dtype == array.dtype and ndarray.shape == array.shape:
             ndarray.array[:] = array[:]
             return ndarray
         ndarray.dispose(unregister=False)
-    return NDArray(array)
+        ndarray = None
+    if array is not None:
+        return NDArray(array)
+    else:
+        return NDArray(shape=shape, dtype=dtype)
 
 
 def create_shared_array(shape: tuple, dtype: str | type):

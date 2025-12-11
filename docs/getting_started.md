@@ -263,7 +263,7 @@ The main script uses [`EnvironmentManager`][wetlands.environment_manager.Environ
 
 ### Next Steps
 
-- See [Shared memory](shared_memory.md)
+- See [Shared memory](shared_memory.md) to share memory between environments
 - See [Advanced Examples](advanced_example.md) for more complex workflows
 - See [Wetlands logging system](logging.md)
 - See [Debugging Guide](debugging.md) to understand how to debug within environments
