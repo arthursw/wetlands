@@ -4,7 +4,7 @@ The Python [`multiprocessing.shared_memory`](https://docs.python.org/3/library/m
 The `shared_memory_example.py` script demonstrate this.
 
 Wetlands provides [NDArray][wetlands.ndarray.NDArray] to automatically convert numpy arrays to shared memory objects and send them between environments. 
-The `shared_memory_example_minimal.py` script demonstrate this.
+This requires to install Wetlands in the external environment. The `shared_memory_example_minimal.py` script demonstrate this.
 
 !!!note
     You can find more shared memory helpers in the [`ndarray` module][wetlands.ndarray] module.
@@ -77,6 +77,7 @@ NDArray is a helper class that:
 - Stores a NumPy array backed by a SharedMemory block.
 - On pickling, becomes a small JSON-serializable dict `{"name": shm.name, "shape": ..., "dtype": ...}`.
 - On unpickling, automatically recreates the NDArray instance and re-attaches to the shared memory buffer.
+- It can also be initialized with a shape and a dtype, in which case the underlying numpy array will be created on demand (when accessing the `NDArray.array` property)
 
 The equivalent example with the NDArray helper is pretty straight-forward:
 
