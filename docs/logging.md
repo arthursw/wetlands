@@ -140,7 +140,8 @@ def check_output(line: str, _context: dict) -> None:
     if "Special message" in line:
         print(line)
 
-process_logger.subscribe(check_output)
+# Be aware of the include_history arg to apply the callback on the entire log history, or only the futur logs
+process_logger.subscribe(check_output, include_history=False)
 
 # Wait for port announcement with timeout
 def port_predicate(line: str) -> bool:
