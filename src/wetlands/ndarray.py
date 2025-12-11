@@ -183,7 +183,7 @@ def update_ndarray(array: np.ndarray | None=None,
         else: delete the ndarray and create a new one from array
     """
     if ndarray is not None:
-        if shape == ndarray.shape and dtype == ndarray.shape:
+        if shape == ndarray.shape and dtype == ndarray.dtype:
             return ndarray
         if array is not None and ndarray.dtype == array.dtype and ndarray.shape == array.shape:
             ndarray.array[:] = array[:]
