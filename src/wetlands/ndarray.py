@@ -9,21 +9,63 @@ class NDArray:
     """
     NDArray: A wrapper around a numpy array stored in shared memory.
     Pickles into a small dict containing shared memory metadata.
+
+    Can be initialized in two ways:
+    1. With an array: NDArray(array=my_array) - creates shared memory and copies data
+    2. With shape and dtype: NDArray(shape=(100, 100), dtype='float32') -
+       creates shared memory but defers numpy array creation until first access (lazy)
+
+    Args:
+        array: numpy array to wrap (mutually exclusive with shape/dtype)
+        shm: existing SharedMemory object to use (optional)
+        shape: shape of array for lazy initialization (requires dtype)
+        dtype: dtype of array for lazy initialization (requires shape)
+        unregister_on_exit: whether to unregister shared memory on context exit
     """
 
-    def __init__(self, array: np.ndarray, shm: shared_memory.SharedMemory | None = None):
-        if shm is None:
-            # Allocate shared memory
-            shm = shared_memory.SharedMemory(create=True, size=array.nbytes)
-            # Copy array data into shared memory
-            shm_arr = np.ndarray(array.shape, dtype=array.dtype, buffer=shm.buf)
-            shm_arr[:] = array[:]
+    def __init__(
+        self,
+        array: np.ndarray | None = None,
+        shm: shared_memory.SharedMemory | None = None,
+        shape: tuple | None = None,
+        dtype: str | type | None = None,
+        unregister_on_exit: bool = True,
+    ):
+        if array is not None:
+            if shm is None:
+                # Allocate shared memory
+                shm = shared_memory.SharedMemory(create=True, size=array.nbytes)
+                # Copy array data into shared memory
+                shm_arr = np.ndarray(array.shape, dtype=array.dtype, buffer=shm.buf)
+                shm_arr[:] = array[:]
+            else:
+                # Use existing shared memory
+                shm_arr = np.ndarray(array.shape, dtype=array.dtype, buffer=shm.buf)
+            self._array = shm_arr
+            self._shape = array.shape
+            self._dtype = array.dtype
         else:
-            # Use existing shared memory
-            shm_arr = np.ndarray(array.shape, dtype=array.dtype, buffer=shm.buf)
+            # Lazy initialization with shape and dtype
+            if shape is None or dtype is None:
+                raise ValueError("Either 'array' or both 'shape' and 'dtype' must be provided")
+            resolved_dtype = np.dtype(dtype) if not isinstance(dtype, np.dtype) else dtype
+            if shm is None:
+                # Allocate shared memory
+                size = int(np.prod(shape) * resolved_dtype.itemsize)
+                shm = shared_memory.SharedMemory(create=True, size=size)
+            self._array = None
+            self._shape = shape
+            self._dtype = resolved_dtype
 
-        self.array = shm_arr
         self.shm = shm
+        self.unregister_on_exit = unregister_on_exit
+
+    @property
+    def array(self) -> np.ndarray:
+        """Lazily create the numpy array from shared memory on first access."""
+        if self._array is None:
+            self._array = np.ndarray(self._shape, dtype=self._dtype, buffer=self.shm.buf)
+        return self._array
 
     def __reduce__(self):
         """
@@ -31,7 +73,8 @@ class NDArray:
         Returns a tuple describing how to reconstruct the object:
          (callable, args)
         """
-        state = {"name": self.shm.name, "shape": self.array.shape, "dtype": str(self.array.dtype)}
+        assert self.shm is not None, "shm must not be None for pickling"
+        state = {"name": self.shm.name, "shape": self._shape, "dtype": str(self._dtype)}
 
         return (self._reconstruct, (state,))
 
@@ -46,19 +89,22 @@ class NDArray:
 
     def close(self):
         """Close shared memory view (but keep block alive)."""
-        self.shm.close()
+        if self.shm is not None:
+            self.shm.close()
 
     def unlink(self, close=True):
         """Free the shared memory block."""
-        if close:
-            self.shm.close()
-        self.shm.unlink()
+        if self.shm is not None:
+            if close:
+                self.shm.close()
+            self.shm.unlink()
 
     def unregister(self):
         # Avoid resource_tracker warnings
         # Silently ignore if unregister fails
-        with suppress(Exception):
-            resource_tracker.unregister(self.shm._name, "shared_memory")  # type: ignore
+        if self.shm is not None:
+            with suppress(Exception):
+                resource_tracker.unregister(self.shm._name, "shared_memory")  # type: ignore
 
     def dispose(self, unregister=True):
         """Close, free, and unregister the shared memory block.
@@ -78,8 +124,18 @@ class NDArray:
             with suppress(Exception):
                 self.unregister()
 
+    def __enter__(self):
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
+        """Exit context manager and cleanup resources."""
+        self.dispose(unregister=self.unregister_on_exit)
+        return False
+
     def __repr__(self):
-        return f"NDArray(shape={self.array.shape}, dtype={self.array.dtype}, shm={self.shm.name})"
+        shm_name = self.shm.name if self.shm is not None else "None"
+        return f"NDArray(shape={self._shape}, dtype={self._dtype}, shm={shm_name})"
 
 
 _registered = False
