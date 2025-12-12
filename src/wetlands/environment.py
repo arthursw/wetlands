@@ -67,7 +67,7 @@ class Environment:
         """
         return self.environment_manager.install(self, dependencies, additional_install_commands)
 
-    def launch(self, additional_activate_commands: Commands = {}, log_output_in_thread: bool = True) -> None:
+    def launch(self, additional_activate_commands: Commands = {}) -> None:
         """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Do nothing when InternalEnvironment. See [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
         return
 

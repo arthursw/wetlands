@@ -160,6 +160,16 @@ def execution_worker(lock: threading.Lock, connection: Connection, message: dict
         else:
             raise Exception(f"Unknown action: {action}")
 
+        # # We could close shared memory args and result
+        # # But they could be nested (like result["shm"]) so too complicated
+        # # Plus it is not very intuitive nor really much easier
+        # if message.get("auto_close_shared_memory"):
+        #     for arg in message.get("args", []):
+        #         if isinstance(arg, NDArray):
+        #             arg.close()
+        #     if isinstance(result, NDArray):
+        #         result.close()
+
         send_message(
             lock,
             connection,

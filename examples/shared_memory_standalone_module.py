@@ -10,7 +10,7 @@ shm: shared_memory.SharedMemory | None = None
 def segment(image_path: Path | str):
     global shm
     # Segment the image with example_module.py
-    masks, flows, styles, diams = example_module.segment(image_path)
+    masks = example_module.segment(image_path, return_segmentation=True)
     # Create the shared memory
     shm = shared_memory.SharedMemory(create=True, size=masks.nbytes)
     # Create a NumPy array backed by shared memory

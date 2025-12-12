@@ -25,25 +25,24 @@ def initialize(pip_deps=[]):
     with open(image_path, "wb") as handler:
         handler.write(image_data)
 
-    segmentation_path = image_path.parent / f"{image_path.stem}_segmentation.png"
-    return image_path, segmentation_path, env
+    return image_path, env
 
 
 if __name__ == "__main__":
     # Initialize: create the environment manager, the Cellpose conda environment, and download the image to segment
-    image_path, segmentation_path, env = initialize()
+    image_path, env = initialize()
 
     # Import example_module in the environment
     example_module = env.import_module("example_module.py")
     # exampleModule is a proxy to example_module.py in the environment,
     # calling exampleModule.function_name(args) will run env.execute(module_name, function_name, args)
-    diameters = example_module.segment(str(image_path), str(segmentation_path))
+    diameters = example_module.segment(str(image_path))
 
     # Or use env.execute() directly to call a function in a module
-    # diameters = env.execute("example_module.py", "segment", (image_path, segmentation_path))
+    # diameters = env.execute("example_module.py", "segment", (image_path))
 
     # Alternatively, use env.run_script() to run an entire Python script
-    # env.run_script("script.py", args=(str(image_path), str(segmentation_path)))
+    # env.run_script("script.py", args=(str(image_path)))
 
     print(f"Found diameters of {diameters} pixels.")
 

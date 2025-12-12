@@ -9,14 +9,10 @@ ndarray: NDArray | None = None
 def segment(image_path: Path | str):
     global ndarray
     # Segment the image with example_module.py
-    masks, flows, styles, diams = example_module.segment(image_path)
+    masks = example_module.segment(image_path, return_segmentation=True)
 
-    # Or, if the image was send with NDArray (image_path would be a NDArray)
-    # masks, flows, styles, diams = example_module.segment(image_path.array)
-
-    # Create the shared memory
+    # Create and return shared memory from masks
     ndarray = NDArray(masks)
-    # Return the ndarray
     return ndarray
 
 

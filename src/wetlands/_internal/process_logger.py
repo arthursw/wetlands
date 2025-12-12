@@ -36,7 +36,7 @@ class ProcessLogger:
         self._lock = threading.Lock()
         self._output: list[str] = []  # Accumulate all output lines
 
-    def subscribe(self, callback: CallableType[[str, dict], None], include_history: bool=True) -> None:
+    def subscribe(self, callback: CallableType[[str, dict], None], include_history: bool = True) -> None:
         """Register a callback to be notified of each log line.
 
         Args:
@@ -110,7 +110,9 @@ class ProcessLogger:
         with self._lock:
             return self._output.copy()
 
-    def wait_for_line(self, predicate: Callable[[str], bool], timeout: Optional[float] = None, include_history: bool=True) -> Optional[str]:
+    def wait_for_line(
+        self, predicate: Callable[[str], bool], timeout: Optional[float] = None, include_history: bool = True
+    ) -> Optional[str]:
         """Wait for a line matching predicate and return it.
 
         Useful for parsing lines like "Listening port 12345" during env startup.

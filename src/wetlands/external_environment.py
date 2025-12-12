@@ -50,12 +50,11 @@ class ExternalEnvironment(Environment):
         self._process_logger: ProcessLogger | None = None
 
     @synchronized
-    def launch(self, additional_activate_commands: Commands = {}, log_output_in_thread: bool = True) -> None:
+    def launch(self, additional_activate_commands: Commands = {}) -> None:
         """Launches a server listening for orders in the environment.
 
         Args:
                 additional_activate_commands: Platform-specific activation commands.
-                log_output_in_thread: Deprecated parameter, kept for backwards compatibility. ProcessLogger always runs in background.
         """
 
         if self.launched():

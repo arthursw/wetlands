@@ -14,7 +14,7 @@ class NDArray:
     1. With an array: NDArray(array=my_array) - creates shared memory and copies data
     2. With shape and dtype: NDArray(shape=(100, 100), dtype='float32') -
        creates shared memory but defers numpy array creation until first access (lazy)
-       WARNING: the numpy array values will be UNDEFINED, 
+       WARNING: the numpy array values will be UNDEFINED,
                 you MUST set `array.fill(0)` or `array[:] = otherArray` before using it
 
     Args:
@@ -22,7 +22,6 @@ class NDArray:
         shm: existing SharedMemory object to use (optional)
         shape: shape of array for lazy initialization (requires dtype)
         dtype: dtype of array for lazy initialization (requires shape)
-        unregister_on_exit: whether to unregister shared memory on context exit
     """
 
     def __init__(
@@ -31,7 +30,6 @@ class NDArray:
         shm: shared_memory.SharedMemory | None = None,
         shape: tuple | None = None,
         dtype: str | type | None = None,
-        unregister_on_exit: bool = True,
     ):
         if array is not None:
             if shm is None:
@@ -60,7 +58,6 @@ class NDArray:
             self.dtype = resolveddtype
 
         self.shm = shm
-        self.unregister_on_exit = unregister_on_exit
 
     @property
     def array(self) -> np.ndarray:
@@ -85,7 +82,17 @@ class NDArray:
         """
         Rebuilds the NDArray when unpickled.
         """
-        shm = shared_memory.SharedMemory(name=state["name"])
+
+        # Child process track shared memory and unlink them on exit
+        # In Wetlands, the owner is the process which created the NDArray
+        # So we want to unregister the shm when unpickling
+        try:
+            # For Python >= 3.13, disable tracking (unlink when process exists) with track=False
+            shm = shared_memory.SharedMemory(name=state["name"], track=False)
+        except TypeError:
+            # For Python < 3.13, unregister manually
+            shm = shared_memory.SharedMemory(name=state["name"])
+            resource_tracker.unregister(shm._name, "shared_memory")  # type: ignore
         array = np.ndarray(state["shape"], dtype=np.dtype(state["dtype"]), buffer=shm.buf)
         return NDArray(array, shm=shm)
 
@@ -94,34 +101,25 @@ class NDArray:
         if self.shm is not None:
             self.shm.close()
 
-    def unlink(self, close=True):
+    def unlink(self):
         """Free the shared memory block."""
         if self.shm is not None:
-            if close:
-                self.shm.close()
             self.shm.unlink()
 
     def unregister(self):
-        # Avoid resource_tracker warnings
-        # Silently ignore if unregister fails
+        # Unregister the shared memory for the resource tracker
         if self.shm is not None:
             with suppress(Exception):
                 resource_tracker.unregister(self.shm._name, "shared_memory")  # type: ignore
 
-    def dispose(self, unregister=True):
-        """Close, free, and unregister the shared memory block.
-        Best-effort teardown.
-        Intended for shutdown, not for regular resource management.
-        """
-        # close should run first
-        with suppress(Exception):
-            self.close()
+    def dispose(self, unregister=False):
+        """Close, free, and optionally unregister the shared memory block."""
+        # with suppress(Exception):
+        self.close()
 
-        # then unlink
-        with suppress(Exception):
-            self.unlink()
+        # with suppress(Exception):
+        self.unlink()
 
-        # only unregister if requested
         if unregister:
             with suppress(Exception):
                 self.unregister()
@@ -132,7 +130,7 @@ class NDArray:
 
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
         """Exit context manager and cleanup resources."""
-        self.dispose(unregister=self.unregister_on_exit)
+        self.dispose()
         return False
 
     def __repr__(self):
@@ -169,10 +167,12 @@ def _pickle_ndarray(obj: NDArray):
     return NDArray._reconstruct, (state,)
 
 
-def update_ndarray(array: np.ndarray | None=None, 
-                   ndarray: NDArray | None=None, 
-                   shape: tuple | None = None,
-                   dtype: str | type | None = None,):
+def update_ndarray(
+    array: np.ndarray | None = None,
+    ndarray: NDArray | None = None,
+    shape: tuple | None = None,
+    dtype: str | type | None = None,
+):
     """updates ndarray from array:
     if ndarray is None: create an NDArray from array
     else:
@@ -188,7 +188,7 @@ def update_ndarray(array: np.ndarray | None=None,
         if array is not None and ndarray.dtype == array.dtype and ndarray.shape == array.shape:
             ndarray.array[:] = array[:]
             return ndarray
-        ndarray.dispose(unregister=False)
+        ndarray.dispose()
         ndarray = None
     if array is not None:
         return NDArray(array)
