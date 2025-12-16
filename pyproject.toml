@@ -1,6 +1,6 @@
 [project]
 name = "wetlands"
-version = "0.4.10"
+version = "0.4.11"
 description = "Wetlands is a lightweight library to create conda environment and execute code inside them."
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "send2trash>=1.8.3",
     "json5>=0.12.1",
+    "packaging>=24.2",
 ]
 classifiers = [
   "Intended Audience :: Developers",
