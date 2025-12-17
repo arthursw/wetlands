@@ -7,6 +7,14 @@ from pathlib import Path
 from wetlands._internal.config_parser import ConfigParser
 
 
+def has_package(deps_list: list[str], package_name: str) -> bool:
+    """Check if a package name is in the dependencies list (with or without version spec)."""
+    return any(dep == package_name or dep.startswith(f"{package_name}>=") or dep.startswith(f"{package_name}==")
+               or dep.startswith(f"{package_name}<=") or dep.startswith(f"{package_name}<")
+               or dep.startswith(f"{package_name}>") or dep.startswith(f"{package_name}~=")
+               for dep in deps_list)
+
+
 # --- Test Fixtures ---
 
 
@@ -197,9 +205,9 @@ class TestConfigParserPixiToml:
         assert "python" in deps
         assert deps["python"] == "3.11"
         assert "conda" in deps
-        assert "numpy" in deps["conda"]
+        assert has_package(deps["conda"], "numpy")
         assert "pip" in deps
-        assert "requests" in deps["pip"]
+        assert has_package(deps["pip"], "requests")
 
     def test_parse_pixi_toml_with_features(self, sample_pixi_toml):
         """Test parsing pixi.toml with features."""
@@ -207,8 +215,8 @@ class TestConfigParserPixiToml:
         deps = parser.parse_pixi_toml(sample_pixi_toml, "default")
 
         # default environment includes dev feature
-        assert "pytest" in deps["conda"]
-        assert "pytest-cov" in deps["pip"]
+        assert has_package(deps["conda"], "pytest")
+        assert has_package(deps["pip"], "pytest-cov")
 
     def test_parse_pixi_toml_missing_environment(self, sample_pixi_toml):
         """Test parsing pixi.toml with missing environment name falls back to default."""
@@ -249,8 +257,8 @@ class TestConfigParserPyprojectToml:
         assert "python" in deps
         assert deps["python"] == "3.10"
         assert "conda" in deps
-        assert "numpy" in deps["conda"]
-        assert "requests" in deps["pip"]
+        assert has_package(deps["conda"], "numpy")
+        assert has_package(deps["pip"], "requests")
 
     def test_parse_pyproject_with_pixi_features(self, sample_pyproject_toml_with_pixi):
         """Test parsing pyproject.toml with pixi features."""
@@ -258,8 +266,8 @@ class TestConfigParserPyprojectToml:
         deps = parser.parse_pyproject_toml(sample_pyproject_toml_with_pixi, environment_name="default")
 
         # default environment includes dev feature
-        assert "pytest" in deps["conda"]
-        assert "pytest-cov" in deps["pip"]
+        assert has_package(deps["conda"], "pytest")
+        assert has_package(deps["pip"], "pytest-cov")
 
     def test_parse_pyproject_with_optional_dependencies(self, sample_pyproject_toml_with_pixi):
         """Test parsing pyproject.toml with optional dependencies group."""
@@ -268,9 +276,9 @@ class TestConfigParserPyprojectToml:
 
         assert deps is not None
         # Should include dev dependencies
-        assert "pytest" in deps["conda"] or "pytest" in deps.get("pip", [])
+        assert has_package(deps["conda"], "pytest") or has_package(deps.get("pip", []), "pytest")
         # Should include docs dependencies
-        assert "sphinx" in str(deps)
+        assert has_package(deps.get("pip", []), "sphinx")
 
     def test_parse_pyproject_no_pixi_standard_deps(self, sample_pyproject_toml_no_pixi):
         """Test parsing pyproject.toml without pixi config (standard deps)."""

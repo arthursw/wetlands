@@ -16,6 +16,24 @@ from wetlands._internal.dependency_manager import Dependencies
 class ConfigParser:
     """Parse dependency configurations from various file formats."""
 
+    def _format_dependency(self, name: str, version: str) -> str:
+        """Format a dependency with its version spec.
+
+        Args:
+            name: Package name
+            version: Version spec (e.g., ">=2.25", "*", "1.0.0")
+
+        Returns:
+            Formatted dependency string (e.g., "requests>=2.25", "requests")
+        """
+        if version == "*" or not version:
+            return name
+        # If version already starts with a comparison operator, just concatenate
+        if version.startswith((">=", "<=", "==", "!=", ">", "<", "~=", "^")):
+            return f"{name}{version}"
+        # Otherwise assume it's an exact version
+        return f"{name}=={version}"
+
     def parse(
         self,
         config_path: Union[str, Path],
@@ -95,6 +113,9 @@ class ConfigParser:
     ) -> Dependencies:
         """Parse pixi.toml file and extract dependencies.
 
+        Supports both native pixi.toml format (with top-level [workspace], [dependencies])
+        and embedded format (with [tool.pixi.*] sections).
+
         Args:
             pixi_path: Path to pixi.toml file
             environment_name: Name of environment to extract (optional - falls back to default)
@@ -115,17 +136,100 @@ class ConfigParser:
         with open(pixi_path, "rb") as f:
             config = tomllib.load(f)
 
-        # Get environment configuration
-        environments = config.get("tool", {}).get("pixi", {}).get("environments", {})
+        # Detect if this is native pixi.toml format or embedded in [tool.pixi]
+        # Native format has [workspace] or [dependencies] at top level
+        # Embedded format has [tool.pixi.workspace] or [tool.pixi.dependencies]
+        is_native_format = "workspace" in config or "dependencies" in config or "pypi-dependencies" in config
+
+        if is_native_format:
+            return self._parse_native_pixi_toml(config, environment_name)
+        else:
+            return self._parse_embedded_pixi_toml(config, environment_name)
+
+    def _parse_native_pixi_toml(
+        self,
+        config: dict,
+        environment_name: Optional[str] = None,
+    ) -> Dependencies:
+        """Parse native pixi.toml format with top-level sections."""
+        dependencies: Dependencies = {}
+
+        # Get environments if defined
+        environments = config.get("environments", {})
 
         # Determine which environment to use
         env_to_use = environment_name
         if env_to_use and env_to_use not in environments:
-            # Fall back to default if requested environment doesn't exist
             env_to_use = "default"
 
         if not env_to_use:
-            # No environment_name provided, use default
+            env_to_use = "default"
+
+        # Get features for this environment (empty list if no environments defined)
+        features: list[str] = []
+        if environments and env_to_use in environments:
+            env_config = environments[env_to_use]
+            if isinstance(env_config, dict):
+                features = env_config.get("features", [])
+            elif isinstance(env_config, list):
+                features = env_config
+
+        # Extract python version from dependencies
+        base_deps = config.get("dependencies", {})
+        if "python" in base_deps:
+            dependencies["python"] = base_deps["python"]
+
+        # Collect dependencies with version specs
+        conda_deps = []
+        pip_deps = []
+
+        # Base dependencies (combine name with version spec)
+        for name, version in base_deps.items():
+            if name != "python":
+                conda_deps.append(self._format_dependency(name, version))
+
+        for name, version in config.get("pypi-dependencies", {}).items():
+            pip_deps.append(self._format_dependency(name, version))
+
+        # Feature dependencies
+        features_config = config.get("feature", {})
+        for feature_name in features:
+            if feature_name in features_config:
+                feature = features_config[feature_name]
+                for name, version in feature.get("dependencies", {}).items():
+                    if name != "python":
+                        conda_deps.append(self._format_dependency(name, version))
+                for name, version in feature.get("pypi-dependencies", {}).items():
+                    pip_deps.append(self._format_dependency(name, version))
+
+        # Remove duplicates
+        conda_deps = list(set(conda_deps))
+        pip_deps = list(set(pip_deps))
+
+        if conda_deps:
+            dependencies["conda"] = conda_deps
+        if pip_deps:
+            dependencies["pip"] = pip_deps
+
+        return dependencies
+
+    def _parse_embedded_pixi_toml(
+        self,
+        config: dict,
+        environment_name: Optional[str] = None,
+    ) -> Dependencies:
+        """Parse embedded pixi.toml format with [tool.pixi.*] sections."""
+        pixi_config = config.get("tool", {}).get("pixi", {})
+
+        # Get environment configuration
+        environments = pixi_config.get("environments", {})
+
+        # Determine which environment to use
+        env_to_use = environment_name
+        if env_to_use and env_to_use not in environments:
+            env_to_use = "default"
+
+        if not env_to_use:
             env_to_use = "default"
 
         if env_to_use not in environments:
@@ -139,7 +243,6 @@ class ConfigParser:
         dependencies: Dependencies = {}
 
         # Extract python version
-        pixi_config = config.get("tool", {}).get("pixi", {})
         if "python" in pixi_config.get("dependencies", {}):
             dependencies["python"] = pixi_config["dependencies"]["python"]
 
@@ -147,20 +250,27 @@ class ConfigParser:
         conda_deps = []
         pip_deps = []
 
-        # Base dependencies
-        conda_deps.extend(pixi_config.get("dependencies", {}).keys())
-        pip_deps.extend(pixi_config.get("pypi-dependencies", {}).keys())
+        # Base dependencies (combine name with version spec)
+        for name, version in pixi_config.get("dependencies", {}).items():
+            if name != "python":
+                conda_deps.append(self._format_dependency(name, version))
+
+        for name, version in pixi_config.get("pypi-dependencies", {}).items():
+            pip_deps.append(self._format_dependency(name, version))
 
         # Feature dependencies
         features_config = pixi_config.get("feature", {})
         for feature_name in features:
             if feature_name in features_config:
                 feature = features_config[feature_name]
-                conda_deps.extend(feature.get("dependencies", {}).keys())
-                pip_deps.extend(feature.get("pypi-dependencies", {}).keys())
+                for name, version in feature.get("dependencies", {}).items():
+                    if name != "python":
+                        conda_deps.append(self._format_dependency(name, version))
+                for name, version in feature.get("pypi-dependencies", {}).items():
+                    pip_deps.append(self._format_dependency(name, version))
 
-        # Remove duplicates and python key if present
-        conda_deps = list(set(d for d in conda_deps if d != "python"))
+        # Remove duplicates
+        conda_deps = list(set(conda_deps))
         pip_deps = list(set(pip_deps))
 
         if conda_deps:
@@ -218,14 +328,14 @@ class ConfigParser:
                     # No environment_name provided, use default
                     env_to_use = "default"
 
-                if env_to_use not in environments:
-                    available = list(environments.keys())
-                    raise ValueError(
-                        f"Environment '{env_to_use}' not found in pyproject.toml. Available environments: {available}"
-                    )
-
-                env_config = environments[env_to_use]
-                features = env_config.get("features", [])
+                # Get features for this environment (empty list if no environments defined)
+                features: list[str] = []
+                if environments and env_to_use in environments:
+                    env_config = environments[env_to_use]
+                    if isinstance(env_config, dict):
+                        features = env_config.get("features", [])
+                    elif isinstance(env_config, list):
+                        features = env_config
 
                 # Extract python version
                 if "python" in pixi_config.get("dependencies", {}):
@@ -235,20 +345,27 @@ class ConfigParser:
                 conda_deps = []
                 pip_deps = []
 
-                # Base dependencies
-                conda_deps.extend(pixi_config.get("dependencies", {}).keys())
-                pip_deps.extend(pixi_config.get("pypi-dependencies", {}).keys())
+                # Base dependencies (combine name with version spec)
+                for name, version in pixi_config.get("dependencies", {}).items():
+                    if name != "python":
+                        conda_deps.append(self._format_dependency(name, version))
+
+                for name, version in pixi_config.get("pypi-dependencies", {}).items():
+                    pip_deps.append(self._format_dependency(name, version))
 
                 # Feature dependencies
                 features_config = pixi_config.get("feature", {})
                 for feature_name in features:
                     if feature_name in features_config:
                         feature = features_config[feature_name]
-                        conda_deps.extend(feature.get("dependencies", {}).keys())
-                        pip_deps.extend(feature.get("pypi-dependencies", {}).keys())
+                        for name, version in feature.get("dependencies", {}).items():
+                            if name != "python":
+                                conda_deps.append(self._format_dependency(name, version))
+                        for name, version in feature.get("pypi-dependencies", {}).items():
+                            pip_deps.append(self._format_dependency(name, version))
 
-                # Remove duplicates and python key
-                conda_deps = list(set(d for d in conda_deps if d != "python"))
+                # Remove duplicates
+                conda_deps = list(set(conda_deps))
                 pip_deps = list(set(pip_deps))
 
                 if conda_deps:
@@ -270,11 +387,14 @@ class ConfigParser:
                         )
 
                     feature = features_config[feature_name]
-                    conda_deps.extend(feature.get("dependencies", {}).keys())
-                    pip_deps.extend(feature.get("pypi-dependencies", {}).keys())
+                    for name, version in feature.get("dependencies", {}).items():
+                        if name != "python":
+                            conda_deps.append(self._format_dependency(name, version))
+                    for name, version in feature.get("pypi-dependencies", {}).items():
+                        pip_deps.append(self._format_dependency(name, version))
 
                 # Remove duplicates
-                conda_deps = list(set(d for d in conda_deps if d != "python"))
+                conda_deps = list(set(conda_deps))
                 pip_deps = list(set(pip_deps))
 
                 if conda_deps:

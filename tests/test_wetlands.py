@@ -13,6 +13,42 @@ from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 
 
+# Config file contents for parameterized test_create_from_config
+PIXI_TOML_CONTENT = """
+[workspace]
+name = "test-project"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
+
+[dependencies]
+requests = ">=2.25"
+"""
+
+PYPROJECT_TOML_CONTENT = """
+[project]
+name = "test-project"
+version = "0.1.0"
+dependencies = [
+    "requests>=2.25",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=6.0"]
+"""
+
+ENV_YML_CONTENT = """
+name: test-env
+channels:
+  - conda-forge
+dependencies:
+  - requests
+"""
+
+REQUIREMENTS_TXT_CONTENT = """
+requests>=2.25
+"""
+
+
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -42,37 +78,50 @@ def env_manager(request, tmp_path_factory):
 
 
 @pytest.mark.integration
-def test_environment_creation(env_manager):
-    """Test that EnvironmentManager.create() correctly create an environment and installs dependencies."""
-    env_name = "test_env_deps"
-    logger.info(f"Testing dependency installation: {env_name}")
-    dependencies = Dependencies({"conda": ["requests"]})
-    env = env_manager.create(env_name, dependencies)
+def test_environment_creation_and_types(env_manager):
+    """Test environment creation, dependency installation, and internal/external type selection."""
+    logger.info("Testing environment creation, types, and dependencies")
 
-    # Verify that 'requests' is installed
-    installed_packages = env_manager.get_installed_packages(env)
+    # Test 1: No dependencies -> InternalEnvironment
+    env_internal = env_manager.create("test_env_internal", {}, use_existing=True)
+    assert isinstance(env_internal, InternalEnvironment)
+    assert env_internal == env_manager.main_environment
+
+    # Test 2: With dependencies -> ExternalEnvironment + deps installed
+    dependencies = Dependencies({"conda": ["requests"]})
+    env_external = env_manager.create("test_env_external", dependencies)
+    assert isinstance(env_external, ExternalEnvironment)
+
+    installed_packages = env_manager.get_installed_packages(env_external)
     assert any(icp["name"] == "requests" for icp in installed_packages)
 
-    # Verify that recreating the same env returns it
-    same_env = env_manager.create(env_name, dependencies)
-    assert env == same_env
-    env.exit()
-    other_env = env_manager.create(env_name, dependencies)
+    # Test 3: Recreating same env returns same instance
+    same_env = env_manager.create("test_env_external", dependencies)
+    assert env_external == same_env
+
+    # Test 4: After exit, recreating gives different instance
+    env_external.exit()
+    other_env = env_manager.create("test_env_external", dependencies)
     assert other_env != same_env
     other_env.exit()
+
+    # Test 5: Force external with use_existing=False
+    env_external_forced = env_manager.create("test_env_external_forced", {}, use_existing=False)
+    assert isinstance(env_external_forced, ExternalEnvironment)
+
+    env_internal.exit()
+    env_external_forced.exit()
 
 
 @pytest.mark.integration
 def test_dependency_installation(env_manager):
-    """Test that EnvironmentManager.install() correctly installs dependencies (in existing env)."""
-    env_name = "test_env_deps"
-    logger.info(f"Testing dependency installation: {env_name}")
-    env = env_manager.create(env_name, use_existing=False)
+    """Test that Environment.install() correctly installs dependencies in existing env."""
+    logger.info("Testing dependency installation in existing env")
+    env = env_manager.create("test_env_deps", use_existing=False)
     dependencies = Dependencies({"pip": ["munch==4.0.0"], "conda": ["fastai::fastprogress==1.0.3"]})
 
     env.install(dependencies)
 
-    # Verify that 'numpy' and 'noise2self' is installed
     installed_packages = env_manager.get_installed_packages(env)
     assert any(
         icp["name"] == "fastprogress" and icp["version"].startswith("1.0.3") and icp["kind"] == "conda"
@@ -84,28 +133,6 @@ def test_dependency_installation(env_manager):
     )
 
     env.exit()
-
-
-@pytest.mark.integration
-def test_internal_external_environment(env_manager):
-    """Test that EnvironmentManager.create() correctly creates internal/external environments."""
-
-    logger.info("Testing internal/external environment creation")
-    # No dependencies: InternalEnvironment
-    env_internal = env_manager.create("test_env_internal", {}, use_existing=True)
-    assert isinstance(env_internal, InternalEnvironment)
-    assert env_internal == env_manager.main_environment
-
-    # With dependencies: ExternalEnvironment
-    env_external = env_manager.create("test_env_external", {"conda": ["requests"]})
-    assert isinstance(env_external, ExternalEnvironment)
-
-    env_external_forced = env_manager.create("test_env_external_forced", {}, use_existing=False)
-    assert isinstance(env_external_forced, ExternalEnvironment)
-
-    env_internal.exit()
-    env_external.exit()
-    env_external_forced.exit()
 
 
 @pytest.mark.integration
@@ -162,18 +189,26 @@ def test_mambarc_modification(env_manager, tmp_path):
 
 
 @pytest.mark.integration
-def test_code_execution(env_manager, tmp_path):
-    """Test that Environment.execute() correctly executes code within an environment."""
-    env_name = "test_env_code_exec"
+class TestCodeExecution:
+    """Tests for code execution within environments, using a shared numpy environment."""
 
-    logger.info(f"Testing code execution: {env_name}")
-    dependencies = {"conda": ["numpy"]}  # numpy is required to import it
+    @pytest.fixture(scope="class")
+    def numpy_env(self, env_manager):
+        """Shared numpy environment for code execution tests."""
+        logger.info("Creating shared numpy environment for TestCodeExecution")
+        env = env_manager.create("shared_numpy_env", {"conda": ["numpy"]})
+        env.launch()
+        yield env
+        env.exit()
 
-    # Create a simple module in the tmp_path
-    module_path = tmp_path / "test_module.py"
-    with open(module_path, "w") as f:
-        f.write(
-            """
+    def test_execute_and_import_module(self, numpy_env, tmp_path):
+        """Test that Environment.execute() and import_module() correctly execute code."""
+        logger.info("Testing code execution with execute() and import_module()")
+
+        module_path = tmp_path / "test_module.py"
+        with open(module_path, "w") as f:
+            f.write(
+                """
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -185,81 +220,28 @@ def sum(x):
 def prod(x=[], y=1):
     return int(np.prod(x)) * y
 """
-        )
-    env = env_manager.create(env_name, dependencies)
-    env.launch()
-    # Execute the function within the environment
-    result = env.execute(str(module_path), "sum", [[1, 2, 3]])
-    assert result == 6
-    result = env.execute(str(module_path), "prod", [[1, 2, 3]], {"y": 2})
-    assert result == 12
+            )
 
-    # Test with import_module
-    module = env.import_module(str(module_path))
-    result = module.sum([1, 2, 3])
-    assert result == 6
-    result = module.prod([1, 2, 3], y=3)
-    assert result == 18
+        # Test execute()
+        result = numpy_env.execute(str(module_path), "sum", [[1, 2, 3]])
+        assert result == 6
+        result = numpy_env.execute(str(module_path), "prod", [[1, 2, 3]], {"y": 2})
+        assert result == 12
 
-    env.exit()
+        # Test import_module()
+        module = numpy_env.import_module(str(module_path))
+        result = module.sum([1, 2, 3])
+        assert result == 6
+        result = module.prod([1, 2, 3], y=3)
+        assert result == 18
 
+    def test_advanced_subprocess_execution(self, numpy_env, tmp_path):
+        """Test advanced execution with subprocess communication."""
+        logger.info("Testing advanced subprocess execution")
 
-@pytest.mark.integration
-def test_non_existent_function(env_manager, tmp_path):
-    """Test that an exception is raised when executing a non-existent function."""
-    env_name = "test_env_non_existent_function"
-
-    logger.info(f"Testing non-existent function: {env_name}")
-    # Create a simple module in the tmp_path
-    module_path = tmp_path / "test_module.py"
-    with open(module_path, "w") as f:
-        f.write(
-            """
-def double(x):
-    return x * 2
-"""
-        )
-
-    env = env_manager.create(env_name, {}, use_existing=True)  # No dependencies needed
-    # env.launch()
-
-    with pytest.raises(Exception) as excinfo:
-        env.execute(str(module_path), "non_existent_function", [1])
-    assert "has no function" in str(excinfo.value)
-
-    module = env.import_module(str(module_path))
-    with pytest.raises(Exception) as excinfo:
-        module.non_existent_function(1)
-
-    assert "has no attribute" in str(excinfo.value)
-
-    env.exit()
-
-
-@pytest.mark.integration
-def test_non_existent_module(env_manager):
-    """Test that an exception is raised when importing a non-existent module."""
-    env_name = "test_env_non_existent_module"
-    env = env_manager.create(env_name, {}, use_existing=True)
-    # env.launch()
-    logger.info(f"Testing non-existent module: {env_name}")
-
-    with pytest.raises(ModuleNotFoundError):
-        env.execute("non_existent_module.py", "my_function", [1])
-
-    with pytest.raises(ModuleNotFoundError):
-        env.import_module("non_existent_module.py")
-
-    env.exit()
-
-
-@pytest.mark.integration
-def test_advanced_execution(env_manager, tmp_path):
-    env = env_manager.create("advanced_test", Dependencies(conda=["numpy"]))
-
-    module_path = tmp_path / "test_module.py"
-    with open(module_path, "w") as f:
-        f.write("""from multiprocessing.connection import Listener
+        module_path = tmp_path / "test_module.py"
+        with open(module_path, "w") as f:
+            f.write("""from multiprocessing.connection import Listener
 import sys
 import numpy as np
 
@@ -276,28 +258,66 @@ with Listener(("localhost", 0)) as listener:
                 sys.exit()
     """)
 
-    process = env.execute_commands([f"python -u {(tmp_path / 'test_module.py').resolve()}"], log=False)
+        process = numpy_env.execute_commands([f"python -u {(tmp_path / 'test_module.py').resolve()}"], log=False)
 
-    port = 0
-    if process.stdout is not None:
-        for line in process.stdout:
-            if line.strip().startswith("Listening port "):
-                port = int(line.strip().replace("Listening port ", ""))
-                break
+        port = 0
+        if process.stdout is not None:
+            for line in process.stdout:
+                if line.strip().startswith("Listening port "):
+                    port = int(line.strip().replace("Listening port ", ""))
+                    break
 
-    connection = Client(("localhost", port))
+        connection = Client(("localhost", port))
 
-    connection.send(dict(action="execute_sum", args=[1, 2, 3, 4]))
-    result = connection.recv()
-    assert result == 10
+        connection.send(dict(action="execute_sum", args=[1, 2, 3, 4]))
+        result = connection.recv()
+        assert result == 10
 
-    connection.send(dict(action="execute_prod", args=[1, 2, 3, 4]))
-    result = connection.recv()
-    assert result == 24
+        connection.send(dict(action="execute_prod", args=[1, 2, 3, 4]))
+        result = connection.recv()
+        assert result == 24
 
-    connection.send(dict(action="exit"))
-    result = connection.recv()
-    assert result["action"] == "exited"
+        connection.send(dict(action="exit"))
+        result = connection.recv()
+        assert result["action"] == "exited"
+
+
+@pytest.mark.integration
+def test_execution_errors(env_manager, tmp_path):
+    """Test that proper exceptions are raised for non-existent functions and modules."""
+    logger.info("Testing execution errors for non-existent function/module")
+
+    module_path = tmp_path / "test_module.py"
+    with open(module_path, "w") as f:
+        f.write(
+            """
+def double(x):
+    return x * 2
+"""
+        )
+
+    env = env_manager.create("test_env_execution_errors", {}, use_existing=True)
+
+    # Test non-existent function via execute
+    with pytest.raises(Exception) as excinfo:
+        env.execute(str(module_path), "non_existent_function", [1])
+    assert "has no function" in str(excinfo.value)
+
+    # Test non-existent function via import_module
+    module = env.import_module(str(module_path))
+    with pytest.raises(Exception) as excinfo:
+        module.non_existent_function(1)
+    assert "has no attribute" in str(excinfo.value)
+
+    # Test non-existent module via execute
+    with pytest.raises(ModuleNotFoundError):
+        env.execute("non_existent_module.py", "my_function", [1])
+
+    # Test non-existent module via import_module
+    with pytest.raises(ModuleNotFoundError):
+        env.import_module("non_existent_module.py")
+
+    env.exit()
 
 
 @pytest.mark.integration
@@ -526,3 +546,38 @@ def clean():
 
     env.exit()
     logger.info("Test completed successfully with no resource leaks")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "config_file,config_content",
+    [
+        ("pixi.toml", PIXI_TOML_CONTENT),
+        ("pyproject.toml", PYPROJECT_TOML_CONTENT),
+        ("environment.yml", ENV_YML_CONTENT),
+        ("requirements.txt", REQUIREMENTS_TXT_CONTENT),
+    ],
+)
+def test_create_from_config(env_manager, tmp_path, config_file, config_content):
+    """Test that EnvironmentManager.create_from_config() works with various config files."""
+    logger.info(f"Testing create_from_config with {config_file}")
+
+    # Create config file
+    config_path = tmp_path / config_file
+    config_path.write_text(config_content)
+
+    env_name = f"test_{config_file.replace('.', '_')}"
+    env = env_manager.create_from_config(name=env_name, config_path=config_path)
+
+    # Verify environment was created
+    assert env is not None
+    assert isinstance(env, ExternalEnvironment)
+
+    # Verify that 'requests' is installed
+    installed_packages = env_manager.get_installed_packages(env)
+    assert any(pkg["name"] == "requests" for pkg in installed_packages), (
+        f"'requests' not found in installed packages: {[p['name'] for p in installed_packages]}"
+    )
+
+    env.exit()
+    logger.info(f"Test create_from_config with {config_file} completed successfully")

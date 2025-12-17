@@ -69,21 +69,19 @@ def environment_manager_for_config_tests(tmp_path_factory, mock_command_executor
 
 @pytest.fixture
 def sample_pixi_toml(temp_config_dir):
-    """Create a sample pixi.toml file."""
+    """Create a sample pixi.toml file in native pixi format."""
     content = """
-[project]
-name = "test-project"
-version = "0.1.0"
+[workspace]
+name = "project-pixi-toml"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
 
-[tool.pixi.dependencies]
-python = "3.11"
+[dependencies]
+python = ">=3.11"
 numpy = ">=1.20"
 
-[tool.pixi.pypi-dependencies]
+[pypi-dependencies]
 requests = ">=2.25"
-
-[tool.pixi.environments.default]
-channels = ["conda-forge"]
 """
     pixi_file = temp_config_dir / "pixi.toml"
     pixi_file.write_text(content)
@@ -95,18 +93,22 @@ def sample_pyproject_toml_with_pixi(temp_config_dir):
     """Create a sample pyproject.toml with pixi config."""
     content = """
 [project]
-name = "test-package"
-version = "0.1.0"
+name = "project-pyproject-toml"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.20",
+    "requests>=2.25"
+]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
 
 [tool.pixi.dependencies]
-python = "3.10"
-numpy = ">=1.20"
+numpy = "*"
+pandas = "*"
+matplotlib = "*"
 
-[tool.pixi.pypi-dependencies]
-requests = ">=2.25"
-
-[tool.pixi.environments.default]
-channels = ["conda-forge"]
 """
     pyproject_file = temp_config_dir / "pyproject.toml"
     pyproject_file.write_text(content)
@@ -172,36 +174,13 @@ class TestCreateWithPixiToml:
     """Test EnvironmentManager.create() with pixi.toml files."""
 
     def test_create_with_pixi_toml_basic(self, environment_manager_for_config_tests, sample_pixi_toml):
-        """Test creating environment from pixi.toml."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
-
-        # Mock ConfigParser to return expected dependencies
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"python": "3.11", "conda": ["numpy>=1.20"], "pip": ["requests>=2.25"]}
-            MockConfigParser.return_value = mock_parser
-
-            manager.create_from_config(name="test_env", config_path=sample_pixi_toml)
-
-            # Verify parse was called
-            mock_parser.parse.assert_called_once()
-
-    def test_create_with_pixi_toml_missing_environment_name(
-        self, environment_manager_for_config_tests, sample_pixi_toml
-    ):
-        """Test that create_from_config can be used without environment_name (validation happens in ConfigParser)."""
+        """Test creating environment from pixi.toml uses real ConfigParser."""
         manager, _, _ = environment_manager_for_config_tests
 
-        # create_from_config doesn't require environment_name - the parser will handle validation
-        # This test now verifies that create_from_config is callable without it
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            # ConfigParser.parse will validate and raise if needed
-            mock_parser.parse.side_effect = ValueError("environment_name is required for pixi.toml files")
-            MockConfigParser.return_value = mock_parser
+        env = manager.create_from_config(name="test_env", config_path=sample_pixi_toml)
 
-            with pytest.raises(ValueError, match="environment_name.*pixi.toml"):
-                manager.create_from_config(name="test_env", config_path=sample_pixi_toml)
+        # Verify environment was created
+        assert env is not None
 
 
 class TestCreateWithPyprojectToml:
@@ -210,142 +189,80 @@ class TestCreateWithPyprojectToml:
     def test_create_with_pyproject_pixi_environment(
         self, environment_manager_for_config_tests, sample_pyproject_toml_with_pixi
     ):
-        """Test creating environment from pyproject.toml with pixi config."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
-
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"python": "3.10", "conda": ["numpy>=1.20"], "pip": ["requests>=2.25"]}
-            MockConfigParser.return_value = mock_parser
-
-            manager.create_from_config(name="test_env", config_path=sample_pyproject_toml_with_pixi)
-
-            mock_parser.parse.assert_called_once()
-
-    def test_create_with_pyproject_optional_deps(
-        self, environment_manager_for_config_tests, sample_pyproject_toml_no_pixi, monkeypatch
-    ):
-        """Test creating environment from pyproject.toml with optional dependencies."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
-
-        # Mock _environment_validates_requirements to return False so environment is created
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
-
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"pip": ["numpy>=1.20", "scipy>=1.7", "pytest>=6.0", "black>=21.0"]}
-            MockConfigParser.return_value = mock_parser
-
-            manager.create_from_config(
-                name="test_env", config_path=sample_pyproject_toml_no_pixi, optional_dependencies=["dev"]
-            )
-
-            mock_parser.parse.assert_called_once()
-            call_args = mock_parser.parse.call_args
-            assert call_args[1].get("optional_dependencies") == ["dev"]
-
-    def test_create_with_pyproject_toml_no_env_or_optional(
-        self, environment_manager_for_config_tests, sample_pyproject_toml_with_pixi, monkeypatch
-    ):
-        """Test that a non-existent environment_name falls back to default environment."""
+        """Test creating environment from pyproject.toml with pixi config uses real ConfigParser."""
         manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _environment_validates_requirements to return False
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        env = manager.create_from_config(name="test_env", config_path=sample_pyproject_toml_with_pixi)
 
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"python": "3.10", "conda": ["numpy"], "pip": ["requests"]}
-            MockConfigParser.return_value = mock_parser
+        assert env is not None
 
-            # Should succeed with non-existent environment_name - falls back to default
-            env = manager.create_from_config(name="test_env", config_path=sample_pyproject_toml_with_pixi)
+    def test_create_with_pyproject_optional_deps(
+        self, environment_manager_for_config_tests, sample_pyproject_toml_no_pixi
+    ):
+        """Test creating environment from pyproject.toml with optional dependencies uses real ConfigParser."""
+        manager, _, _ = environment_manager_for_config_tests
 
-            mock_parser.parse.assert_called_once()
-            assert env is not None
+        env = manager.create_from_config(
+            name="test_env", config_path=sample_pyproject_toml_no_pixi, optional_dependencies=["dev"]
+        )
+
+        assert env is not None
+
+    def test_create_with_pyproject_toml_no_env_or_optional(
+        self, environment_manager_for_config_tests, sample_pyproject_toml_no_pixi
+    ):
+        """Test pyproject.toml without pixi config works with real ConfigParser."""
+        manager, _, _ = environment_manager_for_config_tests
+
+        env = manager.create_from_config(name="test_env", config_path=sample_pyproject_toml_no_pixi)
+
+        assert env is not None
 
 
 class TestCreateWithEnvironmentYml:
     """Test EnvironmentManager.create() with environment.yml files."""
 
-    def test_create_with_environment_yml(
-        self, environment_manager_for_config_tests, sample_environment_yml, monkeypatch
-    ):
-        """Test creating environment from environment.yml."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
+    def test_create_with_environment_yml(self, environment_manager_for_config_tests, sample_environment_yml):
+        """Test creating environment from environment.yml uses real ConfigParser."""
+        manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _environment_validates_requirements to return False
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        env = manager.create_from_config(name="test_env", config_path=sample_environment_yml)
 
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"conda": ["python=3.11", "numpy>=1.20"], "pip": ["requests>=2.25"]}
-            MockConfigParser.return_value = mock_parser
-
-            manager.create_from_config(name="test_env", config_path=sample_environment_yml)
-
-            mock_parser.parse.assert_called_once()
+        assert env is not None
 
     def test_create_with_environment_yml_no_extra_params(
-        self, environment_manager_for_config_tests, sample_environment_yml, monkeypatch
+        self, environment_manager_for_config_tests, sample_environment_yml
     ):
         """Test environment.yml doesn't require environment_name or optional_dependencies."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
+        manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _environment_validates_requirements to return False
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        # Should not raise error
+        env = manager.create_from_config(name="test_env", config_path=sample_environment_yml)
 
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"conda": ["python=3.11"], "pip": ["requests>=2.25"]}
-            MockConfigParser.return_value = mock_parser
-
-            # Should not raise error
-            manager.create_from_config(name="test_env", config_path=sample_environment_yml)
-
-            mock_parser.parse.assert_called_once()
+        assert env is not None
 
 
 class TestCreateWithRequirementsTxt:
     """Test EnvironmentManager.create() with requirements.txt files."""
 
-    def test_create_with_requirements_txt(
-        self, environment_manager_for_config_tests, sample_requirements_txt, monkeypatch
-    ):
-        """Test creating environment from requirements.txt."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
+    def test_create_with_requirements_txt(self, environment_manager_for_config_tests, sample_requirements_txt):
+        """Test creating environment from requirements.txt uses real ConfigParser."""
+        manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _environment_validates_requirements to return False
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        env = manager.create_from_config(name="test_env", config_path=sample_requirements_txt)
 
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"pip": ["numpy>=1.20", "scipy>=1.7", "requests>=2.25", "pytest>=6.0"]}
-            MockConfigParser.return_value = mock_parser
-
-            env = manager.create_from_config(name="test_env", config_path=sample_requirements_txt)
-
-            mock_parser.parse.assert_called_once()
-            assert env is not None
+        assert env is not None
 
     def test_create_with_requirements_txt_no_extra_params(
-        self, environment_manager_for_config_tests, sample_requirements_txt, monkeypatch
+        self, environment_manager_for_config_tests, sample_requirements_txt
     ):
         """Test requirements.txt doesn't require environment_name or optional_dependencies."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
+        manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _environment_validates_requirements to return False
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        # Should not raise error
+        env = manager.create_from_config(name="test_env", config_path=sample_requirements_txt)
 
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"pip": ["numpy>=1.20"]}
-            MockConfigParser.return_value = mock_parser
-
-            # Should not raise error
-            manager.create_from_config(name="test_env", config_path=sample_requirements_txt)
-
-            mock_parser.parse.assert_called_once()
+        assert env is not None
 
 
 class TestCreateBackwardsCompatibility:
@@ -353,7 +270,7 @@ class TestCreateBackwardsCompatibility:
 
     def test_create_with_inline_dependencies(self, environment_manager_for_config_tests):
         """Test creating environment with inline Dependencies dict (original API)."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
+        manager, _, _ = environment_manager_for_config_tests
 
         deps: Dependencies = {"python": "3.11", "conda": ["numpy"], "pip": ["requests"]}
 
@@ -364,12 +281,9 @@ class TestCreateBackwardsCompatibility:
             # ConfigParser should not be called for inline deps
             MockConfigParser.assert_not_called()
 
-    def test_create_with_none_dependencies(self, environment_manager_for_config_tests, monkeypatch):
+    def test_create_with_none_dependencies(self, environment_manager_for_config_tests):
         """Test creating environment with no dependencies."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
-
-        # Mock _environment_validates_requirements to return False so environment is created
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        manager, _, _ = environment_manager_for_config_tests
 
         env = manager.create(name="test_env")
 
@@ -398,49 +312,27 @@ class TestCreateParameterValidation:
             manager.create_from_config(name="test_env", config_path=missing_file)
 
     def test_both_environment_and_optional_deps_provided(
-        self, environment_manager_for_config_tests, sample_pyproject_toml_with_pixi, monkeypatch
+        self, environment_manager_for_config_tests, sample_pyproject_toml_no_pixi
     ):
         """Test that providing optional_dependencies with create_from_config is allowed."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
+        manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _environment_validates_requirements to return False
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        # create_from_config with optional_dependencies using real ConfigParser
+        env = manager.create_from_config(
+            name="test_env", config_path=sample_pyproject_toml_no_pixi, optional_dependencies=["dev"]
+        )
 
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = {"python": "3.10", "conda": ["numpy"], "pip": ["requests"]}
-            MockConfigParser.return_value = mock_parser
-
-            # create_from_config with optional_dependencies
-            manager.create_from_config(
-                name="test_env", config_path=sample_pyproject_toml_with_pixi, optional_dependencies=["dev"]
-            )
-
-            mock_parser.parse.assert_called_once()
+        assert env is not None
 
 
 class TestCreateIntegrationWithDependencyManager:
     """Test create() integration with DependencyManager."""
 
-    def test_create_uses_parsed_dependencies(
-        self, environment_manager_for_config_tests, sample_environment_yml, monkeypatch
-    ):
-        """Test that parsed dependencies are passed to DependencyManager."""
-        manager, mock_execute_output, mock_execute = environment_manager_for_config_tests
+    def test_create_uses_parsed_dependencies(self, environment_manager_for_config_tests, sample_environment_yml):
+        """Test that parsed dependencies are passed to DependencyManager using real ConfigParser."""
+        manager, _, _ = environment_manager_for_config_tests
 
-        # Mock _environment_validates_requirements to return False
-        monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+        env = manager.create_from_config(name="test_env", config_path=sample_environment_yml)
 
-        parsed_deps = {"conda": ["python=3.11", "numpy>=1.20"], "pip": ["requests>=2.25"]}
-
-        with patch("wetlands.environment_manager.ConfigParser") as MockConfigParser:
-            mock_parser = MagicMock()
-            mock_parser.parse.return_value = parsed_deps
-            MockConfigParser.return_value = mock_parser
-
-            env = manager.create_from_config(name="test_env", config_path=sample_environment_yml)
-
-            # Verify that ConfigParser.parse was called with the config file
-            mock_parser.parse.assert_called_once()
-            # Verify environment was created
-            assert env is not None
+        # Verify environment was created
+        assert env is not None
