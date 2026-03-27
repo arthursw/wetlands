@@ -133,7 +133,7 @@ You can also use Wetlands ProcessLogger:
 ```python
 
 # Retrieve the ProcessLogger that was created by execute_commands
-process_logger = self.environment_manager.get_process_logger(env.process.pid)
+process_logger = self.environment_manager.get_process_logger(env.process)
 
 # Subscribe to the process output
 def check_output(line: str, _context: dict) -> None:
