@@ -60,6 +60,10 @@ class ExternalEnvironment(Environment):
         if self.launched():
             return
 
+        # Ensure debugpy is installed if in debug mode (it may be missing if the env was created in normal mode)
+        if self.environment_manager.debug:
+            self._ensure_debugpy_installed()
+
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
 
         debug_args = f" --debug_port 0" if self.environment_manager.debug else ""
@@ -103,6 +107,14 @@ class ExternalEnvironment(Environment):
             raise Exception("Could not find the server port.")
 
         self.connection = Client(("localhost", self.port))
+
+    def _ensure_debugpy_installed(self) -> None:
+        """Install debugpy in the environment if it is not already installed."""
+        installed_packages = self.environment_manager.get_installed_packages(self)
+        if any(pkg["name"] == "debugpy" for pkg in installed_packages):
+            return
+        logger.info(f"Installing debugpy in environment '{self.name}' for debug mode.")
+        self.environment_manager.install(self, {"conda": ["debugpy"]})
 
     def _send_and_wait(self, payload: dict) -> Any:
         """Send a payload to the remote environment and wait for its response."""
