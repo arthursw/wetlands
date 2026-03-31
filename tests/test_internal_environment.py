@@ -4,6 +4,7 @@ import sys
 from unittest.mock import MagicMock, patch
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.internal_environment import InternalEnvironment
+from wetlands.task import Task, TaskStatus
 
 
 def test_execute_function_success():
@@ -81,3 +82,96 @@ def test_run_script_with_custom_run_name():
 
     mock_run_path.assert_called_once_with(script_path, run_name=run_name)
     assert result is None
+
+
+# --- Task API tests ---
+
+
+@pytest.fixture
+def internal_env():
+    env_manager = MagicMock(spec=EnvironmentManager)
+    return InternalEnvironment("test_env", Path("test_env"), env_manager)
+
+
+def test_submit_returns_completed_task(internal_env):
+    module_path = "fake_module.py"
+    mock_module = MagicMock()
+    mock_function = MagicMock(return_value=42)
+    setattr(mock_module, "add", mock_function)
+
+    with (
+        patch.object(internal_env, "_import_module", return_value=mock_module),
+    ):
+        task = internal_env.submit(module_path, "add", args=(1, 2))
+
+    task.wait_for(timeout=5)
+    assert isinstance(task, Task)
+    assert task.status == TaskStatus.COMPLETED
+    assert task.result == 42
+    mock_function.assert_called_once_with(1, 2)
+
+
+def test_submit_with_start_false_stays_pending(internal_env):
+    module_path = "fake_module.py"
+    mock_module = MagicMock()
+    mock_function = MagicMock(return_value=10)
+    setattr(mock_module, "f", mock_function)
+
+    with patch.object(internal_env, "_import_module", return_value=mock_module):
+        task = internal_env.submit(module_path, "f", start=False)
+
+        assert task.status == TaskStatus.PENDING
+        mock_function.assert_not_called()
+
+        # Now start it and verify it completes
+        task.start()
+        task.wait_for(timeout=5)
+        assert task.status == TaskStatus.COMPLETED
+
+
+def test_submit_script_returns_task(internal_env):
+    script_path = "/path/to/script.py"
+
+    with patch("runpy.run_path") as mock_run_path:
+        task = internal_env.submit_script(script_path)
+        task.wait_for(timeout=5)
+
+    assert isinstance(task, Task)
+    assert task.status == TaskStatus.COMPLETED
+    assert task.result is None
+
+
+def test_map_yields_results_in_order(internal_env):
+    module_path = "fake_module.py"
+    mock_module = MagicMock()
+
+    def double(x):
+        return x * 2
+
+    mock_module.double = double
+
+    with patch.object(internal_env, "_import_module", return_value=mock_module):
+        results = list(internal_env.map(module_path, "double", [1, 2, 3, 4]))
+
+    assert results == [2, 4, 6, 8]
+
+
+def test_map_tasks_returns_task_list(internal_env):
+    module_path = "fake_module.py"
+    mock_module = MagicMock()
+
+    def square(x):
+        return x ** 2
+
+    mock_module.square = square
+
+    with patch.object(internal_env, "_import_module", return_value=mock_module):
+        tasks = internal_env.map_tasks(module_path, "square", [2, 3, 5])
+
+        assert len(tasks) == 3
+        for t in tasks:
+            assert isinstance(t, Task)
+            t.wait_for(timeout=5)
+            assert t.status == TaskStatus.COMPLETED
+
+        assert [t.result for t in tasks] == [4, 9, 25]

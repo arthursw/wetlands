@@ -3,6 +3,8 @@ from pathlib import Path
 from multiprocessing.connection import Client, Connection
 import functools
 import threading
+import queue
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any, TYPE_CHECKING, Union
 from send2trash import send2trash
 
@@ -13,6 +15,7 @@ from wetlands.environment import Environment
 from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.process_logger import ProcessLogger
+from wetlands.task import Task, TaskStatus
 
 try:
     from wetlands.ndarray import register_ndarray_pickle
@@ -39,6 +42,28 @@ def synchronized(method):
     return wrapper
 
 
+class _Worker:
+    """Holds state for a single module_executor process."""
+
+    __slots__ = ("index", "process", "port", "connection", "process_logger", "reader_thread", "_current_task")
+
+    def __init__(
+        self,
+        index: int,
+        process: subprocess.Popen,
+        port: int,
+        connection: Connection,
+        process_logger: ProcessLogger | None,
+    ) -> None:
+        self.index = index
+        self.process = process
+        self.port = port
+        self.connection = connection
+        self.process_logger = process_logger
+        self.reader_thread: threading.Thread | None = None
+        self._current_task: Task[Any] | None = None
+
+
 class ExternalEnvironment(Environment):
     port: int | None = None
     process: subprocess.Popen | None = None
@@ -48,22 +73,55 @@ class ExternalEnvironment(Environment):
         super().__init__(name, path, environment_manager)
         self._lock = threading.RLock()
         self._process_logger: ProcessLogger | None = None
+        # Worker pool state
+        self._workers: list[_Worker] = []
+        self._idle_workers: queue.Queue[_Worker] = queue.Queue()
+        self._task_queue: queue.Queue[Task[Any]] = queue.Queue()
 
     @synchronized
-    def launch(self, additional_activate_commands: Commands = {}) -> None:
-        """Launches a server listening for orders in the environment.
+    def launch(
+        self,
+        additional_activate_commands: Commands = {},
+        *,
+        max_workers: int = 1,
+        worker_env: Callable[[int], dict[str, str]] | None = None,
+    ) -> None:
+        """Launches module executor process(es) in the environment.
 
         Args:
-                additional_activate_commands: Platform-specific activation commands.
+            additional_activate_commands: Platform-specific activation commands.
+            max_workers: Number of worker processes to start.
+                All workers share the same conda environment (no duplication).
+            worker_env: Optional callable receiving worker index (0-based),
+                returning extra environment variables for that worker.
         """
-
         if self.launched():
             return
 
-        # Ensure debugpy is installed if in debug mode (it may be missing if the env was created in normal mode)
+        # Ensure debugpy is installed if in debug mode
         if self.environment_manager.debug:
             self._ensure_debugpy_installed()
 
+        for i in range(max_workers):
+            worker = self._launch_worker(i, additional_activate_commands, worker_env)
+            self._workers.append(worker)
+            self._idle_workers.put(worker)
+
+        # For backward compat, expose first worker's port/process/connection
+        if self._workers:
+            first = self._workers[0]
+            self.port = first.port
+            self.process = first.process
+            self.connection = first.connection
+            self._process_logger = first.process_logger
+
+    def _launch_worker(
+        self,
+        index: int,
+        additional_activate_commands: Commands,
+        worker_env: Callable[[int], dict[str, str]] | None,
+    ) -> _Worker:
+        """Launch a single module_executor process and return a _Worker."""
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
 
         debug_args = f" --debug_port 0" if self.environment_manager.debug else ""
@@ -71,42 +129,284 @@ class ExternalEnvironment(Environment):
             f'python -u "{module_executor_path}" {self.name} --wetlands_instance_path {self.environment_manager.wetlands_instance_path.resolve()}{debug_args}'
         ]
 
-        # Create log context for the module executor process
         log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}
+        if len(self._workers) > 0 or index > 0:
+            log_context["worker_index"] = index
 
-        # Pass log_context to execute_commands so ProcessLogger is created with proper context
-        self.process = self.execute_commands(commands, additional_activate_commands, log_context=log_context)
+        # Build popen_kwargs with worker-specific env vars
+        popen_kwargs: dict[str, Any] = {}
+        if worker_env is not None:
+            import os
 
-        # Retrieve the ProcessLogger that was already created and started by execute_commands
-        self._process_logger = self.environment_manager.get_process_logger(self.process)
-        if self._process_logger is None:
-            raise Exception("Failed to retrieve ProcessLogger for module executor process")
+            env = os.environ.copy()
+            env.update(worker_env(index))
+            popen_kwargs["env"] = env
 
-        # Handle debug port if needed
+        process = self.execute_commands(
+            commands, additional_activate_commands, log_context=log_context, popen_kwargs=popen_kwargs
+        )
+
+        process_logger = self.environment_manager.get_process_logger(process)
+        if process_logger is None:
+            raise Exception(f"Failed to retrieve ProcessLogger for worker {index}")
+
+        # Handle debug port
         if self.environment_manager.debug:
 
             def debug_predicate(line: str) -> bool:
                 return line.startswith("Listening debug port ")
 
-            debug_line = self._process_logger.wait_for_line(debug_predicate, timeout=5)
+            debug_line = process_logger.wait_for_line(debug_predicate, timeout=5)
             if debug_line:
                 debug_port = int(debug_line.replace("Listening debug port ", ""))
+                module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
                 self.environment_manager.register_environment(self, debug_port, module_executor_path)
 
-        # Wait for port announcement with timeout
+        # Wait for port
         def port_predicate(line: str) -> bool:
             return line.startswith("Listening port ")
 
-        port_line = self._process_logger.wait_for_line(port_predicate, timeout=30)
+        port_line = process_logger.wait_for_line(port_predicate, timeout=30)
         if port_line:
-            self.port = int(port_line.replace("Listening port ", ""))
+            port = int(port_line.replace("Listening port ", ""))
+        else:
+            port = 0
 
-        if self.process.poll() is not None:
-            raise Exception(f"Process exited with return code {self.process.returncode}.")
-        if self.port is None:
-            raise Exception("Could not find the server port.")
+        if process.poll() is not None:
+            raise Exception(f"Worker {index} exited with return code {process.returncode}.")
+        if port == 0:
+            raise Exception(f"Could not find the server port for worker {index}.")
 
-        self.connection = Client(("localhost", self.port))
+        connection = Client(("localhost", port))
+        worker = _Worker(index, process, port, connection, process_logger)
+
+        # Start IPC reader thread for this worker
+        reader = threading.Thread(
+            target=self._worker_reader_loop,
+            args=(worker,),
+            daemon=True,
+            name=f"wetlands-reader-{self.name}-{index}",
+        )
+        worker.reader_thread = reader
+        reader.start()
+
+        return worker
+
+    def _worker_reader_loop(self, worker: _Worker) -> None:
+        """Daemon thread that reads IPC messages from a worker and dispatches to the current Task."""
+        conn = worker.connection
+        while True:
+            try:
+                message = conn.recv()
+            except (EOFError, OSError):
+                # Connection closed — mark current task as failed if any
+                task = worker._current_task
+                if task is not None and not task.status.is_finished():
+                    task._set_failed("Worker connection closed unexpectedly")
+                break
+
+            task = worker._current_task
+            if task is None:
+                # No active task — this is a legacy message or unexpected
+                logger.warning(f"Worker {worker.index}: received message with no active task: {message}")
+                continue
+
+            action = message.get("action")
+            if action in ("execution finished", "error", "canceled"):
+                task._on_message(message)
+                worker._current_task = None
+                # Return worker to idle pool and dispatch next queued task
+                self._dispatch_or_idle(worker)
+            elif action == "update":
+                task._on_message(message)
+            elif action == "log":
+                level = message.get("level", 20)
+                logger.log(level, message.get("message", ""), extra=message.get("extra"))
+            else:
+                logger.warning(f"Worker {worker.index}: unexpected message: {message}")
+
+    def _dispatch_or_idle(self, worker: _Worker) -> None:
+        """Try to dispatch the next queued task to this worker, or return it to idle pool."""
+        try:
+            task = self._task_queue.get_nowait()
+            self._dispatch_to_worker(worker, task)
+        except queue.Empty:
+            self._idle_workers.put(worker)
+
+    def _dispatch_to_worker(self, worker: _Worker, task: Task[Any]) -> None:
+        """Send a task's payload to a worker for execution."""
+        payload = task._payload  # type: ignore[attr-defined]
+        payload["task_id"] = task.id
+        worker._current_task = task
+        task._set_running()
+
+        if worker.process_logger:
+            call_target = payload.get("_call_target", MODULE_EXECUTOR_FILE)
+            worker.process_logger.update_log_context({"call_target": call_target})
+
+        try:
+            worker.connection.send(payload)
+        except (OSError, BrokenPipeError) as e:
+            task._set_failed(f"Failed to send to worker {worker.index}: {e}")
+            worker._current_task = None
+
+    def _submit_task(self, task: Task[Any], start: bool) -> Task[Any]:
+        """Wire up a task's start/cancel functions and optionally start it."""
+
+        def _start() -> None:
+            try:
+                worker = self._idle_workers.get_nowait()
+                self._dispatch_to_worker(worker, task)
+            except queue.Empty:
+                self._task_queue.put(task)
+                # Task stays PENDING until a worker picks it up — set running deferred
+                # We need a wrapper that sets running when dispatched
+                pass
+
+        def _cancel() -> None:
+            # Find which worker has this task and send cancel
+            for w in self._workers:
+                if w._current_task is task:
+                    try:
+                        w.connection.send({"action": "cancel", "task_id": task.id})
+                    except (OSError, BrokenPipeError):
+                        pass
+                    return
+
+        task._set_start_fn(_start)
+        task._set_cancel_fn(_cancel)
+        if start:
+            task.start()
+        return task
+
+    # --- Public Task API ---
+
+    def submit(
+        self,
+        module_path: str | Path,
+        function: str,
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+        *,
+        start: bool = True,
+    ) -> Task[Any]:
+        """Submit a function for non-blocking execution in the remote environment.
+
+        Args:
+            module_path: Path to the module to import.
+            function: Name of the function to execute.
+            args: Positional arguments (must be picklable).
+            kwargs: Keyword arguments (must be picklable).
+            start: If True (default), dispatch immediately. If False, stays PENDING.
+
+        Returns:
+            A Task object.
+        """
+        kwargs = kwargs or {}
+        task: Task[Any] = Task()
+        module_name = Path(module_path).stem
+        task._payload = dict(  # type: ignore[attr-defined]
+            action="execute",
+            module_path=str(module_path),
+            function=function,
+            args=args,
+            kwargs=kwargs,
+            _call_target=f"{module_name}:{function}",
+        )
+        return self._submit_task(task, start)
+
+    def submit_script(
+        self,
+        script_path: str | Path,
+        args: tuple = (),
+        run_name: str = "__main__",
+        *,
+        start: bool = True,
+    ) -> Task[None]:
+        """Submit a script for non-blocking execution.
+
+        Args:
+            script_path: Path to the Python script.
+            args: Command-line arguments.
+            run_name: Value for runpy.run_path(run_name=...).
+            start: If True (default), dispatch immediately.
+
+        Returns:
+            A Task[None].
+        """
+        task: Task[None] = Task()
+        script_name = Path(script_path).name
+        task._payload = dict(  # type: ignore[attr-defined]
+            action="run",
+            script_path=str(script_path),
+            args=args,
+            run_name=run_name,
+            _call_target=script_name,
+        )
+        return self._submit_task(task, start)
+
+    def map(
+        self,
+        module_path: str | Path,
+        function: str,
+        iterable: Iterable[Any],
+        *,
+        timeout: float | None = None,
+        ordered: bool = True,
+    ) -> Iterator[Any]:
+        """Execute function once for each item, distributing across workers.
+
+        Args:
+            module_path: Module containing the function.
+            function: Function name.
+            iterable: Items to process (one task per item).
+            timeout: Max seconds to wait for each result.
+            ordered: If True, yield in submission order. If False, yield as completed.
+
+        Returns:
+            Iterator of results.
+        """
+        tasks = self.map_tasks(module_path, function, iterable)
+        if ordered:
+            for task in tasks:
+                task.wait_for(timeout=timeout)
+                if task.status == TaskStatus.FAILED:
+                    raise task.exception  # type: ignore[misc]
+                yield task.result
+        else:
+            # Yield results as they complete
+            remaining = set(range(len(tasks)))
+            while remaining:
+                for i in list(remaining):
+                    t = tasks[i]
+                    try:
+                        t.wait_for(timeout=0.01)
+                    except TimeoutError:
+                        continue
+                    remaining.discard(i)
+                    if t.status == TaskStatus.FAILED:
+                        raise t.exception  # type: ignore[misc]
+                    yield t.result
+
+    def map_tasks(
+        self,
+        module_path: str | Path,
+        function: str,
+        iterable: Iterable[Any],
+    ) -> list[Task[Any]]:
+        """Submit one task per item, distributing across workers.
+
+        All tasks are started immediately.
+
+        Args:
+            module_path: Module containing the function.
+            function: Function name.
+            iterable: Items to process.
+
+        Returns:
+            List of Task objects.
+        """
+        return [self.submit(module_path, function, args=(item,)) for item in iterable]
 
     def _ensure_debugpy_installed(self) -> None:
         """Install debugpy in the environment if it is not already installed."""
@@ -117,7 +417,9 @@ class ExternalEnvironment(Environment):
         self.environment_manager.install(self, {"conda": ["debugpy"]})
 
     def _send_and_wait(self, payload: dict) -> Any:
-        """Send a payload to the remote environment and wait for its response."""
+        """Send a payload to the remote environment and wait for its response.
+        Used by the legacy blocking execute()/run_script() methods.
+        """
         connection = self.connection
         if connection is None or connection.closed:
             raise ExecutionException("Connection not ready.")
@@ -153,20 +455,31 @@ class ExternalEnvironment(Environment):
     @synchronized
     def execute(self, module_path: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
         """Executes a function in the given module and return the result.
-        Warning: all arguments (args and kwargs) must be picklable (since they will be send with [multiprocessing.connection.Connection.send](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send))!
+        Warning: all arguments (args and kwargs) must be picklable!
+
+        When workers are available, uses submit() internally for dispatch.
+        Falls back to legacy _send_and_wait when no worker pool is set up.
 
         Args:
-                module_path: the path to the module to import
-                function: the name of the function to execute
-                args: the argument list for the function
-                kwargs: the keyword arguments for the function
+            module_path: the path to the module to import
+            function: the name of the function to execute
+            args: the argument list for the function
+            kwargs: the keyword arguments for the function
 
         Returns:
-                The result of the function if it is defined and the connection is opened ; None otherwise.
+            The result of the function.
         Raises:
-            OSError when raised by the communication.
+            ExecutionException: on remote errors.
         """
-        # Update log context to reflect the function being executed
+        if self._workers:
+            # Use task-based dispatch through worker pool
+            task = self.submit(module_path, function, args=args, kwargs=kwargs)
+            task.wait_for()
+            if task.status == TaskStatus.FAILED:
+                raise task.exception  # type: ignore[misc]
+            return task.result
+
+        # Legacy path (no worker pool — direct connection)
         module_name = Path(module_path).stem
         call_target = f"{module_name}:{function}"
         if self._process_logger:
@@ -182,25 +495,28 @@ class ExternalEnvironment(Environment):
             )
             return self._send_and_wait(payload)
         finally:
-            # Reset to module_executor after execution
             if self._process_logger:
                 self._process_logger.update_log_context({"call_target": MODULE_EXECUTOR_FILE})
 
     @synchronized
     def run_script(self, script_path: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
-        """
-        Runs a Python script remotely using runpy.run_path(), simulating
-        'python script.py arg1 arg2 ...'
+        """Runs a Python script remotely using runpy.run_path().
 
         Args:
             script_path: Path to the script to execute.
-            args: List of arguments to pass (becomes sys.argv[1:] remotely).
-            run_name: Value for runpy.run_path(run_name=...); defaults to "__main__".
+            args: List of arguments to pass.
+            run_name: Value for runpy.run_path(run_name=...).
 
         Returns:
-            The resulting globals dict from the executed script, or None on failure.
+            The resulting globals dict, or None on failure.
         """
-        # Update log context to reflect the script being executed
+        if self._workers:
+            task = self.submit_script(script_path, args=args, run_name=run_name)
+            task.wait_for()
+            if task.status == TaskStatus.FAILED:
+                raise task.exception  # type: ignore[misc]
+            return task.result
+
         script_name = Path(script_path).name
         if self._process_logger:
             self._process_logger.update_log_context({"call_target": script_name})
@@ -214,13 +530,19 @@ class ExternalEnvironment(Environment):
             )
             return self._send_and_wait(payload)
         finally:
-            # Reset to module_executor after execution
             if self._process_logger:
                 self._process_logger.update_log_context({"call_target": MODULE_EXECUTOR_FILE})
 
     @synchronized
     def launched(self) -> bool:
         """Return true if the environment server process is launched and the connection is open."""
+        if self._workers:
+            return any(
+                w.process.poll() is None
+                and w.connection is not None
+                and not w.connection.closed
+                for w in self._workers
+            )
         return (
             self.process is not None
             and self.process.poll() is None
@@ -232,7 +554,27 @@ class ExternalEnvironment(Environment):
 
     @synchronized
     def _exit(self) -> None:
-        """Close the connection to the environment and kills the process."""
+        """Close connections and kill all worker processes."""
+        if self._workers:
+            for worker in self._workers:
+                try:
+                    worker.connection.send(dict(action="exit"))
+                except OSError:
+                    pass
+                worker.connection.close()
+                if worker.process and worker.process.stdout:
+                    worker.process.stdout.close()
+                CommandExecutor.kill_process(worker.process)
+            self._workers.clear()
+            while not self._idle_workers.empty():
+                try:
+                    self._idle_workers.get_nowait()
+                except queue.Empty:
+                    break
+            self._process_logger = None
+            return
+
+        # Legacy single-process path
         if self.connection is not None:
             try:
                 self.connection.send(dict(action="exit"))
@@ -244,40 +586,26 @@ class ExternalEnvironment(Environment):
         if self.process and self.process.stdout:
             self.process.stdout.close()
 
-        # ProcessLogger runs in a daemon thread, so it will be cleaned up automatically
         self._process_logger = None
-
         CommandExecutor.kill_process(self.process)
 
     @synchronized
     def delete(self) -> None:
-        """Deletes this external environment and cleans up associated resources.
-
-        Raises:
-                Exception: If the environment does not exist.
-
-        Side Effects:
-                - If the environment is running, calls _exit() on it
-                - Removes environment from environment_manager.environments dict
-                - Deletes the environment directory using appropriate conda manager
-        """
+        """Deletes this external environment and cleans up associated resources."""
         if self.path is None:
             raise Exception("Cannot delete an environment with no path.")
 
         if not self.environment_manager.environment_exists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
 
-        # Exit the environment if it's running
         if self.launched():
             self._exit()
 
-        # Generate delete commands based on conda manager type
         if self.environment_manager.settings_manager.use_pixi:
             send2trash(self.path.parent)
         else:
             send2trash(self.path)
 
-        # Remove from environments dict
         if self.name in self.environment_manager.environments:
             del self.environment_manager.environments[self.name]
 
@@ -288,35 +616,15 @@ class ExternalEnvironment(Environment):
         additional_install_commands: Commands = {},
         use_existing: bool = False,
     ) -> "Environment":
-        """Updates this external environment by deleting it and recreating it with new dependencies.
-
-        Args:
-                dependencies: New dependencies to install. Can be one of:
-                    - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
-                    - None (no dependencies to install)
-                additional_install_commands: Platform-specific commands during installation.
-                use_existing: use existing environment if it exists instead of recreating it.
-
-        Returns:
-                The recreated environment.
-
-        Raises:
-                Exception: If the environment does not exist.
-
-        Side Effects:
-                - Deletes the existing environment
-                - Creates a new environment with the same name but new dependencies
-        """
+        """Updates this external environment by deleting it and recreating it."""
         if not self.path:
             raise Exception("Cannot update an environment with no path.")
 
         if not self.environment_manager.environment_exists(self.path):
             raise Exception(f"The environment {self.name} does not exist.")
 
-        # Delete the existing environment
         self.delete()
 
-        # Use create for direct Dependencies dict
         return self.environment_manager.create(
             str(self.name),
             dependencies=dependencies,

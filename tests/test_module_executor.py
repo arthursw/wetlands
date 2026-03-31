@@ -1,5 +1,6 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 import threading
+import inspect
 import pytest
 
 from wetlands import module_executor
@@ -35,6 +36,29 @@ class TestHandleExecutionError:
             assert call_args[0][1] == mock_connection
             assert call_args[0][2]["action"] == "error"
             assert "Test error" in call_args[0][2]["exception"]
+            assert "task_id" not in call_args[0][2]
+
+    def test_handle_execution_error_with_task_id(self):
+        """Test that handle_execution_error includes task_id when provided"""
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        exception = Exception("Test error")
+
+        with patch("wetlands.module_executor.send_message") as mock_send:
+            module_executor.handle_execution_error(mock_lock, mock_connection, exception, task_id="task-123")
+            call_args = mock_send.call_args
+            assert call_args[0][2]["task_id"] == "task-123"
+
+    def test_handle_execution_error_without_task_id(self):
+        """Test backward compat: no task_id field when not provided"""
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        exception = Exception("err")
+
+        with patch("wetlands.module_executor.send_message") as mock_send:
+            module_executor.handle_execution_error(mock_lock, mock_connection, exception)
+            msg = mock_send.call_args[0][2]
+            assert "task_id" not in msg
 
 
 class TestExecuteFunction:
@@ -86,6 +110,103 @@ class TestExecuteFunction:
         with pytest.raises(Exception, match="SystemExit"):
             module_executor.execute_function(message)
 
+    @patch("wetlands.module_executor.importlib.import_module")
+    def test_execute_function_injects_task_handle(self, mock_import):
+        """Test RemoteTaskHandle injection when function has 'task' parameter"""
+        def my_func(a, task=None):
+            return task
+
+        mock_module = MagicMock()
+        mock_module.my_func = my_func
+        mock_import.return_value = mock_module
+
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+
+        message = {
+            "module_path": "/path/to/module.py",
+            "function": "my_func",
+            "args": [1],
+            "kwargs": {},
+            "task_id": "task-abc",
+        }
+
+        result = module_executor.execute_function(message, mock_lock, mock_connection)
+
+        # Result should be the injected RemoteTaskHandle
+        assert result is not None
+        assert result._task_id == "task-abc"
+
+    @patch("wetlands.module_executor.importlib.import_module")
+    def test_execute_function_no_injection_without_task_param(self, mock_import):
+        """Test no injection when function lacks 'task' parameter"""
+        def my_func(a):
+            return a
+
+        mock_module = MagicMock()
+        mock_module.my_func = my_func
+        mock_import.return_value = mock_module
+
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+
+        message = {
+            "module_path": "/path/to/module.py",
+            "function": "my_func",
+            "args": [42],
+            "kwargs": {},
+            "task_id": "task-abc",
+        }
+
+        result = module_executor.execute_function(message, mock_lock, mock_connection)
+        assert result == 42
+
+    @patch("wetlands.module_executor.importlib.import_module")
+    def test_execute_function_no_injection_without_task_id(self, mock_import):
+        """Test no injection when message has no task_id (backward compat)"""
+        def my_func(a, task=None):
+            return task
+
+        mock_module = MagicMock()
+        mock_module.my_func = my_func
+        mock_import.return_value = mock_module
+
+        message = {
+            "module_path": "/path/to/module.py",
+            "function": "my_func",
+            "args": [1],
+            "kwargs": {},
+        }
+
+        result = module_executor.execute_function(message)
+        assert result is None  # task should not be injected
+
+    @patch("wetlands.module_executor.importlib.import_module")
+    def test_execute_function_cleans_up_active_tasks(self, mock_import):
+        """Test that _active_tasks is cleaned up after execution"""
+        def my_func(a, task=None):
+            # During execution, the task should be in _active_tasks
+            assert "task-cleanup" in module_executor._active_tasks
+            return 1
+
+        mock_module = MagicMock()
+        mock_module.my_func = my_func
+        mock_import.return_value = mock_module
+
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+
+        message = {
+            "module_path": "/path/to/module.py",
+            "function": "my_func",
+            "args": [1],
+            "kwargs": {},
+            "task_id": "task-cleanup",
+        }
+
+        module_executor.execute_function(message, mock_lock, mock_connection)
+        assert "task-cleanup" not in module_executor._active_tasks
+
 
 class TestRunScript:
     @patch("wetlands.module_executor.runpy.run_path")
@@ -130,8 +251,11 @@ class TestExecutionWorker:
 
         module_executor.execution_worker(mock_lock, mock_connection, message)
 
-        mock_execute.assert_called_once()
+        mock_execute.assert_called_once_with(message, mock_lock, mock_connection)
         mock_send.assert_called_once()
+        sent_msg = mock_send.call_args[0][2]
+        assert sent_msg["action"] == "execution finished"
+        assert "task_id" not in sent_msg  # backward compat
 
     @patch("wetlands.module_executor.run_script")
     @patch("wetlands.module_executor.send_message")
@@ -145,6 +269,8 @@ class TestExecutionWorker:
 
         mock_run.assert_called_once()
         mock_send.assert_called_once()
+        sent_msg = mock_send.call_args[0][2]
+        assert "task_id" not in sent_msg  # backward compat
 
     @patch("wetlands.module_executor.handle_execution_error")
     def test_execution_worker_unknown_action(self, mock_error):
@@ -156,6 +282,49 @@ class TestExecutionWorker:
         module_executor.execution_worker(mock_lock, mock_connection, message)
 
         mock_error.assert_called_once()
+
+    @patch("wetlands.module_executor.execute_function")
+    @patch("wetlands.module_executor.send_message")
+    def test_execution_worker_execute_with_task_id(self, mock_send, mock_execute):
+        """Test worker includes task_id in response when message has task_id"""
+        mock_execute.return_value = "result"
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        message = {"action": "execute", "module_path": "/path/to/module.py", "task_id": "task-456"}
+
+        module_executor.execution_worker(mock_lock, mock_connection, message)
+
+        sent_msg = mock_send.call_args[0][2]
+        assert sent_msg["action"] == "execution finished"
+        assert sent_msg["task_id"] == "task-456"
+        assert sent_msg["result"] == "result"
+
+    @patch("wetlands.module_executor.run_script")
+    @patch("wetlands.module_executor.send_message")
+    def test_execution_worker_run_with_task_id(self, mock_send, mock_run):
+        """Test worker includes task_id in run response"""
+        mock_run.return_value = None
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        message = {"action": "run", "script_path": "/path/to/script.py", "task_id": "task-789"}
+
+        module_executor.execution_worker(mock_lock, mock_connection, message)
+
+        sent_msg = mock_send.call_args[0][2]
+        assert sent_msg["task_id"] == "task-789"
+
+    @patch("wetlands.module_executor.handle_execution_error")
+    def test_execution_worker_error_with_task_id(self, mock_error):
+        """Test worker passes task_id to error handler"""
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        message = {"action": "unknown", "task_id": "task-err"}
+
+        module_executor.execution_worker(mock_lock, mock_connection, message)
+
+        mock_error.assert_called_once()
+        _, kwargs = mock_error.call_args
+        assert kwargs["task_id"] == "task-err"
 
 
 class TestGetMessage:
@@ -201,3 +370,92 @@ class TestLaunchListener:
 
             # Should have sent exit response
             assert mock_connection.send.called
+
+    def test_launch_listener_cancel_action(self):
+        """Test listener handles cancel action by setting cancel_requested on active task"""
+        mock_handle = MagicMock()
+        module_executor._active_tasks["task-cancel-1"] = mock_handle
+
+        try:
+            with (
+                patch("wetlands.module_executor.Listener") as MockListener,
+                patch(
+                    "wetlands.module_executor.get_message",
+                    side_effect=[
+                        {"action": "cancel", "task_id": "task-cancel-1"},
+                        {"action": "exit"},
+                    ],
+                ),
+            ):
+                mock_listener = MockListener.return_value.__enter__.return_value
+                mock_connection = mock_listener.accept.return_value.__enter__.return_value
+
+                module_executor.launch_listener()
+
+                mock_handle._set_cancel_requested.assert_called_once()
+        finally:
+            module_executor._active_tasks.pop("task-cancel-1", None)
+
+    def test_launch_listener_cancel_unknown_task(self):
+        """Test listener handles cancel for unknown task_id gracefully"""
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch(
+                "wetlands.module_executor.get_message",
+                side_effect=[
+                    {"action": "cancel", "task_id": "nonexistent"},
+                    {"action": "exit"},
+                ],
+            ),
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_connection = mock_listener.accept.return_value.__enter__.return_value
+
+            # Should not raise
+            module_executor.launch_listener()
+
+
+class TestBackwardCompatibility:
+    """Ensure messages without task_id work exactly as before."""
+
+    @patch("wetlands.module_executor.execute_function")
+    @patch("wetlands.module_executor.send_message")
+    def test_no_task_id_in_execute_response(self, mock_send, mock_execute):
+        """Response should not contain task_id when message has none"""
+        mock_execute.return_value = 42
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        message = {"action": "execute", "module_path": "/path/to/module.py"}
+
+        module_executor.execution_worker(mock_lock, mock_connection, message)
+
+        sent_msg = mock_send.call_args[0][2]
+        assert "task_id" not in sent_msg
+        assert sent_msg["action"] == "execution finished"
+        assert sent_msg["result"] == 42
+
+    @patch("wetlands.module_executor.run_script")
+    @patch("wetlands.module_executor.send_message")
+    def test_no_task_id_in_run_response(self, mock_send, mock_run):
+        """Response should not contain task_id when message has none"""
+        mock_run.return_value = None
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        message = {"action": "run", "script_path": "/path/to/script.py"}
+
+        module_executor.execution_worker(mock_lock, mock_connection, message)
+
+        sent_msg = mock_send.call_args[0][2]
+        assert "task_id" not in sent_msg
+
+    @patch("wetlands.module_executor.handle_execution_error")
+    def test_no_task_id_in_error(self, mock_error):
+        """Error handler should receive task_id=None when message has none"""
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        message = {"action": "unknown"}
+
+        module_executor.execution_worker(mock_lock, mock_connection, message)
+
+        _, kwargs = mock_error.call_args
+        assert kwargs["task_id"] is None

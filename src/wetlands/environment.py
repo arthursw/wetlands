@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from importlib import import_module
 from abc import abstractmethod
+from collections.abc import Iterable, Iterator
 from typing import Any, TYPE_CHECKING, Union
 from types import ModuleType
 import inspect
@@ -12,6 +13,7 @@ from wetlands._internal.dependency_manager import Dependencies
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
+    from wetlands.task import Task
 
 
 class Environment:
@@ -101,6 +103,52 @@ class Environment:
     def execute(self, module_path: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
         """Execute the given function in the given module. See [`ExternalEnvironment.execute`][wetlands.external_environment.ExternalEnvironment.execute] and [`InternalEnvironment.execute`][wetlands.internal_environment.InternalEnvironment.execute]"""
         pass
+
+    def submit(
+        self,
+        module_path: str | Path,
+        function: str,
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+        *,
+        start: bool = True,
+    ) -> "Task[Any]":
+        """Submit a function for non-blocking execution. Returns a Task.
+        Base implementation raises NotImplementedError.
+        """
+        raise NotImplementedError("submit() requires ExternalEnvironment or InternalEnvironment")
+
+    def submit_script(
+        self,
+        script_path: str | Path,
+        args: tuple = (),
+        run_name: str = "__main__",
+        *,
+        start: bool = True,
+    ) -> "Task[None]":
+        """Submit a script for non-blocking execution. Returns a Task[None]."""
+        raise NotImplementedError("submit_script() requires ExternalEnvironment or InternalEnvironment")
+
+    def map(
+        self,
+        module_path: str | Path,
+        function: str,
+        iterable: "Iterable[Any]",
+        *,
+        timeout: float | None = None,
+        ordered: bool = True,
+    ) -> "Iterator[Any]":
+        """Execute function once for each item, distributing across workers."""
+        raise NotImplementedError("map() requires ExternalEnvironment or InternalEnvironment")
+
+    def map_tasks(
+        self,
+        module_path: str | Path,
+        function: str,
+        iterable: "Iterable[Any]",
+    ) -> "list[Task[Any]]":
+        """Submit one task per item. Returns Task objects."""
+        raise NotImplementedError("map_tasks() requires ExternalEnvironment or InternalEnvironment")
 
     def _exit(self) -> None:
         """Exit the environment, important in ExternalEnvironment"""

@@ -16,6 +16,7 @@ import threading
 import traceback
 import argparse
 import runpy
+import inspect
 from pathlib import Path
 import importlib
 import importlib.util
@@ -41,6 +42,22 @@ try:
 except ImportError:
     # Do not support ndarray if numpy is not installed
     pass
+
+try:
+    _task_file = Path(__file__).parent / "task.py"
+    _task_spec = importlib.util.spec_from_file_location("wetlands_task", _task_file)
+    if _task_spec is not None and _task_spec.loader is not None:
+        _task_mod = importlib.util.module_from_spec(_task_spec)
+        sys.modules["wetlands_task"] = _task_mod  # Required before exec for dataclass resolution
+        _task_spec.loader.exec_module(_task_mod)
+        RemoteTaskHandle = _task_mod.RemoteTaskHandle
+    else:
+        RemoteTaskHandle = None
+except Exception:
+    RemoteTaskHandle = None
+
+# Active task handles for cancel support
+_active_tasks: dict[str, object] = {}
 
 # Configure logging to both file and console
 logging.basicConfig(
@@ -95,7 +112,7 @@ def send_message(lock: threading.Lock, connection: Connection, message: dict):
         connection.send(message)
 
 
-def handle_execution_error(lock: threading.Lock, connection: Connection, e: Exception):
+def handle_execution_error(lock: threading.Lock, connection: Connection, e: Exception, task_id: str | None = None):
     """Common error handling for any execution type."""
     logger.error(str(e))
     logger.error("Traceback:")
@@ -103,19 +120,18 @@ def handle_execution_error(lock: threading.Lock, connection: Connection, e: Exce
     for line in tbftb:
         logger.error(line)
     sys.stderr.flush()
-    send_message(
-        lock,
-        connection,
-        dict(
-            action="error",
-            exception=str(e),
-            traceback=tbftb,
-        ),
+    msg = dict(
+        action="error",
+        exception=str(e),
+        traceback=tbftb,
     )
+    if task_id is not None:
+        msg["task_id"] = task_id
+    send_message(lock, connection, msg)
     logger.debug("Error sent")
 
 
-def execute_function(message: dict):
+def execute_function(message: dict, lock: threading.Lock | None = None, connection: Connection | None = None):
     """Import a module and execute one of its functions."""
     module_path = Path(message["module_path"])
     logger.debug(f"Import module {module_path}")
@@ -125,11 +141,29 @@ def execute_function(message: dict):
         raise Exception(f"Module {module_path} has no function {message['function']}.")
     args = message.get("args", [])
     kwargs = message.get("kwargs", {})
+    task_id = message.get("task_id")
+
+    # Inject RemoteTaskHandle if the function accepts a 'task' parameter
+    if task_id is not None and RemoteTaskHandle is not None and lock is not None and connection is not None:
+        func = getattr(module, message["function"])
+        try:
+            sig = inspect.signature(func)
+            if "task" in sig.parameters:
+                handle = RemoteTaskHandle(task_id, lock, connection)
+                _active_tasks[task_id] = handle
+                kwargs = dict(kwargs)
+                kwargs["task"] = handle
+        except (ValueError, TypeError):
+            pass
+
     logger.info(f"Execute {message['module_path']}:{message['function']}({args})")
     try:
         result = getattr(module, message["function"])(*args, **kwargs)
     except SystemExit as se:
         raise Exception(f"Function raised SystemExit: {se}\n\n")
+    finally:
+        if task_id is not None:
+            _active_tasks.pop(task_id, None)
     logger.info("Executed")
     return result
 
@@ -151,36 +185,26 @@ def execution_worker(lock: threading.Lock, connection: Connection, message: dict
     """
     Worker function handling both 'execute' and 'run' actions.
     """
+    task_id = message.get("task_id")
     try:
         action = message["action"]
         if action == "execute":
-            result = execute_function(message)
+            result = execute_function(message, lock, connection)
         elif action == "run":
             result = run_script(message)
         else:
             raise Exception(f"Unknown action: {action}")
 
-        # # We could close shared memory args and result
-        # # But they could be nested (like result["shm"]) so too complicated
-        # # Plus it is not very intuitive nor really much easier
-        # if message.get("auto_close_shared_memory"):
-        #     for arg in message.get("args", []):
-        #         if isinstance(arg, NDArray):
-        #             arg.close()
-        #     if isinstance(result, NDArray):
-        #         result.close()
-
-        send_message(
-            lock,
-            connection,
-            dict(
-                action="execution finished",
-                message=f"{action} completed",
-                result=result,
-            ),
+        response = dict(
+            action="execution finished",
+            message=f"{action} completed",
+            result=result,
         )
+        if task_id is not None:
+            response["task_id"] = task_id
+        send_message(lock, connection, response)
     except Exception as e:
-        handle_execution_error(lock, connection, e)
+        handle_execution_error(lock, connection, e, task_id=task_id)
 
 
 def get_message(connection: Connection) -> dict:
@@ -211,6 +235,15 @@ def launch_listener():
                                 args=(lock, connection, message),
                             )
                             thread.start()
+
+                        elif message["action"] == "cancel":
+                            cancel_task_id = message.get("task_id")
+                            if cancel_task_id and cancel_task_id in _active_tasks:
+                                handle = _active_tasks[cancel_task_id]
+                                handle._set_cancel_requested()
+                                logger.debug(f"Cancel requested for task {cancel_task_id}")
+                            else:
+                                logger.debug(f"Cancel requested for unknown task {cancel_task_id}")
 
                         elif message["action"] == "exit":
                             logger.info("exit")

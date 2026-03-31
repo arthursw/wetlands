@@ -581,3 +581,223 @@ def test_create_from_config(env_manager, tmp_path, config_file, config_content):
 
     env.exit()
     logger.info(f"Test create_from_config with {config_file} completed successfully")
+
+
+# --- Task API integration tests ---
+
+from wetlands.task import Task, TaskStatus, TaskEventType, TaskEvent
+
+
+class TestTaskAPI:
+    """Integration tests for the task-based API with real conda environments."""
+
+    @pytest.fixture(scope="class")
+    def task_env(self, env_manager):
+        """Shared environment for task API tests."""
+        logger.info("Creating shared environment for TestTaskAPI")
+        env = env_manager.create("task_api_env", {"conda": ["numpy"]})
+        env.launch()
+        yield env
+        env.exit()
+
+    def test_submit_and_wait(self, task_env, tmp_path):
+        """submit() returns a Task that completes with the correct result."""
+        module_path = tmp_path / "compute.py"
+        module_path.write_text("def add(a, b): return a + b\n")
+
+        task = task_env.submit(str(module_path), "add", args=(3, 7))
+        assert isinstance(task, Task)
+        task.wait_for(timeout=30)
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == 10
+
+    def test_submit_start_false(self, task_env, tmp_path):
+        """submit(start=False) creates a PENDING task that starts on demand."""
+        module_path = tmp_path / "compute2.py"
+        module_path.write_text("def double(x): return x * 2\n")
+
+        task = task_env.submit(str(module_path), "double", args=(21,), start=False)
+        assert task.status == TaskStatus.PENDING
+
+        task.start()
+        task.wait_for(timeout=30)
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == 42
+
+    def test_submit_with_listener(self, task_env, tmp_path):
+        """Listeners receive terminal events."""
+        module_path = tmp_path / "compute3.py"
+        module_path.write_text("def identity(x): return x\n")
+
+        events = []
+        task = task_env.submit(str(module_path), "identity", args=("hello",), start=False)
+        task.listen(lambda e: events.append(e.type))
+        task.start()
+        task.wait_for(timeout=30)
+
+        assert TaskEventType.STARTED in events
+        assert TaskEventType.COMPLETION in events
+        assert task.result == "hello"
+
+    def test_submit_failure(self, task_env, tmp_path):
+        """Task transitions to FAILED when the remote function raises."""
+        module_path = tmp_path / "failing.py"
+        module_path.write_text("def boom(): raise ValueError('test error')\n")
+
+        task = task_env.submit(str(module_path), "boom")
+        task.wait_for(timeout=30)
+        assert task.status == TaskStatus.FAILED
+        assert "test error" in task.error
+
+    def test_submit_future_interop(self, task_env, tmp_path):
+        """task.future works with concurrent.futures."""
+        module_path = tmp_path / "compute4.py"
+        module_path.write_text("def square(x): return x ** 2\n")
+
+        task = task_env.submit(str(module_path), "square", args=(9,))
+        result = task.future.result(timeout=30)
+        assert result == 81
+
+    def test_execute_still_works(self, task_env, tmp_path):
+        """Blocking execute() still works after task API is available."""
+        module_path = tmp_path / "compute5.py"
+        module_path.write_text("def triple(x): return x * 3\n")
+
+        result = task_env.execute(str(module_path), "triple", (5,))
+        assert result == 15
+
+    def test_progress_reporting(self, task_env, tmp_path):
+        """Remote code can report progress via the task handle."""
+        module_path = tmp_path / "progress_module.py"
+        module_path.write_text(
+            """
+def work_with_progress(n, *, task=None):
+    total = 0
+    for i in range(n):
+        total += i
+        if task:
+            task.update(f"Step {i}", current=i + 1, maximum=n)
+    return total
+"""
+        )
+
+        updates = []
+        task = task_env.submit(str(module_path), "work_with_progress", args=(5,), start=False)
+        task.listen(lambda e: updates.append(e.type) if e.type == TaskEventType.UPDATE else None)
+        task.start()
+        task.wait_for(timeout=30)
+
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == 10  # 0+1+2+3+4
+        assert len(updates) > 0
+
+    def test_cancel(self, task_env, tmp_path):
+        """Cooperative cancellation works end-to-end."""
+        module_path = tmp_path / "cancellable.py"
+        module_path.write_text(
+            """
+import time
+
+def slow_work(*, task=None):
+    for i in range(1000):
+        if task and task.cancel_requested:
+            task.cancel()
+            return None
+        time.sleep(0.01)
+    return "done"
+"""
+        )
+
+        task = task_env.submit(str(module_path), "slow_work")
+        import time
+
+        time.sleep(0.2)
+        task.cancel()
+        task.wait_for(timeout=30)
+        assert task.status == TaskStatus.CANCELED
+
+
+class TestTaskAPIConcurrency:
+    """Integration tests for multi-worker concurrency."""
+
+    @pytest.fixture(scope="class")
+    def parallel_env(self, env_manager):
+        """Environment with 3 workers for concurrency tests."""
+        logger.info("Creating parallel environment for TestTaskAPIConcurrency")
+        env = env_manager.create("parallel_env", {"conda": ["numpy"]})
+        env.launch(max_workers=3)
+        yield env
+        env.exit()
+
+    def test_map_parallel(self, parallel_env, tmp_path):
+        """map() distributes work across workers and returns results in order."""
+        module_path = tmp_path / "parallel_compute.py"
+        module_path.write_text(
+            """
+def square(x):
+    return x ** 2
+"""
+        )
+
+        results = list(parallel_env.map(str(module_path), "square", [1, 2, 3, 4, 5]))
+        assert results == [1, 4, 9, 16, 25]
+
+    def test_map_tasks_parallel(self, parallel_env, tmp_path):
+        """map_tasks() returns Task objects that complete independently."""
+        module_path = tmp_path / "parallel_compute2.py"
+        module_path.write_text(
+            """
+import time
+
+def slow_double(x):
+    time.sleep(0.1)
+    return x * 2
+"""
+        )
+
+        tasks = parallel_env.map_tasks(str(module_path), "slow_double", [10, 20, 30])
+        assert len(tasks) == 3
+
+        for t in tasks:
+            t.wait_for(timeout=30)
+
+        results = [t.result for t in tasks]
+        assert results == [20, 40, 60]
+
+    def test_concurrent_submit(self, parallel_env, tmp_path):
+        """Multiple submit() calls run concurrently across workers."""
+        import concurrent.futures
+        import time
+
+        module_path = tmp_path / "timed.py"
+        module_path.write_text(
+            """
+import time
+
+def sleep_and_return(x):
+    time.sleep(0.3)
+    return x
+"""
+        )
+
+        start = time.monotonic()
+        t1 = parallel_env.submit(str(module_path), "sleep_and_return", args=(1,))
+        t2 = parallel_env.submit(str(module_path), "sleep_and_return", args=(2,))
+        t3 = parallel_env.submit(str(module_path), "sleep_and_return", args=(3,))
+
+        concurrent.futures.wait([t1.future, t2.future, t3.future], timeout=30)
+        elapsed = time.monotonic() - start
+
+        assert t1.result == 1
+        assert t2.result == 2
+        assert t3.result == 3
+        # With 3 workers, 3 tasks sleeping 0.3s each should complete in ~0.3s, not ~0.9s
+        assert elapsed < 1.0, f"Expected parallel execution but took {elapsed:.1f}s"
+
+    def test_execute_blocking_with_workers(self, parallel_env, tmp_path):
+        """Blocking execute() still works with a multi-worker pool."""
+        module_path = tmp_path / "simple.py"
+        module_path.write_text("def inc(x): return x + 1\n")
+
+        result = parallel_env.execute(str(module_path), "inc", (99,))
+        assert result == 100
