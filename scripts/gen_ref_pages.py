@@ -13,6 +13,8 @@ src = root / "src"
 file_names = [
     "environment_manager.py",
     "environment.py",
+    "task.py",
+    "ndarray.py",
     "internal_environment.py",
     "external_environment.py",
 ]  # define manually to force rendering order

@@ -11,7 +11,6 @@ Wetlands provides a comprehensive logging system that tracks operations across e
   - [Filtering Logs by Context](#filtering-logs-by-context)
   - [Per-Execution Log Files](#per-execution-log-files)
   - [GUI Integration](#gui-integration)
-  - [Custom Log Processing](#custom-log-processing)
 
 ---
 

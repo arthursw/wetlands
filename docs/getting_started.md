@@ -91,17 +91,19 @@ For Wetlands to execute code within the isolated environment, we need to launch 
 env.launch()
 ```
 
-By default, `launch()` starts a single worker process. For parallel execution, you can start multiple workers sharing the same Conda environment:
+!!! note
 
-```python
-env.launch(max_workers=4)  # 4 worker processes, same conda env on disk
-```
+    By default, `launch()` starts a single worker process. For parallel execution, you can start multiple workers sharing the same Conda environment:
 
-You can also assign specific environment variables per worker (e.g. for GPU assignment):
+    ```python
+    env.launch(max_workers=4)  # 4 worker processes, same conda env on disk
+    ```
 
-```python
-env.launch(max_workers=4, worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)})
-```
+    You can also assign specific environment variables per worker (e.g. for GPU assignment):
+
+    ```python
+    env.launch(max_workers=4, worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)})
+    ```
 
 #### 4. Execute Code in the Environment
 
