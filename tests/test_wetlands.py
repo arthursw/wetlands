@@ -11,6 +11,7 @@ from wetlands.internal_environment import InternalEnvironment
 from wetlands._internal.exceptions import IncompatibilityException
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
+from wetlands.task import Task, TaskStatus, TaskEventType
 
 
 # Config file contents for parameterized test_create_from_config
@@ -584,8 +585,6 @@ def test_create_from_config(env_manager, tmp_path, config_file, config_content):
 
 
 # --- Task API integration tests ---
-
-from wetlands.task import Task, TaskStatus, TaskEventType, TaskEvent
 
 
 class TestTaskAPI:

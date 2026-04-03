@@ -132,7 +132,7 @@ def test_submit_with_start_false_stays_pending(internal_env):
 def test_submit_script_returns_task(internal_env):
     script_path = "/path/to/script.py"
 
-    with patch("runpy.run_path") as mock_run_path:
+    with patch("runpy.run_path"):
         task = internal_env.submit_script(script_path)
         task.wait_for(timeout=5)
 
@@ -161,7 +161,7 @@ def test_map_tasks_returns_task_list(internal_env):
     mock_module = MagicMock()
 
     def square(x):
-        return x ** 2
+        return x**2
 
     mock_module.square = square
 

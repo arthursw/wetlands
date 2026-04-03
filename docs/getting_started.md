@@ -1,7 +1,12 @@
 
-### Simplified Execution with [`env.import_module`][wetlands.environment.Environment.import_module]
+### Executing Code in an Environment
 
-To demonstrates the most straightforward way to use Wetlands, we will create an environment, install `cellpose`, and run a segmentation function defined in a separate file ([`example_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/example_module.py)) within that isolated environment.
+Wetlands provides two ways to execute functions in an isolated environment:
+
+- **[`env.submit()`][wetlands.environment.Environment.submit]** returns a **[`Task[T]`][wetlands.task.Task]** immediately, letting you monitor progress, cancel execution, or wait for the result at your convenience.
+- **[`env.execute()`][wetlands.environment.Environment.execute]** and **[`env.import_module()`][wetlands.environment.Environment.import_module]** are blocking shortcuts that wait for the result before returning — convenient when you don't need cancellation.
+
+To demonstrate, we will create an environment, install `cellpose`, and run a segmentation function defined in a separate file ([`example_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/example_module.py)) within that isolated environment.
 
 Let's see the main script [`getting_started.py`](https://github.com/arthursw/wetlands/blob/main/examples/getting_started.py) step by step. 
 
@@ -16,6 +21,7 @@ segmentation_path = image_path.parent / f"{image_path.stem}_segmentation.png"
 #### 1. Initialize the Environment Manager
 
 We start by initializing the [EnvironmentManager][wetlands.environment_manager.EnvironmentManager]. We provide:
+
 - A `wetlands_instance_path` where Wetlands stores logs and debug information (defaults to `"wetlands/"`).
 - Optionally, a `conda_path` where Wetlands should look for an existing Pixi (or Micromamba) installation or where it should download and set up a new one. If not provided, it defaults to `wetlands_instance_path / "pixi"`.
 
@@ -77,42 +83,75 @@ env = environment_manager.create(
     You can also load an existing environment with `environment.load("env_name", Path("Path/to/existing/environment/pyproject.toml"))`. See [`EnvironmentManager.load()`][wetlands.environment_manager.EnvironmentManager.load].
 
 
-#### 3. Launch the Environment's Communication Server
+#### 3. Launch the Environment's Worker Processes
 
-For Wetlands to execute code within the isolated environment (using [`import_module`][wetlands.environment.Environment.import_module] or [`execute`][wetlands.environment.Environment.execute]), we need to launch its background communication server. This server runs as a separate process *inside* the `cellpose_env` and listens for commands from our main script.
+For Wetlands to execute code within the isolated environment, we need to launch its worker processes. Each worker runs *inside* the `cellpose_env` and listens for commands from our main script.
 
 ```python
 env.launch()
 ```
 
-#### 4. Import and Execute Code in the Environment via Proxy
-
-This is where the core Wetlands interaction happens. We use [`env.import_module("example_module.py")`][wetlands.environment.Environment.import_module] to gain access to the functions defined in `example_module.py`. Wetlands doesn't actually import the module into the main process; instead, it returns a *proxy object*. When we call a method on this proxy object (like `example_module.segment(...)`), Wetlands intercepts the call, sends the function name and arguments to the server running in the `cellpose_env`, executes the *real* function there, and returns the result back to the main script. File paths and other pickleable arguments are automatically transferred.
+By default, `launch()` starts a single worker process. For parallel execution, you can start multiple workers sharing the same Conda environment:
 
 ```python
-print("Importing module in environment...")
+env.launch(max_workers=4)  # 4 worker processes, same conda env on disk
+```
+
+You can also assign specific environment variables per worker (e.g. for GPU assignment):
+
+```python
+env.launch(max_workers=4, worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)})
+```
+
+#### 4. Execute Code in the Environment
+
+##### Non-blocking execution with `submit()`
+
+[`env.submit()`][wetlands.environment.Environment.submit] sends a function call to a worker and returns a [`Task`][wetlands.task.Task] object immediately. You can then monitor progress, attach listeners, or wait for the result:
+
+```python
+task = env.submit("example_module.py", "segment",
+                  args=(str(image_path), str(segmentation_path)))
+
+# Do other work while segmentation runs...
+print(f"Task status: {task.status}")
+
+# Block until the result is ready
+task.wait_for()
+diameters = task.result
+print(f"Segmentation complete. Found diameters of {diameters} pixels.")
+```
+
+Tasks support progress reporting, cooperative cancellation, event listeners, context managers, `concurrent.futures.Future` interop, and `async/await`. See [Tasks and parallel execution](tasks.md) for the full API.
+
+##### Blocking shortcuts: `import_module()` and `execute()`
+
+For simple cases where you just need the result, Wetlands provides blocking shortcuts.
+
+[`env.import_module()`][wetlands.environment.Environment.import_module] returns a *proxy object*. When you call a method on this proxy (like `example_module.segment(...)`), Wetlands sends the function name and arguments to the worker running in the `cellpose_env`, executes the function there, and returns the result:
+
+```python
 example_module = env.import_module("example_module.py")
-
-print(f"Running segmentation on {image_path}...")
 diameters = example_module.segment(str(image_path), str(segmentation_path))
-
 print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 ```
 
 
-Alternatively, we could use [`env.execute()`][wetlands.environment.Environment.execute] directly:
+[`env.execute()`][wetlands.environment.Environment.execute] calls a function directly without a proxy object:
 
 ```python
-print(f"Running segmentation on {image_path}...")
 args = (str(image_path), str(segmentation_path))
 diameters = env.execute("example_module.py", "segment", args)
-
 print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 ```
+
+!!! tip "Tracking progress with blocking calls"
+
+    Even when using the blocking API, you can track what happens inside the environment through Wetlands' [logging system](logging.md). The environment's stdout is captured in real time and routed through Python's `logging` module, so `print()` statements in remote code appear as log messages that you can filter, redirect, or display in a GUI. See [Logging](logging.md) for details.
 
 !!! note "Function arguments must be serializable"
 
-    The arguments of the segment function will be send to the other process via [`multiprocessing.connection.Connection.send()`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send) so the objects must be picklable.
+    The arguments of the segment function will be sent to the other process via [`multiprocessing.connection.Connection.send()`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection.send) so the objects must be picklable.
 
 #### 5. Clean Up
 
@@ -258,12 +297,12 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 
 #### Summary of Example 1 Flow:
 
-The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment_manager.Environment.launch] starts a hidden server in that environment. [`env.import_module()`][wetlands.environment.Environment.import_module] provides a proxy, and calling functions on the proxy executes the code (like `example_module.segment`) within the isolated environment, handling data transfer automatically. [`env.exit()`][wetlands.environment.Environment.exit] cleans up the server process.
-
+The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment.Environment.launch] starts one or more worker processes inside that environment. [`env.submit()`][wetlands.environment.Environment.submit] dispatches work and returns a [`Task`][wetlands.task.Task] for non-blocking control, while [`env.import_module()`][wetlands.environment.Environment.import_module] and [`env.execute()`][wetlands.environment.Environment.execute] provide blocking shortcuts. [`env.exit()`][wetlands.environment.Environment.exit] cleans up all worker processes.
 
 ### Next Steps
 
+- See [Tasks and parallel execution](tasks.md) for the full task API: progress, cancellation, events, parallel workers
 - See [Shared memory](shared_memory.md) to share memory between environments
-- See [Advanced Examples](advanced_example.md) for more complex workflows
+- See [Manual communication](manual_communication.md) for low-level control over environment processes
 - See [Wetlands logging system](logging.md)
 - See [Debugging Guide](debugging.md) to understand how to debug within environments

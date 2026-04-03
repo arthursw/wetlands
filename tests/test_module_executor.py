@@ -1,6 +1,5 @@
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import threading
-import inspect
 import pytest
 
 from wetlands import module_executor
@@ -113,6 +112,7 @@ class TestExecuteFunction:
     @patch("wetlands.module_executor.importlib.import_module")
     def test_execute_function_injects_task_handle(self, mock_import):
         """Test RemoteTaskHandle injection when function has 'task' parameter"""
+
         def my_func(a, task=None):
             return task
 
@@ -140,6 +140,7 @@ class TestExecuteFunction:
     @patch("wetlands.module_executor.importlib.import_module")
     def test_execute_function_no_injection_without_task_param(self, mock_import):
         """Test no injection when function lacks 'task' parameter"""
+
         def my_func(a):
             return a
 
@@ -164,6 +165,7 @@ class TestExecuteFunction:
     @patch("wetlands.module_executor.importlib.import_module")
     def test_execute_function_no_injection_without_task_id(self, mock_import):
         """Test no injection when message has no task_id (backward compat)"""
+
         def my_func(a, task=None):
             return task
 
@@ -184,6 +186,7 @@ class TestExecuteFunction:
     @patch("wetlands.module_executor.importlib.import_module")
     def test_execute_function_cleans_up_active_tasks(self, mock_import):
         """Test that _active_tasks is cleaned up after execution"""
+
         def my_func(a, task=None):
             # During execution, the task should be in _active_tasks
             assert "task-cleanup" in module_executor._active_tasks
@@ -387,8 +390,7 @@ class TestLaunchListener:
                     ],
                 ),
             ):
-                mock_listener = MockListener.return_value.__enter__.return_value
-                mock_connection = mock_listener.accept.return_value.__enter__.return_value
+                MockListener.return_value.__enter__.return_value
 
                 module_executor.launch_listener()
 
@@ -408,8 +410,7 @@ class TestLaunchListener:
                 ],
             ),
         ):
-            mock_listener = MockListener.return_value.__enter__.return_value
-            mock_connection = mock_listener.accept.return_value.__enter__.return_value
+            MockListener.return_value.__enter__.return_value
 
             # Should not raise
             module_executor.launch_listener()

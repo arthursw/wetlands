@@ -414,5 +414,5 @@ This sets `just_my_code: true` in the VS Code launch configuration, which speeds
 ## See Also
 
 - [Getting Started](getting_started.md) - Basic Wetlands usage
-- [Advanced Example](advanced_example.md) - More complex scenarios
+- [Manual communication](manual_communication.md) - Low-level control over environment processes
 - [How It Works](how_it_works.md) - Internal architecture

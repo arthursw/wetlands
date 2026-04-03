@@ -1,15 +1,14 @@
 import logging
 import threading
-import queue
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
 from wetlands.external_environment import ExternalEnvironment, _Worker
-from wetlands.task import Task, TaskStatus, TaskEventType
-
+from wetlands.task import Task, TaskStatus
 
 # --- Helper to create a basic ExternalEnvironment with mocked manager ---
+
 
 def _make_env(**kwargs):
     env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
@@ -199,7 +198,7 @@ class TestSubmit:
         env._workers = [worker]
         env._idle_workers.put(worker)
 
-        task = env.submit("module.py", "func", kwargs={"x": 1})
+        env.submit("module.py", "func", kwargs={"x": 1})
         sent = worker.connection.send.call_args[0][0]
         assert sent["kwargs"] == {"x": 1}
 
@@ -349,6 +348,7 @@ class TestExecuteWithWorkers:
             return {"action": "execution finished", "result": 99}
 
         call_count = [0]
+
         def recv_side_effect():
             call_count[0] += 1
             if call_count[0] == 1:
@@ -363,9 +363,11 @@ class TestExecuteWithWorkers:
 
         # Patch send to signal dispatch
         original_send = worker.connection.send
+
         def send_and_signal(payload):
             original_send(payload)
             dispatched.set()
+
         worker.connection.send = MagicMock(side_effect=send_and_signal)
 
         result = env.execute("module.py", "func", (1,))

@@ -146,6 +146,7 @@ env.exit()
 This requires to install Wetlands in the external environment.
 
 NDArray is a helper class that:
+
 - Stores a NumPy array backed by a SharedMemory block.
 - On pickling, becomes a small JSON-serializable dict `{"name": shm.name, "shape": ..., "dtype": ...}`.
 - On unpickling, automatically recreates the NDArray instance and re-attaches to the shared memory buffer.

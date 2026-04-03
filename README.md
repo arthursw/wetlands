@@ -29,9 +29,11 @@ There are other minor differences between the two libraries. For example, Wetlan
 
 - **Automatic Environment Management**: Create and configure environments on demand.
 - **Dependency Isolation**: Install dependencies without conflicts.
-- **Embedded Execution**: Run Python functions or scripts inside isolated environments.
+- **Embedded Execution**: Run Python functions or scripts inside isolated environments, with both blocking and non-blocking (task-based) APIs.
+- **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks.
+- **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work.
 - **Integrated Debugging**: Debug code running in isolated environments using VS Code or PyCharm with breakpoints and step-through execution.
-- **Micromamba**: Wetlands uses a self-contained `micromamba` for fast and lightweight Conda environment handling.
+- **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
 
 ## 📦 Installation
 
@@ -46,36 +48,28 @@ pip install wetlands
 If the user doesn't have pixi or micromamba installed, Wetlands will download and set it up automatically.
 
 ```python
-
 from wetlands.environment_manager import EnvironmentManager
 
-# Initialize the environment manager with a wetlands instance path
-# The wetlands_instance_path will contain logs, debug information, and by default the conda installation
-# Wetlands will use the existing Pixi or Micromamba installation if available;
-# otherwise it will automatically download and install Pixi or Micromamba in a self-contained manner.
+# Initialize the environment manager
 environment_manager = EnvironmentManager()
 
 # Create and launch an isolated Conda environment named "numpy"
-env = environment_manager.create("numpy", {"pip":["numpy==2.2.4"]})
+env = environment_manager.create("numpy", {"pip": ["numpy==2.2.4"]})
 env.launch()
 
-# Import example_module in the environment, see example_module.py below
+# Import a module proxy and call functions in the environment
 minimal_module = env.import_module("minimal_module.py")
-# example_module is a proxy to example_module.py in the environment
-array = [1,2,3]
-result = minimal_module.sum(array)
+result = minimal_module.sum([1, 2, 3])
+print(f"Result: {result}")
 
-print(f"Sum of {array} is {result}.")
+# Or use execute() for a direct blocking call
+result = env.execute("minimal_module.py", "sum", args=([1, 2, 3],))
 
-# You can also run Python scripts directly using run_script()
-# env.run_script("script.py", args=("arg1", "arg2"))
-
-# Clean up and exit the environment
+# Clean up
 env.exit()
-
 ```
 
-with `example_module.py` as follow:
+with `minimal_module.py`:
 
 ```python
 def sum(x):
@@ -83,7 +77,37 @@ def sum(x):
     return int(np.sum(x))
 ```
 
-See the `examples/` folder for more detailed examples.
+### Non-blocking execution with tasks
+
+`submit()` returns a `Task` object immediately, letting you monitor progress, cancel, or wait for the result:
+
+```python
+# Submit a function for non-blocking execution
+task = env.submit("compute.py", "heavy_computation", args=(data,))
+
+# Do other work while the task runs...
+print(f"Status: {task.status}")
+
+# Block for the result when ready
+task.wait_for()
+print(f"Result: {task.result}")
+```
+
+### Parallel execution with multiple workers
+
+Launch multiple worker processes sharing the same Conda environment:
+
+```python
+env.launch(max_workers=4)
+
+# Distribute work across workers
+results = list(env.map("segment.py", "segment", images))
+
+# Or get individual Task objects for full control
+tasks = env.map_tasks("segment.py", "segment", images)
+```
+
+See the `examples/` folder and the [documentation](https://arthursw.github.io/wetlands/latest/) for more detailed examples.
 
 ## 🐛 Debugging
 

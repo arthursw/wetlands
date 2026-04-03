@@ -538,10 +538,7 @@ class ExternalEnvironment(Environment):
         """Return true if the environment server process is launched and the connection is open."""
         if self._workers:
             return any(
-                w.process.poll() is None
-                and w.connection is not None
-                and not w.connection.closed
-                for w in self._workers
+                w.process.poll() is None and w.connection is not None and not w.connection.closed for w in self._workers
             )
         return (
             self.process is not None

@@ -9,10 +9,16 @@ from wetlands._internal.config_parser import ConfigParser
 
 def has_package(deps_list: list[str], package_name: str) -> bool:
     """Check if a package name is in the dependencies list (with or without version spec)."""
-    return any(dep == package_name or dep.startswith(f"{package_name}>=") or dep.startswith(f"{package_name}==")
-               or dep.startswith(f"{package_name}<=") or dep.startswith(f"{package_name}<")
-               or dep.startswith(f"{package_name}>") or dep.startswith(f"{package_name}~=")
-               for dep in deps_list)
+    return any(
+        dep == package_name
+        or dep.startswith(f"{package_name}>=")
+        or dep.startswith(f"{package_name}==")
+        or dep.startswith(f"{package_name}<=")
+        or dep.startswith(f"{package_name}<")
+        or dep.startswith(f"{package_name}>")
+        or dep.startswith(f"{package_name}~=")
+        for dep in deps_list
+    )
 
 
 # --- Test Fixtures ---

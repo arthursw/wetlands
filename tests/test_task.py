@@ -137,6 +137,7 @@ class TestTaskWaitFor:
 
         def complete_later():
             import time
+
             time.sleep(0.05)
             task._set_completed("result")
 
@@ -180,7 +181,8 @@ class TestTaskListeners:
     def test_remove_listener(self):
         task = Task()
         events = []
-        cb = lambda e: events.append(e.type)
+        def cb(e):
+            events.append(e.type)
         task.listen(cb)
         task._set_running()
         task.remove_listener(cb)
@@ -321,6 +323,7 @@ class TestTaskAsync:
             # Complete in background
             def complete():
                 import time
+
                 time.sleep(0.05)
                 task._set_completed(99)
 
@@ -339,6 +342,7 @@ class TestTaskAsync:
 
             def emit():
                 import time
+
                 time.sleep(0.05)
                 task._set_update(message="step1", current=1, maximum=3)
                 time.sleep(0.05)

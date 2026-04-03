@@ -15,10 +15,10 @@ _base.setLevel(logging.DEBUG)
 # Pixi/Micromamba will be installed in wetlands_instance_path/pixi by default
 environment_manager = EnvironmentManager()
 
-env = environment_manager.create("advanced_cellpose", {"conda": ["cellpose==3.1.0"]})
+env = environment_manager.create("cellpose_manual", {"conda": ["cellpose==3.1.0"]})
 
 # Warning: set log=False since process output is handled manually below (having two loggers reading the same stdout causes issues)
-process = env.execute_commands(["python -u advanced_example_module.py"], log=False)
+process = env.execute_commands(["python -u manual_communication_module.py"], log=False)
 
 port = 0
 

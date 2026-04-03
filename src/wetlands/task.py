@@ -411,4 +411,5 @@ class RemoteTaskHandle:
 
 class InvalidStateError(Exception):
     """Raised when accessing task result in an invalid state."""
+
     pass

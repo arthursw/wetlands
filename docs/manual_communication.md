@@ -1,16 +1,18 @@
 
 ## Manual Communication with [`env.execute_commands`][wetlands.environment.Environment.execute_commands]
 
-This example shows how to use Wetlands to run a specific script within the environment and manage the communication manually using Python's [`multiprocessing.connection`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection). This gives you full control over the interaction protocol but requires more setup.
+For most use cases, [`env.submit()`][wetlands.environment.Environment.submit], [`env.execute()`][wetlands.environment.Environment.execute], and [`env.import_module()`][wetlands.environment.Environment.import_module] handle communication with isolated environments automatically. However, if you need full control over the interaction protocol — for example, to implement a custom message format or integrate with an existing server — you can use [`env.execute_commands()`][wetlands.environment.Environment.execute_commands] to launch a script in the environment and manage the IPC yourself using Python's [`multiprocessing.connection`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection).
 
-Let's see the main script [`advanced_example.py`](https://github.com/arthursw/wetlands/blob/main/examples/advanced_example.py) step by step. 
+This approach requires more setup but gives you complete flexibility over the communication.
+
+Let's see the main script [`manual_communication.py`](https://github.com/arthursw/wetlands/blob/main/examples/manual_communication.py) step by step. 
 
 ### Initialize Wetlands and Logging
 
 We import necessary modules, including [`Client`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Client) for manual connection and standard Python libraries like [`subprocess`](https://docs.python.org/3/library/subprocess.html#module-subprocess), [`threading`](https://docs.python.org/3/library/threading.html), and [`logging`](https://docs.python.org/3/library/logging.html). We also enable debug logging for Wetlands to see more internal details and initialize the [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager].
 
 ```python
-# main_script_manual.py
+# manual_communication.py
 from multiprocessing.connection import Client
 import subprocess
 import sys
@@ -30,20 +32,20 @@ environment_manager = EnvironmentManager("micromamba/", False)
 
 ### Create the Environment
 
-Similar to the first example, we create the environment (`advanced_cellpose_env`) and specify its dependencies.
+Similar to the first example, we create the environment (`cellpose_manual_env`) and specify its dependencies.
 
 ```python
 deps = {"conda": ["cellpose==3.1.0"]}
-env = environment_manager.create("advanced_cellpose_env", deps)
+env = environment_manager.create("cellpose_manual_env", deps)
 ```
 
 ### Execute a Custom Script in the Environment
 
-Instead of [`env.launch()`][wetlands.environment.Environment.launch], we use [`env.execute_commands()`][wetlands.environment.Environment.execute_commands]. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script ([`advanced_example_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/advanced_example_module.py)) using `python -u` (unbuffered output, important for reading stdout line-by-line immediately). We capture the `Popen` object for the launched process. We also redirect stderr to stdout for easier log capture.
+Instead of [`env.launch()`][wetlands.environment.Environment.launch], we use [`env.execute_commands()`][wetlands.environment.Environment.execute_commands]. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script ([`manual_communication_module.py`](https://github.com/arthursw/wetlands/blob/main/examples/manual_communication_module.py)) using `python -u` (unbuffered output, important for reading stdout line-by-line immediately). We capture the `Popen` object for the launched process. We also redirect stderr to stdout for easier log capture.
 
 ```python
-print("Executing advanced_example_module.py in environment...")
-process = env.execute_commands(["python -u advanced_example_module.py"])
+print("Executing manual_communication_module.py in environment...")
+process = env.execute_commands(["python -u manual_communication_module.py"])
 ```
 
 !!! note "Windows users"
@@ -52,7 +54,7 @@ process = env.execute_commands(["python -u advanced_example_module.py"])
 
 ### Establish Manual Connection
 
-The script we just launched (`advanced_example_module.py`) is designed to start a server and print the port it's listening on to its standard output. Our main script now needs to read the `stdout` of the `process` launched by Wetlands to discover this port number. We loop through the output lines until we find the line indicating the port.
+The script we just launched (`manual_communication_module.py`) is designed to start a server and print the port it's listening on to its standard output. Our main script now needs to read the `stdout` of the `process` launched by Wetlands to discover this port number. We loop through the output lines until we find the line indicating the port.
 
 ```python
 port = None
@@ -125,14 +127,14 @@ if process.returncode is None:
 
 ---
 
-Now, let's examine the `advanced_example_module.py` script, which is executed by Wetlands in the isolated environment via `execute_commands`.
+Now, let's examine the `manual_communication_module.py` script, which is executed by Wetlands in the isolated environment via `execute_commands`.
 
 **Define Callable Functions**
 
 This script defines the functions (`download_image`, `segment_image`) that the main script will invoke remotely. These functions perform the actual work (downloading, segmenting using `example_module`) *inside the environment* and use the provided `connection` object to send back results or status messages.
 
 ```python
-# advanced_example_module.py
+# manual_communication_module.py
 import sys
 import urllib.request
 from multiprocessing.connection import Listener
@@ -197,4 +199,4 @@ Once connected, the script enters a loop, waiting to receive messages (`connecti
 
 **Summary of Example 2 Flow:**
 
-The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to create an environment. [`env.execute_commands()`][wetlands.environment.Environment.execute_commands] starts a *custom* server script (`advanced_example_module.py`) inside the environment. The main script reads the server's port from stdout and connects manually using `Client`. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by [`execute_commands`][wetlands.environment.Environment.execute_commands]. This approach offers more control but requires implementing the server logic and communication protocol.
+The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to create an environment. [`env.execute_commands()`][wetlands.environment.Environment.execute_commands] starts a *custom* server script (`manual_communication_module.py`) inside the environment. The main script reads the server's port from stdout and connects manually using `Client`. Communication happens via custom message dictionaries sent over this connection. The main script explicitly tells the server to exit before cleaning up the process started by [`execute_commands`][wetlands.environment.Environment.execute_commands]. This approach offers more control but requires implementing the server logic and communication protocol.

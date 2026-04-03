@@ -20,7 +20,9 @@ The name ***Wetlands*** comes from the tropical *environments* where anacondas t
 
 - **Automatic Environment Management**: Create and configure environments on demand.
 - **Dependency Isolation**: Install dependencies without conflicts.
-- **Embedded Execution**: Run Python functions inside isolated environments.
+- **Embedded Execution**: Run Python functions inside isolated environments, with both blocking and non-blocking (task-based) APIs.
+- **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks. See [Tasks and parallel execution](tasks.md).
+- **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work across them. See [Tasks and parallel execution](tasks.md).
 - **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
 
 ---
@@ -74,12 +76,13 @@ def sum(x):
 
 ### General usage
 
-Wetlands allows you to interact with isolated Conda environments in two main ways:
+Wetlands provides several ways to execute code in isolated Conda environments:
 
-1.  **Simplified Execution ([`env.import_module`][wetlands.environment.Environment.import_module] / [`env.execute`][wetlands.environment.Environment.execute]):** Wetlands manages the communication details, providing a proxy object to call functions within the environment seamlessly. See [Getting started](getting_started.md).
-2.  **Manual Control ([`env.execute_commands`][wetlands.environment.Environment.execute_commands]):** You run specific commands (like starting a Python script that listens for connections) and manage the inter-process communication yourself. See [Advanced example](advanced_example.md).
+1.  **Task-based execution ([`env.submit`][wetlands.environment.Environment.submit]):** Submit a function for non-blocking execution and get a task object back, with progress reporting, cooperative cancellation, event listeners, and `async/await`. For batch processing, use [`env.map()`][wetlands.environment.Environment.map] or [`env.map_tasks()`][wetlands.environment.Environment.map_tasks] to distribute work across multiple worker processes. See [Tasks and parallel execution](tasks.md).
+2.  **Blocking execution ([`env.import_module`][wetlands.environment.Environment.import_module] / [`env.execute`][wetlands.environment.Environment.execute]):** Convenience shortcuts that block until the result is ready. Wetlands manages the communication details, providing a proxy object to call functions within the environment seamlessly. See [Getting started](getting_started.md).
+3.  **Manual Control ([`env.execute_commands`][wetlands.environment.Environment.execute_commands]):** You run specific commands (like starting a Python script that listens for connections) and manage the inter-process communication yourself. See [Manual communication](manual_communication.md).
 
-You can run those examples form the [`examples/` folder](https://github.com/arthursw/wetlands/tree/main/examples) in the repository.
+You can run those examples from the [`examples/` folder](https://github.com/arthursw/wetlands/tree/main/examples) in the repository.
 
 Explore the inner workings on the [How it Works](how_it_works.md) page.
 
