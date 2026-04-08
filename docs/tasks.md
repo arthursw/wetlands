@@ -1,4 +1,5 @@
 
+
 ### Tasks and Parallel Execution
 
 Wetlands provides a task-based API for non-blocking execution, progress reporting, cancellation, and parallel processing across multiple worker processes.
@@ -16,6 +17,8 @@ PENDING ──(start)──> RUNNING ──(success)──> COMPLETED
 ```
 
 By default, `submit()` starts the task immediately (`start=True`). With `start=False`, the task stays `PENDING` until `task.start()` is called — useful for attaching listeners before execution begins.
+
+You can check whether a task has reached a terminal state with `task.status.is_finished()`.
 
 #### Basic usage
 
@@ -37,6 +40,31 @@ You can also submit scripts:
 task = env.submit_script("train.py", args=("--epochs", "10"))
 task.wait_for()
 ```
+
+---
+
+### Task properties
+
+Once a task is created, you can inspect its state through these read-only properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `str` | Unique identifier (UUID4) |
+| `status` | [`TaskStatus`][wetlands.task.TaskStatus] | Current lifecycle state (`PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELED`) |
+| `result` | `T` | Return value of the remote function. Raises `InvalidStateError` if the task is not `COMPLETED`. |
+| `error` | `str \| None` | Error message string when `FAILED`, otherwise `None` |
+| `exception` | [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] `\| None` | Exception wrapping the error message and traceback. `None` unless the task has failed. |
+| `traceback` | `list[str] \| None` | Traceback lines when `FAILED`, otherwise `None` |
+| `message` | `str \| None` | Latest progress message from `update()` |
+| `current` | `int \| None` | Current progress counter from `update()` |
+| `maximum` | `int \| None` | Maximum progress counter from `update()` |
+| `progress` | `float \| None` | Computed as `current / maximum` (a float in [0, 1]). `None` if either value is missing or `maximum` is 0. |
+| `outputs` | `dict[str, Any]` | Accumulated named intermediate outputs from `set_output()` |
+| `future` | `Future[T]` | Standard `concurrent.futures.Future` — see [interop section](#concurrentfutures-interop) |
+
+!!! note "`result` does not block"
+
+    Unlike `future.result()`, accessing `task.result` never blocks. It returns the value immediately if the task is completed, or raises `InvalidStateError` otherwise. Use `task.wait_for()` or `await task` to wait first.
 
 ---
 
@@ -96,7 +124,16 @@ task.listen(on_event).start()
 task.wait_for()
 ```
 
-Terminal events (`COMPLETION`, `FAILURE`, `CANCELATION`) are replayed to late listeners, so attaching a listener after the task finishes still delivers the final outcome.
+Terminal events (`COMPLETION`, `FAILURE`, `CANCELATION`) are replayed to late listeners, so attaching a listener after the task finishes still delivers the final outcome. Progress updates are transient and not replayed.
+
+A listener can be removed with `task.remove_listener(callback)`.
+
+Each [`TaskEvent`][wetlands.task.TaskEvent] has two fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task` | `Task` | The task that emitted the event |
+| `type` | `TaskEventType` | The kind of event |
 
 Event types:
 
@@ -127,6 +164,41 @@ If the remote function returns normally after a cancel request without acknowled
 
 ---
 
+### Waiting and Timeouts
+
+`task.wait_for()` blocks until the task reaches a terminal state. An optional `timeout` (in seconds) raises `TimeoutError` if exceeded — but does **not** cancel the task:
+
+```python
+try:
+    task.wait_for(timeout=30)
+except TimeoutError:
+    print("Still running — deciding whether to cancel...")
+    task.cancel()
+    task.wait_for()
+```
+
+---
+
+### Error Handling
+
+When a task fails, you can inspect the error in several ways:
+
+```python
+task.wait_for()
+
+if task.status == TaskStatus.FAILED:
+    print(task.error)               # error message string
+    print(task.traceback)           # list of traceback lines
+    print(task.exception)           # ExecutionException wrapping both
+
+    # Or via the underlying Future:
+    print(task.future.exception())  # same ExecutionException
+```
+
+The `exception` property returns an [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] that carries both the error message (`.exception`) and the traceback lines (`.traceback`).
+
+---
+
 ### Context Managers
 
 Tasks can be used as context managers for automatic cancellation on early exit:
@@ -137,6 +209,8 @@ with env.submit("training.py", "train_model", args=(config,)) as task:
 # If we exit the block early (exception, timeout, etc.),
 # the task is automatically canceled and awaited.
 ```
+
+Entering the context auto-starts a `PENDING` task. Exiting cancels and waits if the task is still running.
 
 Async context managers are also supported:
 
