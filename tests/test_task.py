@@ -360,6 +360,62 @@ class TestTaskAsync:
         assert TaskEventType.COMPLETION in types
 
 
+class TestTerminalStateGuards:
+    def test_set_failed_twice_no_exception(self):
+        task = Task()
+        task._set_running()
+        task._set_failed("first error")
+        task._set_failed("second error")  # should be a no-op
+        assert task.status == TaskStatus.FAILED
+        assert task.error == "first error"
+
+    def test_set_completed_then_set_failed_no_exception(self):
+        task = Task()
+        task._set_running()
+        task._set_completed(42)
+        task._set_failed("should be ignored")
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == 42
+
+    def test_set_failed_then_set_completed_no_exception(self):
+        task = Task()
+        task._set_running()
+        task._set_failed("error")
+        task._set_completed(42)  # should be a no-op
+        assert task.status == TaskStatus.FAILED
+        assert task.error == "error"
+
+    def test_set_canceled_then_set_failed_no_exception(self):
+        task = Task()
+        task._set_running()
+        task._set_canceled()
+        task._set_failed("should be ignored")
+        assert task.status == TaskStatus.CANCELED
+
+    def test_concurrent_set_failed_no_exception(self):
+        task = Task()
+        task._set_running()
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def fail_task(error_msg):
+            try:
+                barrier.wait(timeout=2)
+                task._set_failed(error_msg)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=fail_task, args=("error1",))
+        t2 = threading.Thread(target=fail_task, args=("error2",))
+        t1.start()
+        t2.start()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+        assert errors == []
+        assert task.status == TaskStatus.FAILED
+        assert task.error in ("error1", "error2")
+
+
 class TestRemoteTaskHandle:
     def test_cancel_requested_default_false(self):
         handle = RemoteTaskHandle("t1", threading.Lock(), MagicMock())

@@ -273,6 +273,8 @@ class Task(Generic[T]):
 
     def _set_completed(self, result: T) -> None:
         with self._lock:
+            if self._status.is_finished():
+                return
             self._status = TaskStatus.COMPLETED
             self._result = result
         self._future.set_result(result)
@@ -281,6 +283,8 @@ class Task(Generic[T]):
 
     def _set_failed(self, error: str, traceback: list[str] | None = None) -> None:
         with self._lock:
+            if self._status.is_finished():
+                return
             self._status = TaskStatus.FAILED
             self._error = error
             self._traceback = traceback
@@ -291,6 +295,8 @@ class Task(Generic[T]):
 
     def _set_canceled(self) -> None:
         with self._lock:
+            if self._status.is_finished():
+                return
             self._status = TaskStatus.CANCELED
         self._future.cancel()
         self._emit(TaskEventType.CANCELATION)

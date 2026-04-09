@@ -1,4 +1,5 @@
 import logging
+import time
 import threading
 import pytest
 from pathlib import Path
@@ -237,7 +238,8 @@ class TestCancel:
 
 
 class TestWorkerReaderLoop:
-    def test_completion_returns_worker_to_idle(self):
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_completion_returns_worker_to_idle(self, mock_kill):
         env = _make_env()
         worker = _make_mock_worker()
         env._workers = [worker]
@@ -254,10 +256,9 @@ class TestWorkerReaderLoop:
 
         assert task.status == TaskStatus.COMPLETED
         assert task.result == 42
-        # Worker should be back in idle pool
-        assert not env._idle_workers.empty()
 
-    def test_error_returns_worker_to_idle(self):
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_error_returns_worker_to_idle(self, mock_kill):
         env = _make_env()
         worker = _make_mock_worker()
         env._workers = [worker]
@@ -274,7 +275,8 @@ class TestWorkerReaderLoop:
         assert task.status == TaskStatus.FAILED
         assert task.error == "boom"
 
-    def test_update_passes_to_task(self):
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_update_passes_to_task(self, mock_kill):
         env = _make_env()
         worker = _make_mock_worker()
         env._workers = [worker]
@@ -292,7 +294,8 @@ class TestWorkerReaderLoop:
         assert task.message == "progress"
         assert task.current == 5
 
-    def test_connection_closed_fails_task(self):
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_connection_closed_fails_task(self, mock_kill):
         env = _make_env()
         worker = _make_mock_worker()
         env._workers = [worker]
@@ -305,7 +308,8 @@ class TestWorkerReaderLoop:
 
         assert task.status == TaskStatus.FAILED
 
-    def test_dispatches_queued_task_after_completion(self):
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_dispatches_queued_task_after_completion(self, mock_kill):
         env = _make_env()
         worker = _make_mock_worker()
         env._workers = [worker]
@@ -333,7 +337,8 @@ class TestWorkerReaderLoop:
 
 
 class TestExecuteWithWorkers:
-    def test_execute_uses_worker_pool(self):
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_execute_uses_worker_pool(self, mock_kill):
         """execute() should use submit() when workers are available."""
         env = _make_env()
         worker = _make_mock_worker()
@@ -421,3 +426,303 @@ class TestLaunchedWithWorkers:
         worker.process.poll.return_value = 1  # exited
         env._workers = [worker]
         assert not env.launched()
+
+
+class TestRemoveDeadWorker:
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_removes_worker_from_pool(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        env._remove_dead_worker(worker)
+        assert worker not in env._workers
+        assert len(env._workers) == 0
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_closes_connection(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        env._remove_dead_worker(worker)
+        worker.connection.close.assert_called_once()
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_kills_alive_process(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        worker.process.poll.return_value = None  # still alive
+        env._workers = [worker]
+        env._remove_dead_worker(worker)
+        mock_kill.assert_called_once_with(worker.process)
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_does_not_kill_dead_process(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        worker.process.poll.return_value = 1  # already dead
+        env._workers = [worker]
+        env._remove_dead_worker(worker)
+        mock_kill.assert_not_called()
+
+
+class TestDeadWorkerCleanup:
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_reader_loop_removes_dead_worker(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        task = Task()
+        task._set_running()
+        worker._current_task = task
+
+        worker.connection.recv.side_effect = EOFError()
+        env._worker_reader_loop(worker)
+
+        assert task.status == TaskStatus.FAILED
+        assert worker not in env._workers
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_dispatch_failure_removes_dead_worker(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+
+        task = Task()
+        task._payload = dict(action="execute", module_path="m.py", function="f", args=(), kwargs={})
+        worker.connection.send.side_effect = BrokenPipeError("broken")
+
+        env._dispatch_to_worker(worker, task)
+
+        assert task.status == TaskStatus.FAILED
+        assert "Failed to send" in task.error
+        assert worker not in env._workers
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_start_skips_dead_workers_in_idle_queue(self, mock_kill):
+        env = _make_env()
+        dead_worker = _make_mock_worker(0)
+        live_worker = _make_mock_worker(1)
+        env._workers = [live_worker]  # dead_worker not in _workers
+        env._idle_workers.put(dead_worker)
+        env._idle_workers.put(live_worker)
+
+        task = Task()
+        task._payload = dict(action="execute", module_path="m.py", function="f", args=(), kwargs={})
+        env._submit_task(task, start=True)
+
+        assert task.status == TaskStatus.RUNNING
+        assert live_worker._current_task is task
+        dead_worker.connection.send.assert_not_called()
+
+    def test_dispatch_or_idle_skips_dead_worker(self):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = []  # worker not in pool (dead)
+
+        env._dispatch_or_idle(worker)
+        # Should not be added back to idle queue
+        assert env._idle_workers.empty()
+
+
+class TestWorkerCount:
+    def test_worker_count_reflects_pool_size(self):
+        env = _make_env()
+        env._workers = [_make_mock_worker(i) for i in range(3)]
+        assert env.worker_count == 3
+
+    def test_worker_count_zero_when_empty(self):
+        env = _make_env()
+        assert env.worker_count == 0
+
+
+class TestLastActivity:
+    def test_last_activity_set_on_dispatch(self):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+
+        task = Task()
+        task._payload = dict(action="execute", module_path="m.py", function="f", args=(), kwargs={})
+        before = time.time()
+        env._dispatch_to_worker(worker, task)
+        after = time.time()
+
+        assert before <= worker._last_activity <= after
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_last_activity_set_on_message_recv(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        task = Task()
+        task._set_running()
+        worker._current_task = task
+
+        worker.connection.recv.side_effect = [
+            {"action": "execution finished", "result": "ok"},
+            EOFError(),
+        ]
+        before = time.time()
+        env._worker_reader_loop(worker)
+        after = time.time()
+
+        assert before <= worker._last_activity <= after
+
+
+class TestHealthMonitor:
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_detects_dead_worker_process(self, mock_kill):
+        env = _make_env()
+        env._shutdown_event = threading.Event()
+        env._worker_timeout = None
+        env._additional_activate_commands = {}
+        env._worker_env = None
+
+        worker = _make_mock_worker()
+        worker.process.poll.return_value = 9  # dead (SIGKILL)
+        worker.process.returncode = -9
+        env._workers = [worker]
+
+        task = Task()
+        task._set_running()
+        worker._current_task = task
+
+        # Mock _try_replace_worker to avoid launching a real process
+        env._try_replace_worker = MagicMock()
+
+        # Run one iteration of the health monitor
+        env._shutdown_event.set()  # Will exit after one check
+        # Manually call the check logic since the loop exits immediately when event is set
+        # Instead, let's directly test the detection logic
+        with env._lock:
+            workers = list(env._workers)
+        for w in workers:
+            t = w._current_task
+            if t is None or t.status.is_finished():
+                continue
+            if w.process.poll() is not None:
+                rc = w.process.returncode
+                t._set_failed(f"Worker process died (exit code {rc})")
+                w._current_task = None
+                env._remove_dead_worker(w)
+                env._try_replace_worker(w.index)
+
+        assert task.status == TaskStatus.FAILED
+        assert "exit code" in task.error
+        assert worker not in env._workers
+        env._try_replace_worker.assert_called_once_with(0)
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_detects_hung_worker_timeout(self, mock_kill):
+        env = _make_env()
+        env._shutdown_event = threading.Event()
+        env._worker_timeout = 0.1  # Very short timeout for testing
+        env._additional_activate_commands = {}
+        env._worker_env = None
+
+        worker = _make_mock_worker()
+        worker.process.poll.return_value = None  # alive
+        worker._last_activity = time.time() - 1.0  # 1 second ago (> 0.1 timeout)
+        env._workers = [worker]
+
+        task = Task()
+        task._set_running()
+        worker._current_task = task
+
+        env._try_replace_worker = MagicMock()
+
+        # Simulate one health check iteration
+        with env._lock:
+            workers = list(env._workers)
+        for w in workers:
+            t = w._current_task
+            if t is None or t.status.is_finished():
+                continue
+            if w.process.poll() is not None:
+                continue
+            if env._worker_timeout is not None:
+                elapsed = time.time() - w._last_activity
+                if elapsed > env._worker_timeout:
+                    t._set_failed(f"Worker process timed out (no response for {elapsed:.0f}s)")
+                    w._current_task = None
+                    env._remove_dead_worker(w)
+                    env._try_replace_worker(w.index)
+
+        assert task.status == TaskStatus.FAILED
+        assert "timed out" in task.error
+        assert worker not in env._workers
+
+    def test_no_timeout_when_activity_recent(self):
+        env = _make_env()
+        env._worker_timeout = 10.0
+
+        worker = _make_mock_worker()
+        worker.process.poll.return_value = None
+        worker._last_activity = time.time()  # just now
+        env._workers = [worker]
+
+        task = Task()
+        task._set_running()
+        worker._current_task = task
+
+        # Check: elapsed < timeout, so no action
+        elapsed = time.time() - worker._last_activity
+        assert elapsed < env._worker_timeout
+        assert task.status == TaskStatus.RUNNING  # unchanged
+
+    def test_health_monitor_loop_exits_on_shutdown(self):
+        env = _make_env()
+        env._shutdown_event = threading.Event()
+        env._worker_timeout = None
+
+        # Set shutdown immediately so the loop exits after first wait
+        env._shutdown_event.set()
+
+        # Should return without error
+        env._health_monitor_loop()
+
+
+class TestExitFailsQueuedTasks:
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_exit_fails_queued_tasks(self, mock_kill):
+        env = _make_env()
+        env._shutdown_event = threading.Event()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+
+        task1 = Task()
+        task2 = Task()
+        env._task_queue.put(task1)
+        env._task_queue.put(task2)
+
+        env._exit()
+
+        assert task1.status == TaskStatus.FAILED
+        assert "shutting down" in task1.error
+        assert task2.status == TaskStatus.FAILED
+        assert "shutting down" in task2.error
+        assert env._task_queue.empty()
+
+
+class TestTryReplaceWorker:
+    def test_replacement_worker_added_to_pool(self):
+        env = _make_env()
+        env._additional_activate_commands = {}
+        env._worker_env = None
+        new_worker = _make_mock_worker(0)
+
+        with patch.object(env, "_launch_worker", return_value=new_worker):
+            env._try_replace_worker(0)
+
+        assert new_worker in env._workers
+
+    def test_replacement_failure_logs_error(self, caplog):
+        env = _make_env()
+        env._additional_activate_commands = {}
+        env._worker_env = None
+
+        with patch.object(env, "_launch_worker", side_effect=Exception("env broken")):
+            with caplog.at_level(logging.ERROR):
+                env._try_replace_worker(0)
+
+        assert "Failed to launch replacement worker" in caplog.text

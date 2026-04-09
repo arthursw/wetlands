@@ -1,4 +1,5 @@
 import subprocess
+import time
 from pathlib import Path
 from multiprocessing.connection import Client, Connection
 import functools
@@ -45,7 +46,7 @@ def synchronized(method):
 class _Worker:
     """Holds state for a single module_executor process."""
 
-    __slots__ = ("index", "process", "port", "connection", "process_logger", "reader_thread", "_current_task")
+    __slots__ = ("index", "process", "port", "connection", "process_logger", "reader_thread", "_current_task", "_last_activity")
 
     def __init__(
         self,
@@ -62,6 +63,7 @@ class _Worker:
         self.process_logger = process_logger
         self.reader_thread: threading.Thread | None = None
         self._current_task: Task[Any] | None = None
+        self._last_activity: float = 0.0
 
 
 class ExternalEnvironment(Environment):
@@ -77,6 +79,10 @@ class ExternalEnvironment(Environment):
         self._workers: list[_Worker] = []
         self._idle_workers: queue.Queue[_Worker] = queue.Queue()
         self._task_queue: queue.Queue[Task[Any]] = queue.Queue()
+        self._additional_activate_commands: Commands = {}
+        self._worker_env: Callable[[int], dict[str, str]] | None = None
+        self._worker_timeout: float | None = None
+        self._shutdown_event = threading.Event()
 
     @synchronized
     def launch(
@@ -85,6 +91,7 @@ class ExternalEnvironment(Environment):
         *,
         max_workers: int = 1,
         worker_env: Callable[[int], dict[str, str]] | None = None,
+        worker_timeout: float | None = None,
     ) -> None:
         """Launches module executor process(es) in the environment.
 
@@ -97,6 +104,11 @@ class ExternalEnvironment(Environment):
         """
         if self.launched():
             return
+
+        self._additional_activate_commands = additional_activate_commands
+        self._worker_env = worker_env
+        self._worker_timeout = worker_timeout
+        self._shutdown_event.clear()
 
         # Ensure debugpy is installed if in debug mode
         if self.environment_manager.debug:
@@ -114,6 +126,14 @@ class ExternalEnvironment(Environment):
             self.process = first.process
             self.connection = first.connection
             self._process_logger = first.process_logger
+
+        # Start health monitor thread
+        self._health_thread = threading.Thread(
+            target=self._health_monitor_loop,
+            daemon=True,
+            name=f"wetlands-health-{self.name}",
+        )
+        self._health_thread.start()
 
     def _launch_worker(
         self,
@@ -198,11 +218,13 @@ class ExternalEnvironment(Environment):
         while True:
             try:
                 message = conn.recv()
+                worker._last_activity = time.time()
             except (EOFError, OSError):
-                # Connection closed — mark current task as failed if any
                 task = worker._current_task
                 if task is not None and not task.status.is_finished():
                     task._set_failed("Worker connection closed unexpectedly")
+                worker._current_task = None
+                self._remove_dead_worker(worker)
                 break
 
             task = worker._current_task
@@ -225,8 +247,80 @@ class ExternalEnvironment(Environment):
             else:
                 logger.warning(f"Worker {worker.index}: unexpected message: {message}")
 
+    _HEALTH_CHECK_INTERVAL = 5  # seconds
+
+    def _health_monitor_loop(self) -> None:
+        """Daemon thread that detects dead or hung workers."""
+        while not self._shutdown_event.wait(timeout=self._HEALTH_CHECK_INTERVAL):
+            with self._lock:
+                workers = list(self._workers)
+
+            for worker in workers:
+                task = worker._current_task
+                if task is None or task.status.is_finished():
+                    continue
+
+                # Check 1: Is the process dead?
+                if worker.process.poll() is not None:
+                    rc = worker.process.returncode
+                    logger.error(f"Worker {worker.index} died (exit code {rc}) while running task {task.id}")
+                    task._set_failed(f"Worker process died (exit code {rc})")
+                    worker._current_task = None
+                    self._remove_dead_worker(worker)
+                    self._try_replace_worker(worker.index)
+                    continue
+
+                # Check 2: Has the worker timed out? (hung but alive)
+                if self._worker_timeout is not None:
+                    elapsed = time.time() - worker._last_activity
+                    if elapsed > self._worker_timeout:
+                        logger.error(
+                            f"Worker {worker.index} timed out (no response for {elapsed:.0f}s) "
+                            f"while running task {task.id}"
+                        )
+                        task._set_failed(f"Worker process timed out (no response for {elapsed:.0f}s)")
+                        worker._current_task = None
+                        self._remove_dead_worker(worker)
+                        self._try_replace_worker(worker.index)
+
+    def _try_replace_worker(self, index: int) -> None:
+        """Attempt to launch a replacement worker at the given index."""
+        try:
+            worker = self._launch_worker(index, self._additional_activate_commands, self._worker_env)
+            with self._lock:
+                self._workers.append(worker)
+            self._dispatch_or_idle(worker)
+            logger.info(f"Replacement worker {index} launched successfully.")
+        except Exception as e:
+            logger.error(f"Failed to launch replacement worker {index}: {e}")
+
+    def _remove_dead_worker(self, worker: _Worker) -> None:
+        """Remove a dead worker from all pools and clean up its resources."""
+        with self._lock:
+            if worker in self._workers:
+                self._workers.remove(worker)
+
+        try:
+            if worker.connection and not worker.connection.closed:
+                worker.connection.close()
+        except OSError:
+            pass
+
+        if worker.process and worker.process.poll() is None:
+            CommandExecutor.kill_process(worker.process)
+
+        if worker.process and worker.process.stdout:
+            try:
+                worker.process.stdout.close()
+            except OSError:
+                pass
+
+        logger.warning(f"Worker {worker.index} removed (dead). {len(self._workers)} worker(s) remaining.")
+
     def _dispatch_or_idle(self, worker: _Worker) -> None:
         """Try to dispatch the next queued task to this worker, or return it to idle pool."""
+        if worker not in self._workers:
+            return
         try:
             task = self._task_queue.get_nowait()
             self._dispatch_to_worker(worker, task)
@@ -238,6 +332,7 @@ class ExternalEnvironment(Environment):
         payload = task._payload  # type: ignore[attr-defined]
         payload["task_id"] = task.id
         worker._current_task = task
+        worker._last_activity = time.time()
         task._set_running()
 
         if worker.process_logger:
@@ -249,19 +344,23 @@ class ExternalEnvironment(Environment):
         except (OSError, BrokenPipeError) as e:
             task._set_failed(f"Failed to send to worker {worker.index}: {e}")
             worker._current_task = None
+            self._remove_dead_worker(worker)
 
     def _submit_task(self, task: Task[Any], start: bool) -> Task[Any]:
         """Wire up a task's start/cancel functions and optionally start it."""
 
         def _start() -> None:
-            try:
-                worker = self._idle_workers.get_nowait()
+            while True:
+                try:
+                    worker = self._idle_workers.get_nowait()
+                except queue.Empty:
+                    self._task_queue.put(task)
+                    return
+                # Skip dead workers that are still in the idle queue
+                if worker not in self._workers:
+                    continue
                 self._dispatch_to_worker(worker, task)
-            except queue.Empty:
-                self._task_queue.put(task)
-                # Task stays PENDING until a worker picks it up — set running deferred
-                # We need a wrapper that sets running when dispatched
-                pass
+                return
 
         def _cancel() -> None:
             # Find which worker has this task and send cancel
@@ -549,9 +648,18 @@ class ExternalEnvironment(Environment):
             and self.connection.readable
         )
 
+    @property
+    def worker_count(self) -> int:
+        """Number of currently active workers."""
+        with self._lock:
+            return len(self._workers)
+
     @synchronized
     def _exit(self) -> None:
         """Close connections and kill all worker processes."""
+        # Stop health monitor
+        self._shutdown_event.set()
+
         if self._workers:
             for worker in self._workers:
                 try:
@@ -568,6 +676,15 @@ class ExternalEnvironment(Environment):
                     self._idle_workers.get_nowait()
                 except queue.Empty:
                     break
+
+            # Fail any tasks still in the queue
+            while True:
+                try:
+                    task = self._task_queue.get_nowait()
+                    task._set_failed("Environment is shutting down")
+                except queue.Empty:
+                    break
+
             self._process_logger = None
             return
 
