@@ -10,6 +10,7 @@ Wetlands leverages **Pixi**, a package management tool for developers, or **Micr
     *   Each worker listens on its own local socket using `multiprocessing.connection.Listener`.
     *   The main process connects to each worker using `multiprocessing.connection.Client`.
     *   A dedicated IPC reader daemon thread is started per worker to receive messages asynchronously.
+    *   A health monitor daemon thread is started to periodically check all workers for liveness and inactivity timeouts (see below).
 5.  **Execution (`submit`/`execute`/`import_module`):**
     *   `submit(module, func, args)` creates a `Task[T]` object, dispatches the function call to an idle worker, and returns the `Task` immediately. If all workers are busy, the task is queued internally and dispatched when the next worker becomes available.
     *   `execute(module, func, args)` is a blocking shortcut: it submits the call and waits for the result before returning.
@@ -23,8 +24,13 @@ Wetlands leverages **Pixi**, a package management tool for developers, or **Micr
 7.  **Progress and Cancellation:**
     *   Remote code can report progress by declaring a `task` parameter in the function signature. Wetlands detects it via `inspect.signature()` and injects a `RemoteTaskHandle` automatically.
     *   The handle provides `task.update()` for progress, `task.set_output()` for intermediate results, `task.cancel_requested` for cooperative cancellation, and `task.log()` for remote logging.
-8.  **Direct Execution (`execute_commands`):** This method directly activates the target environment and runs the provided shell commands using `subprocess.Popen` (no worker processes involved here). The user is responsible for managing the launched process and any necessary communication.
-9.  **Isolation:** Each environment created by Wetlands is fully isolated, preventing dependency conflicts between different environments or with the main application's environment.
+8.  **Worker Health Monitoring:**
+    *   A background daemon thread monitors all workers every few seconds.
+    *   If a worker process has exited (crash, OOM kill, etc.), the monitor fails the active task, removes the worker, and launches a replacement with the same configuration.
+    *   If `worker_timeout` is set and a worker has not sent any IPC message within that duration, it is treated as hung: the active task is failed, the worker is killed and replaced.
+    *   On `env.exit()`, the health monitor stops and any tasks still in the queue are failed with a descriptive error.
+9.  **Direct Execution (`execute_commands`):** This method directly activates the target environment and runs the provided shell commands using `subprocess.Popen` (no worker processes involved here). The user is responsible for managing the launched process and any necessary communication.
+10.  **Isolation:** Each environment created by Wetlands is fully isolated, preventing dependency conflicts between different environments or with the main application's environment.
 
 
 ## 🔀 Worker Pool Architecture
@@ -38,7 +44,7 @@ env.launch(max_workers=4) ──────├─ module_executor (pid 1002) �
                                 └─ module_executor (pid 1004) ─ port 5004
 ```
 
-Each worker holds its own subprocess, port, IPC connection, and a dedicated reader thread. Tasks are dispatched to idle workers from an internal pool; when all workers are busy, tasks queue and are dispatched as workers become available.
+Each worker holds its own subprocess, port, IPC connection, and a dedicated reader thread. Tasks are dispatched to idle workers from an internal pool; when all workers are busy, tasks queue and are dispatched as workers become available. A health monitor thread runs alongside the pool, detecting crashed or hung workers and replacing them transparently.
 
 Multi-process is preferred over multi-thread because Wetlands' primary use case is scientific computing (numpy, torch, cellpose, stardist). Separate processes provide true parallelism (no GIL), failure isolation (one crash doesn't kill other tasks), and separate `sys.path`/`sys.argv` per worker. The only cost is memory (~200–400 MB per worker for a typical scientific stack), controlled via `max_workers`.
 

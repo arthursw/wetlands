@@ -105,6 +105,14 @@ env.launch()
     env.launch(max_workers=4, worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)})
     ```
 
+    To detect hung workers that stop responding, set an inactivity timeout (in seconds):
+
+    ```python
+    env.launch(max_workers=4, worker_timeout=300)  # 5-minute timeout
+    ```
+
+    Wetlands runs a background health monitor that checks all workers periodically. If a worker process crashes or exceeds the inactivity timeout, the monitor fails the active task, removes the dead worker, and launches a replacement automatically. See [Worker health monitoring](tasks.md#worker-health-monitoring) for details.
+
 #### 4. Execute Code in the Environment
 
 ##### Non-blocking execution with `submit()`

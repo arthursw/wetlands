@@ -296,6 +296,21 @@ env.launch(
 )
 ```
 
+To detect hung workers that stop responding, set an inactivity timeout (in seconds):
+
+```python
+env.launch(
+    max_workers=4,
+    worker_timeout=300,  # fail tasks if a worker is silent for 5 minutes
+)
+```
+
+You can check how many workers are currently alive with the `worker_count` property:
+
+```python
+print(f"Active workers: {env.worker_count}")
+```
+
 #### `map()` — batch execution
 
 [`env.map()`][wetlands.environment.Environment.map] distributes work across workers and yields results, similar to `concurrent.futures.Executor.map()`:
@@ -328,6 +343,31 @@ for task in tasks:
 for task in tasks:
     task.wait_for()
 ```
+
+---
+
+### Worker Health Monitoring
+
+Wetlands runs a background health monitor thread for each launched environment. Every few seconds, the monitor checks each worker that has an active task:
+
+- **Dead worker detection**: If a worker process has exited unexpectedly (segfault, OOM kill, etc.), the monitor fails the active task, removes the worker from the pool, and launches a replacement.
+- **Inactivity timeout**: If `worker_timeout` is set and a worker has not sent any IPC message (result, progress update, log) within that duration, it is treated as hung. The monitor fails the active task, kills and removes the worker, and launches a replacement.
+
+Replacement workers are started transparently with the same configuration (environment variables, activation commands) as the original. Queued tasks waiting for a worker are dispatched to the replacement as soon as it is ready.
+
+```python
+env.launch(
+    max_workers=4,
+    worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)},
+    worker_timeout=600,  # 10-minute inactivity timeout
+)
+
+# Workers that crash or hang are replaced automatically.
+# The failed task receives a FAILED status with a descriptive error message.
+results = list(env.map("process.py", "run", items))
+```
+
+The health monitor stops when `env.exit()` is called. Any tasks still queued at shutdown are failed with a descriptive error message.
 
 ---
 

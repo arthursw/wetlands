@@ -101,6 +101,9 @@ class ExternalEnvironment(Environment):
                 All workers share the same conda environment (no duplication).
             worker_env: Optional callable receiving worker index (0-based),
                 returning extra environment variables for that worker.
+            worker_timeout: Optional inactivity timeout in seconds. If set and a
+                worker sends no IPC message within this duration, it is treated as
+                hung: the active task is failed, the worker is killed and replaced.
         """
         if self.launched():
             return

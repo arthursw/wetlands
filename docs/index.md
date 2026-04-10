@@ -23,6 +23,7 @@ The name ***Wetlands*** comes from the tropical *environments* where anacondas t
 - **Embedded Execution**: Run Python functions inside isolated environments, with both blocking and non-blocking (task-based) APIs.
 - **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks. See [Tasks and parallel execution](tasks.md).
 - **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work across them. See [Tasks and parallel execution](tasks.md).
+- **Worker Health Monitoring**: Automatic detection of dead or hung worker processes, with configurable inactivity timeouts and transparent replacement of failed workers.
 - **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
 
 ---
