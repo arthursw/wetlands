@@ -10,6 +10,8 @@ Clients can send instructions to:
 Designed to be run within isolated environments for sandboxed execution of Python code modules.
 """
 
+from __future__ import annotations
+
 import sys
 import logging
 import threading
@@ -240,7 +242,8 @@ def launch_listener():
                             cancel_task_id = message.get("task_id")
                             if cancel_task_id and cancel_task_id in _active_tasks:
                                 handle = _active_tasks[cancel_task_id]
-                                handle._set_cancel_requested()
+                                if hasattr(handle, "_set_cancel_requested"):
+                                    handle._set_cancel_requested()  # type: ignore[attr-defined]
                                 logger.debug(f"Cancel requested for task {cancel_task_id}")
                             else:
                                 logger.debug(f"Cancel requested for unknown task {cancel_task_id}")

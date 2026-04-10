@@ -154,7 +154,7 @@ class ExternalEnvironment(Environment):
 
         log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}
         if len(self._workers) > 0 or index > 0:
-            log_context["worker_index"] = index
+            log_context["worker_index"] = str(index)
 
         # Build popen_kwargs with worker-specific env vars
         popen_kwargs: dict[str, Any] = {}
