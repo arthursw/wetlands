@@ -11,6 +11,7 @@ from wetlands.internal_environment import InternalEnvironment
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands._internal.command_generator import Commands
+from wetlands._internal.shell import shell_quote
 
 
 @pytest.fixture
@@ -138,7 +139,7 @@ def test_create_dependencies_not_met_create_external(environment_manager_fixture
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
     current_py_version = platform.python_version()
-    assert any(f"create -n {env_name} python={current_py_version} -y" in cmd for cmd in command_list)
+    assert any(f"create -n {shell_quote(env_name)} python={current_py_version} -y" in cmd for cmd in command_list)
     assert any(f"install" in cmd for cmd in command_list if "micromamba" in cmd)
     assert any("requests" in cmd for cmd in command_list if "install" in cmd)
     assert any("pandas" in cmd for cmd in command_list if "pip" in cmd and "install" in cmd)
@@ -158,7 +159,7 @@ def test_create_with_python_version(environment_manager_fixture, monkeypatch):
     mock_execute_output.assert_called()
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
-    assert any(f"create -n {env_name} python={py_version} -y" in cmd for cmd in command_list)
+    assert any(f"create -n {shell_quote(env_name)} python={py_version} -y" in cmd for cmd in command_list)
     assert any("toolz" in cmd for cmd in command_list if "pip" in cmd and "install" in cmd)
 
 
@@ -180,7 +181,7 @@ def test_create_with_additional_commands(environment_manager_fixture, monkeypatc
     called_args, _ = mock_execute_output.call_args
     command_list = called_args[0]
 
-    assert any(f"create -n {env_name}" in cmd for cmd in command_list)
+    assert any(f"create -n {shell_quote(env_name)}" in cmd for cmd in command_list)
     assert any("tiny-package" in cmd for cmd in command_list if "pip" in cmd and "install" in cmd)
     assert "echo 'hello world'" in command_list
     assert "specific command" in command_list
