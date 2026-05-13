@@ -65,7 +65,7 @@ class EnvironmentManager:
         """
 
         self.environments: dict[str | Path, Environment] = {}
-        self.wetlands_instance_path = cast(Path, wetlands_instance_path).resolve()
+        self.wetlands_instance_path = Path(wetlands_instance_path).resolve()
 
         # Set default conda_path if not provided
         if conda_path is None:

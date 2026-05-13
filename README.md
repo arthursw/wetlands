@@ -32,7 +32,6 @@ There are other minor differences between the two libraries. For example, Wetlan
 - **Embedded Execution**: Run Python functions or scripts inside isolated environments, with both blocking and non-blocking (task-based) APIs.
 - **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks.
 - **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work.
-- **Worker Health Monitoring**: Automatic detection of dead or hung workers, with configurable inactivity timeouts and transparent replacement of failed workers.
 - **Integrated Debugging**: Debug code running in isolated environments using VS Code or PyCharm with breakpoints and step-through execution.
 - **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
 

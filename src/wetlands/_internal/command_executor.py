@@ -27,6 +27,7 @@ class CommandExecutor:
         try:
             parent = psutil.Process(process.pid)
         except psutil.NoSuchProcess:
+            process.wait()  # reap zombie if already dead
             return
         try:
             for child in parent.children(recursive=True):  # Get all child processes
@@ -35,6 +36,10 @@ class CommandExecutor:
             if parent.is_running():
                 parent.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        try:
+            process.wait(timeout=5)                                                                                                 
+        except Exception:                                     
             pass
 
     def _is_windows(self) -> bool:
