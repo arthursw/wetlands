@@ -7,6 +7,7 @@ import pytest
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.command_generator import Commands
+from wetlands._internal.shell import shell_quote
 
 
 @pytest.fixture
@@ -70,7 +71,7 @@ def test_execute_commands_in_specific_env(environment_manager_fixture):
     command_list = called_args[0]
 
     # Check activation for the specific environment
-    assert any(f"activate {env.path}" in cmd for cmd in command_list)
+    assert any(f"activate {shell_quote(env.path)}" in cmd for cmd in command_list)
     # Check user commands are present
     assert "python script.py" in command_list
     assert "echo done" in command_list

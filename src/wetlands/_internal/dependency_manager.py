@@ -2,6 +2,7 @@ import platform
 from typing import TYPE_CHECKING
 
 from wetlands._internal.command_generator import CommandGenerator
+from wetlands._internal.shell import shell_quote
 
 try:
     from typing import NotRequired, TypedDict, Literal  # type: ignore
@@ -91,8 +92,8 @@ class DependencyManager:
                         f"Error: the library {dependency['name']} is not available on this platform ({current_platform}). It is only available on the following platforms: {platforms_string}."
                     )
         if quotes:
-            final_dependencies = [f'"{d}"' for d in final_dependencies]
-            final_dependencies_no_deps = [f'"{d}"' for d in final_dependencies_no_deps]
+            final_dependencies = [shell_quote(d) for d in final_dependencies]
+            final_dependencies_no_deps = [shell_quote(d) for d in final_dependencies_no_deps]
         return (
             final_dependencies,
             final_dependencies_no_deps,
@@ -138,7 +139,7 @@ class DependencyManager:
             )
 
         proxy_string = self.settings_manager.get_proxy_string()
-        proxy_args = f"--proxy {proxy_string}" if proxy_string is not None else ""
+        proxy_args = f"--proxy {shell_quote(proxy_string)}" if proxy_string is not None else ""
         if self.settings_manager.use_pixi:
             if environment is None:
                 raise Exception(
@@ -147,12 +148,12 @@ class DependencyManager:
             if hasPipDependencies:
                 install_deps_commands += [
                     f'echo "Installing pip dependencies..."',
-                    f'{self.settings_manager.conda_bin} add --manifest-path "{environment.path}" --pypi {" ".join(pipDependencies)}',
+                    f"{self.settings_manager.conda_bin} add --manifest-path {shell_quote(environment.path)} --pypi {' '.join(pipDependencies)}",
                 ]
             if hasCondaDependencies:
                 install_deps_commands += [
                     f'echo "Installing conda dependencies..."',
-                    f'{self.settings_manager.conda_bin} add --manifest-path "{environment.path}" {" ".join(conda_dependencies)}',
+                    f"{self.settings_manager.conda_bin} add --manifest-path {shell_quote(environment.path)} {' '.join(conda_dependencies)}",
                 ]
             if len(condaDependenciesNoDeps) > 0:
                 raise Exception(f"Use micromamba to be able to install conda packages without their dependencies.")

@@ -1,6 +1,8 @@
 from pathlib import Path
 import platform
 
+from wetlands._internal.shell import shell_quote
+
 
 class SettingsManager:
     use_pixi = True
@@ -28,9 +30,9 @@ class SettingsManager:
         # conda_bin_config is only used with micromamba but let's initialize it for pixi as well
         conda_config_path = self.conda_path / "pixi.toml" if self.use_pixi else self.conda_path / ".mambarc"
         self.conda_bin_config = (
-            f'{self.conda_bin} --manifest-path "{conda_config_path}"'
+            f"{self.conda_bin} --manifest-path {shell_quote(conda_config_path)}"
             if self.use_pixi
-            else f'{self.conda_bin} --rc-file "{conda_config_path}"'
+            else f"{self.conda_bin} --rc-file {shell_quote(conda_config_path)}"
         )
 
         if self.use_pixi:
@@ -96,9 +98,9 @@ class SettingsManager:
         if self.proxies is None:
             return []
         return [
-            f'export {name.lower()}_proxy="{value}"'
+            f"export {name.lower()}_proxy={shell_quote(value)}"
             if platform.system() != "Windows"
-            else f'$Env:{name.upper()}_PROXY="{value}"'
+            else f"$Env:{name.upper()}_PROXY={shell_quote(value)}"
             for name, value in self.proxies.items()
         ]
 

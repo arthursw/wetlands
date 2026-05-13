@@ -19,6 +19,7 @@ from wetlands._internal.config_parser import ConfigParser
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.process_logger import ProcessLogger
+from wetlands._internal.shell import shell_quote
 from wetlands.logger import logger, enable_file_logging, LOG_SOURCE_ENVIRONMENT
 
 
@@ -169,7 +170,9 @@ class EnvironmentManager:
         """
         if self.settings_manager.use_pixi:
             commands = self.command_generator.get_activate_conda_commands()
-            commands += [f'{self.settings_manager.conda_bin} list --json --manifest-path "{environment.path}"']
+            commands += [
+                f"{self.settings_manager.conda_bin} list --json --manifest-path {shell_quote(environment.path)}"
+            ]
             return self.command_executor.execute_commands_and_get_json_output(commands)
         else:
             commands = self.command_generator.get_activate_environment_commands(environment) + [
@@ -457,15 +460,17 @@ class EnvironmentManager:
         if self.settings_manager.use_pixi:
             manifest_path = path
             if not manifest_path.exists():
-                platform_args = f"--platform win-64" if platform.system() == "Windows" else ""
+                platform_args = "--platform win-64" if platform.system() == "Windows" else ""
                 create_env_commands += [
-                    f'{self.settings_manager.conda_bin} init --no-progress {platform_args} "{manifest_path.parent}"'
+                    f"{self.settings_manager.conda_bin} init --no-progress {platform_args} {shell_quote(manifest_path.parent)}"
                 ]
             create_env_commands += [
-                f'{self.settings_manager.conda_bin} add --no-progress --manifest-path "{manifest_path}" {python_requirement}'
+                f"{self.settings_manager.conda_bin} add --no-progress --manifest-path {shell_quote(manifest_path)}{python_requirement}"
             ]
         else:
-            create_env_commands += [f"{self.settings_manager.conda_bin_config} create -n {name}{python_requirement} -y"]
+            create_env_commands += [
+                f"{self.settings_manager.conda_bin_config} create -n {shell_quote(name)}{python_requirement} -y"
+            ]
         environment = ExternalEnvironment(name, path, self)
         self.environments[name] = environment
         create_env_commands += self.dependency_manager.get_install_dependencies_commands(environment, dependencies)

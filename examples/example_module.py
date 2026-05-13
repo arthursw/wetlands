@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 
 def segment_image(
-    image: numpy.ndarray,
+    image: "numpy.ndarray",
     model_type="cyto",
     use_gpu=False,
     channels=[0, 0],

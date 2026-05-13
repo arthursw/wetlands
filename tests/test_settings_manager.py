@@ -1,6 +1,7 @@
 from pathlib import Path
 import platform
 from unittest.mock import patch, mock_open
+from wetlands._internal.shell import shell_quote
 from wetlands._internal.settings_manager import SettingsManager
 
 
@@ -71,12 +72,12 @@ def test_get_proxy_environment_variables_commands():
         "https": "https://secure-proxy.com:8443",
     }
     expected_cmds = [
-        'export http_proxy="http://proxy.com:8080"'
+        f"export http_proxy={shell_quote('http://proxy.com:8080')}"
         if platform.system() != "Windows"
-        else '$Env:HTTP_PROXY="http://proxy.com:8080"',
-        'export https_proxy="https://secure-proxy.com:8443"'
+        else f"$Env:HTTP_PROXY={shell_quote('http://proxy.com:8080')}",
+        f"export https_proxy={shell_quote('https://secure-proxy.com:8443')}"
         if platform.system() != "Windows"
-        else '$Env:HTTPS_PROXY="https://secure-proxy.com:8443"',
+        else f"$Env:HTTPS_PROXY={shell_quote('https://secure-proxy.com:8443')}",
     ]
     assert sm.get_proxy_environment_variables_commands() == expected_cmds
 

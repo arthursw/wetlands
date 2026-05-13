@@ -5,6 +5,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
+from wetlands._internal.shell import shell_quote
 from wetlands.external_environment import ExternalEnvironment, _Worker
 from wetlands.task import Task, TaskStatus
 
@@ -58,6 +59,37 @@ def test_launch(mock_popen):
 
         assert env.port == 5000
         assert env.connection == mock_conn
+
+
+def test_launch_worker_quotes_command_arguments_with_spaces():
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = MagicMock()
+    wetlands_instance_path = Path("/tmp/wetlands state")
+    mock_env_manager.wetlands_instance_path.resolve.return_value = wetlands_instance_path
+
+    env = ExternalEnvironment("cellpose env", Path("/tmp/cellpose env"), mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+
+    mock_conn = MagicMock()
+    mock_conn.recv.side_effect = EOFError()
+    mock_conn.closed = False
+
+    with patch("wetlands.external_environment.Client", return_value=mock_conn):
+        env._launch_worker(0, {}, None)
+
+    commands = env.execute_commands.call_args.args[0]
+    command = commands[0]
+    assert shell_quote("cellpose env") in command
+    assert shell_quote(wetlands_instance_path) in command
 
 
 @patch("multiprocessing.connection.Client")

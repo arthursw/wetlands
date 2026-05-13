@@ -13,6 +13,8 @@ from typing import Dict, Optional, Tuple
 
 import yaml
 
+from wetlands._internal.shell import shell_quote
+
 # --- Configuration ---
 PIXI_VERSION = "v0.48.2"
 MICROMAMBA_VERSION = "2.3.0-1"
@@ -153,7 +155,7 @@ def install_vc_redist_windows(proxies: Optional[Dict[str, str]]) -> None:
             ps_command = [
                 "powershell",
                 "-Command",
-                f"Start-Process -FilePath '{vc_redist_path}' -ArgumentList '/install','/passive','/norestart' -Wait -NoNewWindow",
+                f"Start-Process -FilePath {shell_quote(vc_redist_path)} -ArgumentList '/install','/passive','/norestart' -Wait -NoNewWindow",
             ]
 
             result = subprocess.run(

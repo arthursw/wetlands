@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 import yaml
 
 from wetlands._internal.settings_manager import SettingsManager
+from wetlands._internal.shell import shell_quote
 
 
 class CommandsDict(TypedDict):
@@ -41,22 +42,22 @@ class CommandGenerator:
         conda_path, conda_bin_path = self.settings_manager.get_conda_paths()
         if self.settings_manager.use_pixi:
             if platform.system() == "Windows":
-                return [f'$env:PATH = "{conda_path / conda_bin_path.parent};" + $env:PATH']
+                return [f"$env:PATH = {shell_quote(str(conda_path / conda_bin_path.parent) + ';')} + $env:PATH"]
             else:
-                return [f'export PATH="{conda_path / conda_bin_path.parent}:$PATH"']
+                return [f"export PATH={shell_quote(conda_path / conda_bin_path.parent)}:$PATH"]
         if platform.system() == "Windows":
             return [
-                f'Set-Location -Path "{conda_path}"',
-                f'$Env:MAMBA_ROOT_PREFIX="{conda_path}"',
+                f"Set-Location -Path {shell_quote(conda_path)}",
+                f"$Env:MAMBA_ROOT_PREFIX={shell_quote(conda_path)}",
                 f".\\{conda_bin_path} shell hook -s powershell | Out-String | Invoke-Expression",
-                f'Set-Location -Path "{current_path}"',
+                f"Set-Location -Path {shell_quote(current_path)}",
             ]
         else:
             return [
-                f'cd "{conda_path}"',
-                f'export MAMBA_ROOT_PREFIX="{conda_path}"',
+                f"cd {shell_quote(conda_path)}",
+                f"export MAMBA_ROOT_PREFIX={shell_quote(conda_path)}",
                 f'eval "$({conda_bin_path} shell hook -s posix)"',
-                f'cd "{current_path}"',
+                f"cd {shell_quote(current_path)}",
             ]
 
     def create_mamba_config_file(self, conda_path):
@@ -120,14 +121,14 @@ class CommandGenerator:
             # Warning: Use `pixi shell-hook` instead of `pixi shell` since `pixi shell` creates a new shell (and we want to keep the same shell)
             if platform.system() != "Windows":
                 commands += [
-                    f'eval "$({self.settings_manager.conda_bin} shell-hook --manifest-path "{environment.path}")"'
+                    f'eval "$({self.settings_manager.conda_bin} shell-hook --manifest-path {shell_quote(environment.path)})"'
                 ]
             else:
                 commands += [
-                    f'{self.settings_manager.conda_bin} shell-hook --manifest-path "{environment.path}" | Out-String | Invoke-Expression'
+                    f"{self.settings_manager.conda_bin} shell-hook --manifest-path {shell_quote(environment.path)} | Out-String | Invoke-Expression"
                 ]
         else:
-            commands += [f"{self.settings_manager.conda_bin} activate {environment.path}"]
+            commands += [f"{self.settings_manager.conda_bin} activate {shell_quote(environment.path)}"]
         return commands + self.get_commands_for_current_platform(additional_activate_commands)
 
     def get_add_channels_commands(
@@ -151,7 +152,10 @@ class CommandGenerator:
         """
         if not self.settings_manager.use_pixi:
             if len(channels) > 0:
-                return [f"{self.settings_manager.conda_bin_config} config --add channels " + " ".join(channels)]
+                return [
+                    f"{self.settings_manager.conda_bin_config} config --add channels "
+                    + " ".join(shell_quote(channel) for channel in channels)
+                ]
             else:
                 return []
         channels += set([dep.split("::")[0].replace('"', "") for dep in conda_dependencies if "::" in dep])
@@ -159,7 +163,7 @@ class CommandGenerator:
             return []
         commands = self.get_activate_conda_commands() if activate_conda else []
         commands += [
-            f'{self.settings_manager.conda_bin} project channel add --manifest-path "{environment.path}" --no-progress --prepend '
-            + " ".join(channels)
+            f"{self.settings_manager.conda_bin} project channel add --manifest-path {shell_quote(environment.path)} --no-progress --prepend "
+            + " ".join(shell_quote(channel) for channel in channels)
         ]
         return commands

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from wetlands._internal.exceptions import IncompatibilityException
 from wetlands._internal.dependency_manager import DependencyManager, Dependencies
+from wetlands._internal.shell import shell_quote
 
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 
@@ -51,9 +52,9 @@ def test_format_dependencies(mock_command_generator_micromamba):
 
     deps, deps_no_deps, has_deps = dependency_manager.format_dependencies("conda", dependencies)
 
-    assert '"numpy"' in deps
-    assert '"tensorflow"' in deps  # tensorflow should be included as platform matches
-    assert '"pandas"' not in deps  # pandas should be excluded as platform does not match
+    assert shell_quote("numpy") in deps
+    assert shell_quote("tensorflow") in deps  # tensorflow should be included as platform matches
+    assert shell_quote("pandas") not in deps  # pandas should be excluded as platform does not match
     assert has_deps is True
     assert len(deps_no_deps) == 0
 
@@ -82,14 +83,23 @@ def test_get_install_dependencies_commands_micromamba(mock_command_generator_mic
     commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
 
     assert any(
-        re.match(rf'{dependency_manager.settings_manager.conda_bin_config} install "numpy" -y', cmd) for cmd in commands
-    )
-    assert any(
-        re.match(rf'{dependency_manager.settings_manager.conda_bin_config} install --no-deps "stardist==0.9.1" -y', cmd)
+        re.match(
+            rf"{dependency_manager.settings_manager.conda_bin_config} install {re.escape(shell_quote('numpy'))} -y",
+            cmd,
+        )
         for cmd in commands
     )
-    assert any(re.match(r'pip\s+install\s+"requests"', cmd) for cmd in commands)
-    assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)
+    assert any(
+        re.match(
+            rf"{dependency_manager.settings_manager.conda_bin_config} install --no-deps {re.escape(shell_quote('stardist==0.9.1'))} -y",
+            cmd,
+        )
+        for cmd in commands
+    )
+    assert any(re.match(rf"pip\s+install\s+{re.escape(shell_quote('requests'))}", cmd) for cmd in commands)
+    assert any(
+        re.match(rf"pip\s+install\s+--no-deps\s+{re.escape(shell_quote('cellpose==3.1.0'))}", cmd) for cmd in commands
+    )
 
 
 def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
@@ -110,6 +120,8 @@ def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
 
     commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
 
-    assert any("pixi add" in cmd and '"numpy"' in cmd for cmd in commands)
-    assert any("pixi add" in cmd and '--pypi "requests"' in cmd for cmd in commands)
-    assert any(re.match(r'pip\s+install\s+--no-deps\s+"cellpose==3.1.0"', cmd) for cmd in commands)
+    assert any("pixi add" in cmd and shell_quote("numpy") in cmd for cmd in commands)
+    assert any("pixi add" in cmd and f"--pypi {shell_quote('requests')}" in cmd for cmd in commands)
+    assert any(
+        re.match(rf"pip\s+install\s+--no-deps\s+{re.escape(shell_quote('cellpose==3.1.0'))}", cmd) for cmd in commands
+    )

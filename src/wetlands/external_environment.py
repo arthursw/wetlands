@@ -16,6 +16,7 @@ from wetlands.environment import Environment
 from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.process_logger import ProcessLogger
+from wetlands._internal.shell import shell_quote
 from wetlands.task import Task, TaskStatus
 
 try:
@@ -156,9 +157,20 @@ class ExternalEnvironment(Environment):
         """Launch a single module_executor process and return a _Worker."""
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
 
-        debug_args = f" --debug_port 0" if self.environment_manager.debug else ""
+        debug_args = " --debug_port 0" if self.environment_manager.debug else ""
+        wetlands_instance_path = self.environment_manager.wetlands_instance_path.resolve()
         commands = [
-            f'python -u "{module_executor_path}" {self.name} --wetlands_instance_path {self.environment_manager.wetlands_instance_path.resolve()}{debug_args}'
+            " ".join(
+                [
+                    "python",
+                    "-u",
+                    shell_quote(module_executor_path),
+                    shell_quote(self.name),
+                    "--wetlands_instance_path",
+                    shell_quote(wetlands_instance_path),
+                ]
+            )
+            + debug_args
         ]
 
         log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}

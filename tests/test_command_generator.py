@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from wetlands._internal.command_generator import CommandGenerator
+from wetlands._internal.shell import shell_quote
 
 # mock_settings_manager and mock_dependency_manager is defined in conftest.py
 
@@ -59,7 +60,9 @@ def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
     dependencies = ["conda-forge::requests", "python", "nvidia::cuda-toolkit", "conda-forge::scipy"]
     # Channels are sorted alphabetically and unique
     expected_channels = "conda-forge", "nvidia", "bioconda"
-    expected_command = rf'pixi project channel add --manifest-path ".*" --no-progress --prepend'
+    expected_command = (
+        rf"pixi project channel add --manifest-path {re.escape(shell_quote(environment.path))} --no-progress --prepend"
+    )
     commands = command_generator_pixi.get_add_channels_commands(
         environment, ["bioconda"], dependencies, activate_conda=True
     )
@@ -81,3 +84,13 @@ def test_mixed_dependencies_with_and_without_channels_micromamba(command_generat
     )
     assert re.search(expected_command, commands[-1])
     assert all(ec in commands[-1] for ec in expected_channels)
+
+
+@patch("platform.system", return_value="Linux")
+def test_activate_environment_quotes_paths_with_spaces(mock_platform, command_generator_pixi):
+    environment = MagicMock()
+    environment.path = Path("/tmp/wetlands state/workspaces/cellpose env/pixi.toml")
+
+    commands = command_generator_pixi.get_activate_environment_commands(environment)
+
+    assert any(shell_quote(environment.path) in command for command in commands)
