@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-ProperDocs 1.6.7, mkdocs-material-9.7.6">
     
     
       
@@ -2376,7 +2376,7 @@
 </span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="sd">        &quot;&quot;&quot;</span>
 </span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66"></a>
 </span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">environments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">,</span> <span class="n">Environment</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">wetlands_instance_path</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">Path</span><span class="p">,</span> <span class="n">wetlands_instance_path</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">wetlands_instance_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">wetlands_instance_path</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
 </span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69"></a>
 </span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70"></a>        <span class="c1"># Set default conda_path if not provided</span>
 </span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71"></a>        <span class="k">if</span> <span class="n">conda_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -3186,7 +3186,7 @@
 </span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="sd">    &quot;&quot;&quot;</span>
 </span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66"></a>
 </span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">environments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">,</span> <span class="n">Environment</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">wetlands_instance_path</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">Path</span><span class="p">,</span> <span class="n">wetlands_instance_path</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">wetlands_instance_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">wetlands_instance_path</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
 </span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69"></a>
 </span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70"></a>    <span class="c1"># Set default conda_path if not provided</span>
 </span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71"></a>    <span class="k">if</span> <span class="n">conda_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
