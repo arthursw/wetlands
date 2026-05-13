@@ -46,7 +46,16 @@ def synchronized(method):
 class _Worker:
     """Holds state for a single module_executor process."""
 
-    __slots__ = ("index", "process", "port", "connection", "process_logger", "reader_thread", "_current_task", "_last_activity")
+    __slots__ = (
+        "index",
+        "process",
+        "port",
+        "connection",
+        "process_logger",
+        "reader_thread",
+        "_current_task",
+        "_last_activity",
+    )
 
     def __init__(
         self,

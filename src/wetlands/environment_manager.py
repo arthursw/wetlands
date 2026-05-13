@@ -4,7 +4,7 @@ from importlib import metadata
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any, Literal, cast, Union
+from typing import Any, Literal, Union
 import json5
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion

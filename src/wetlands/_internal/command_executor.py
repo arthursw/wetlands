@@ -38,8 +38,8 @@ class CommandExecutor:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
         try:
-            process.wait(timeout=5)                                                                                                 
-        except Exception:                                     
+            process.wait(timeout=5)
+        except Exception:
             pass
 
     def _is_windows(self) -> bool:

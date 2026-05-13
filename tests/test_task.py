@@ -181,8 +181,10 @@ class TestTaskListeners:
     def test_remove_listener(self):
         task = Task()
         events = []
+
         def cb(e):
             events.append(e.type)
+
         task.listen(cb)
         task._set_running()
         task.remove_listener(cb)
