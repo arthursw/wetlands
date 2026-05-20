@@ -1380,7 +1380,9 @@
 <h2 id="overview">Overview</h2>
 <p>Wetlands automatically logs all operations (environment creation, installation, execution) with rich context metadata:</p>
 <ul>
-<li>By default, logs are written to <code>"wetlands/wetlands.log"</code> file (when using <code>EnvironmentManager</code>)</li>
+<li>By default, manager logs are written to <code>"wetlands/wetlands.log"</code> when using <code>EnvironmentManager</code></li>
+<li>Worker process logs are written to <code>"wetlands/environments.log"</code></li>
+<li>Relative log paths are resolved inside the <code>wetlands_instance_path</code>; absolute log paths are used as provided</li>
 <li>Use <code>logging.basicConfig()</code> or add handlers to enable console output</li>
 <li>Most logs include context fields (environment name, operation type, etc.)</li>
 <li>ProcessLogger reads subprocess output in background threads for real-time logging</li>
@@ -1421,7 +1423,7 @@
 </ol>
 <h2 id="basic-usage">Basic Usage</h2>
 <h3 id="default-behavior">Default Behavior</h3>
-<p>By default, when you create an <code>EnvironmentManager</code>, it automatically enables logging to <code>"wetlands/wetlands.log"</code>:</p>
+<p>By default, when you create an <code>EnvironmentManager</code>, it automatically enables logging to <code>"wetlands/wetlands.log"</code>. Worker processes launched with <code>env.launch()</code> also write their own log stream to <code>"wetlands/environments.log"</code>:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">wetlands.environment_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvironmentManager</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
@@ -1442,7 +1444,8 @@
 </span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="n">env</span> <span class="o">=</span> <span class="n">env_manager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="s2">&quot;cellpose&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;conda&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;cellpose==3.1.0&quot;</span><span class="p">]})</span>
 </span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">()</span>
 </span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>
-</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="c1"># All operations are now logged to wetlands/wetlands.log</span>
+</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="c1"># Manager logs are written to wetlands/wetlands.log</span>
+</span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="c1"># Worker logs are written to wetlands/environments.log</span>
 </span></code></pre></div>
 <h2 id="advanced-examples">Advanced Examples</h2>
 <h3 id="per-execution-log-files">Per-Execution Log Files</h3>

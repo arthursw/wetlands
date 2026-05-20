@@ -1490,7 +1490,7 @@
 <h4 id="1-initialize-the-environment-manager">1. Initialize the Environment Manager</h4>
 <p>We start by initializing the <a class="autorefs autorefs-internal" title="            EnvironmentManager" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager">EnvironmentManager</a>. We provide:</p>
 <ul>
-<li>A <code>wetlands_instance_path</code> where Wetlands stores logs and debug information (defaults to <code>"wetlands/"</code>).</li>
+<li>A <code>wetlands_instance_path</code> where Wetlands stores logs and debug information (defaults to <code>"wetlands/"</code>). By default, manager logs are written to <code>wetlands.log</code> in this folder, and launched worker processes write to <code>environments.log</code> in the same folder.</li>
 <li>Optionally, a <code>conda_path</code> where Wetlands should look for an existing Pixi (or Micromamba) installation or where it should download and set up a new one. If not provided, it defaults to <code>wetlands_instance_path / "pixi"</code>.</li>
 </ul>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">wetlands.environment_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvironmentManager</span>
