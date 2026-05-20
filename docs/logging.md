@@ -18,7 +18,9 @@ Wetlands provides a comprehensive logging system that tracks operations across e
 
 Wetlands automatically logs all operations (environment creation, installation, execution) with rich context metadata:
 
-- By default, logs are written to `"wetlands/wetlands.log"` file (when using `EnvironmentManager`)
+- By default, manager logs are written to `"wetlands/wetlands.log"` when using `EnvironmentManager`
+- Worker process logs are written to `"wetlands/environments.log"`
+- Relative log paths are resolved inside the `wetlands_instance_path`; absolute log paths are used as provided
 - Use `logging.basicConfig()` or add handlers to enable console output
 - Most logs include context fields (environment name, operation type, etc.)
 - ProcessLogger reads subprocess output in background threads for real-time logging
@@ -60,7 +62,7 @@ Every log record in Wetlands includes metadata that helps track operations. This
 
 ### Default Behavior
 
-By default, when you create an `EnvironmentManager`, it automatically enables logging to `"wetlands/wetlands.log"`:
+By default, when you create an `EnvironmentManager`, it automatically enables logging to `"wetlands/wetlands.log"`. Worker processes launched with `env.launch()` also write their own log stream to `"wetlands/environments.log"`:
 
 ```python
 from wetlands.environment_manager import EnvironmentManager
@@ -83,7 +85,8 @@ env_manager = EnvironmentManager()
 env = env_manager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
 env.launch()
 
-# All operations are now logged to wetlands/wetlands.log
+# Manager logs are written to wetlands/wetlands.log
+# Worker logs are written to wetlands/environments.log
 ```
 
 ## Advanced Examples

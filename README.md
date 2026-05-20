@@ -33,6 +33,7 @@ There are other minor differences between the two libraries. For example, Wetlan
 - **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks.
 - **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work.
 - **Integrated Debugging**: Debug code running in isolated environments using VS Code or PyCharm with breakpoints and step-through execution.
+- **Scoped Logs**: Keep manager and worker log files under the Wetlands instance directory by default.
 - **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
 
 ## 📦 Installation
@@ -52,6 +53,8 @@ from wetlands.environment_manager import EnvironmentManager
 
 # Initialize the environment manager
 environment_manager = EnvironmentManager()
+# Logs are stored under wetlands/ by default:
+# wetlands.log for manager operations and environments.log for worker processes.
 
 # Create and launch an isolated Conda environment named "numpy"
 env = environment_manager.create("numpy", {"pip": ["numpy==2.2.4"]})

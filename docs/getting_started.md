@@ -22,7 +22,7 @@ segmentation_path = image_path.parent / f"{image_path.stem}_segmentation.png"
 
 We start by initializing the [EnvironmentManager][wetlands.environment_manager.EnvironmentManager]. We provide:
 
-- A `wetlands_instance_path` where Wetlands stores logs and debug information (defaults to `"wetlands/"`).
+- A `wetlands_instance_path` where Wetlands stores logs and debug information (defaults to `"wetlands/"`). By default, manager logs are written to `wetlands.log` in this folder, and launched worker processes write to `environments.log` in the same folder.
 - Optionally, a `conda_path` where Wetlands should look for an existing Pixi (or Micromamba) installation or where it should download and set up a new one. If not provided, it defaults to `wetlands_instance_path / "pixi"`.
 
 ```python

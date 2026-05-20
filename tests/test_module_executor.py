@@ -1,8 +1,41 @@
 from unittest.mock import MagicMock, patch
+import logging
 import threading
 import pytest
 
 from wetlands import module_executor
+
+
+class TestConfigureLogging:
+    def test_configure_logging_writes_environments_log_under_instance_path(self, tmp_path, monkeypatch):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        wetlands_instance_path = tmp_path / "wetlands"
+        monkeypatch.chdir(cwd)
+        root_logger = logging.getLogger()
+        previous_handlers = list(root_logger.handlers)
+        previous_level = root_logger.level
+        for handler in previous_handlers:
+            root_logger.removeHandler(handler)
+
+        log_path = module_executor.configure_logging(wetlands_instance_path)
+
+        try:
+            logging.getLogger("test_env").info("hello from worker")
+            for handler in root_logger.handlers:
+                handler.flush()
+
+            assert log_path == wetlands_instance_path.resolve() / "environments.log"
+            assert log_path.exists()
+            assert "hello from worker" in log_path.read_text()
+            assert not (cwd / "environments.log").exists()
+        finally:
+            for handler in list(root_logger.handlers):
+                root_logger.removeHandler(handler)
+                handler.close()
+            for handler in previous_handlers:
+                root_logger.addHandler(handler)
+            root_logger.setLevel(previous_level)
 
 
 class TestSendMessage:

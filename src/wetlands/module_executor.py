@@ -61,17 +61,27 @@ except Exception:
 # Active task handles for cancel support
 _active_tasks: dict[str, object] = {}
 
-# Configure logging to both file and console
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s",
-    handlers=[
-        logging.FileHandler("environments.log", encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
-
 port = 0
+logger = logging.getLogger("module_executor")
+
+
+def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -> Path:
+    """Configure module executor logging under the Wetlands instance directory."""
+    log_path = Path(wetlands_instance_path).resolve() / "environments.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s",
+        handlers=[
+            logging.FileHandler(log_path, encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+        force=True,
+    )
+    return log_path
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         "Wetlands module executor",
@@ -87,11 +97,12 @@ if __name__ == "__main__":
         "-wip",
         "--wetlands_instance_path",
         help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.",
-        default=None,
+        default=Path("wetlands"),
         type=Path,
     )
     args = parser.parse_args()
     port = args.port
+    configure_logging(args.wetlands_instance_path)
     logger = logging.getLogger(args.environment)
     if args.debug_port is not None:
         logger.setLevel(logging.DEBUG)
@@ -104,9 +115,6 @@ if __name__ == "__main__":
         except ImportError as ie:
             logger.error("debugpy is not installed in this environment. Debugging is not available.")
             logger.error(str(ie))
-else:
-    logger = logging.getLogger("module_executor")
-
 
 def send_message(lock: threading.Lock, connection: Connection, message: dict):
     """Thread-safe sending of messages."""
