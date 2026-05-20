@@ -156,8 +156,13 @@ Check for code errors with `uv run ruff check` and format the code with `uv run 
 
 ### Tests
 
-Test wetlands with `uv` and `ipdb`: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests`
-Use `--last-failed` to only re-run the failures: `uv run pytest --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb --last-failed tests`
+Test Wetlands with `uv`: `uv run pytest tests/`
+
+To skip tests that install Conda environments, run: `uv run pytest tests/ --ignore=tests/test_wetlands.py`
+
+For debugging with `ipdb`: `uv run pytest tests/ --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb`
+
+Use `--last-failed` to only re-run the failures: `uv run pytest tests/ --last-failed`
 
 ### Build and Publish
 
