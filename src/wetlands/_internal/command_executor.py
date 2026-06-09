@@ -42,6 +42,22 @@ class CommandExecutor:
         except Exception:
             pass
 
+    @staticmethod
+    def kill_pid(pid: int) -> None:
+        """Terminates the process with the given PID and its children."""
+        try:
+            parent = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            return
+        try:
+            for child in parent.children(recursive=True):
+                if child.is_running():
+                    child.kill()
+            if parent.is_running():
+                parent.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
     def _is_windows(self) -> bool:
         """Checks if the current OS is Windows."""
         return platform.system() == "Windows"

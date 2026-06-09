@@ -19,9 +19,11 @@ import traceback
 import argparse
 import runpy
 import inspect
+import os
 from pathlib import Path
 import importlib
 import importlib.util
+from multiprocessing.context import AuthenticationError
 from multiprocessing.connection import Listener, Connection
 
 
@@ -63,6 +65,7 @@ _active_tasks: dict[str, object] = {}
 
 port = 0
 logger = logging.getLogger("module_executor")
+_detached_stdio = False
 
 
 def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -> Path:
@@ -82,6 +85,31 @@ def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -
     return log_path
 
 
+def _safe_print(message: str) -> None:
+    try:
+        print(message, flush=True)
+    except (BrokenPipeError, OSError):
+        pass
+
+
+def _detach_standard_streams() -> None:
+    """Stop persistent workers from depending on the launching process pipes."""
+    global _detached_stdio
+    if _detached_stdio:
+        return
+
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            root_logger.removeHandler(handler)
+            handler.close()
+
+    devnull = open(os.devnull, "w", encoding="utf-8")
+    sys.stdout = devnull
+    sys.stderr = devnull
+    _detached_stdio = True
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         "Wetlands module executor",
@@ -99,6 +127,11 @@ if __name__ == "__main__":
         help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.",
         default=Path("wetlands"),
         type=Path,
+    )
+    parser.add_argument(
+        "--persistent",
+        help="Keep the worker process alive after client disconnects so managers can reconnect.",
+        action="store_true",
     )
     args = parser.parse_args()
     port = args.port
@@ -222,20 +255,53 @@ def get_message(connection: Connection) -> dict:
     return connection.recv()
 
 
-def launch_listener():
+def load_root_authkey(wetlands_instance_path: Path) -> bytes:
+    """Read the root-local multiprocessing auth key."""
+    return (Path(wetlands_instance_path).resolve() / "state" / "auth.key").read_bytes()
+
+
+def launch_listener(authkey: bytes | None = None, persistent: bool = False):
     """
     Launches a listener on a random available port on localhost.
     Waits for client connections and handles 'execute', 'run', or 'exit' messages.
     """
     lock = threading.Lock()
-    with Listener(("localhost", port)) as listener:
+    with Listener(("localhost", port), authkey=authkey) as listener:
+        task_threads: list[threading.Thread] = []
+        _safe_print(f"Listening port {listener.address[1]}")
+        if persistent:
+            _detach_standard_streams()
         while True:
-            print(f"Listening port {listener.address[1]}")
-            with listener.accept() as connection:
+            try:
+                connection_context = listener.accept()
+            except (AuthenticationError, EOFError):
+                logger.warning("Rejected unauthenticated or abandoned client")
+                if persistent:
+                    continue
+                return
+            with connection_context as connection:
                 logger.debug(f"Connection accepted {listener.address}")
                 message = ""
                 try:
-                    while message := get_message(connection):
+                    while True:
+                        try:
+                            message = get_message(connection)
+                        except (EOFError, OSError):
+                            logger.debug("Client connection closed")
+                            if persistent:
+                                for thread in task_threads:
+                                    thread.join()
+                                task_threads.clear()
+                                break
+                            return
+                        if not message:
+                            if persistent:
+                                for thread in task_threads:
+                                    thread.join()
+                                task_threads.clear()
+                                break
+                            return
+
                         logger.debug(f"Got message: {message}")
 
                         if message["action"] in ("execute", "run"):
@@ -245,6 +311,7 @@ def launch_listener():
                                 args=(lock, connection, message),
                             )
                             thread.start()
+                            task_threads.append(thread)
 
                         elif message["action"] == "cancel":
                             cancel_task_id = message.get("task_id")
@@ -266,6 +333,6 @@ def launch_listener():
 
 
 if __name__ == "__main__":
-    launch_listener()
+    launch_listener(authkey=load_root_authkey(args.wetlands_instance_path), persistent=args.persistent)
 
 logger.debug("Exit")

@@ -54,6 +54,27 @@ def test_importModule_creates_fake_module(mock_listFunctions, mock_importModule,
     assert result == "Executed func2 in /path/to/test_mod.py with args ('value2',) and kwargs {'arg_name': 'arg_value'}"
 
 
+def test_importModule_falls_back_to_source_function_names_when_local_dependency_missing(dummy_env, tmp_path):
+    module_path = tmp_path / "remote_only.py"
+    module_path.write_text(
+        """
+import dependency_that_only_exists_remotely
+
+def create_array(shape):
+    return dependency_that_only_exists_remotely.create(shape)
+
+def clean():
+    pass
+"""
+    )
+
+    fake_module = dummy_env.import_module(module_path)
+
+    assert hasattr(fake_module, "create_array")
+    assert hasattr(fake_module, "clean")
+    assert fake_module.clean() == f"Executed clean in {module_path} with args () and kwargs {{}}"
+
+
 def test_exit(dummy_env, mock_environment_manager):
     dummy_env.exit()
     mock_environment_manager._remove_environment.assert_called_once_with(dummy_env)

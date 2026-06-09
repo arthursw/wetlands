@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 import logging
 import threading
 import pytest
+from multiprocessing.context import AuthenticationError
 
 from wetlands import module_executor
 
@@ -376,6 +377,20 @@ class TestGetMessage:
 
 
 class TestLaunchListener:
+    def test_launch_listener_uses_authkey(self):
+        """Test listener is authenticated with the provided authkey."""
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.get_message", side_effect=[{"action": "exit"}]),
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+            mock_listener.accept.return_value.__enter__.return_value = MagicMock()
+
+            module_executor.launch_listener(authkey=b"root-auth-key")
+
+            MockListener.assert_called_once_with(("localhost", module_executor.port), authkey=b"root-auth-key")
+
     def test_launch_listener_exit_action(self):
         """Test listener exits on exit action"""
         with (
@@ -388,6 +403,108 @@ class TestLaunchListener:
             module_executor.launch_listener()
 
             mock_connection.send.assert_called_with({"action": "exited"})
+
+    def test_persistent_launch_listener_returns_to_accept_on_eof(self):
+        first_connection = MagicMock()
+        second_connection = MagicMock()
+        first_context = MagicMock()
+        second_context = MagicMock()
+        first_context.__enter__.return_value = first_connection
+        second_context.__enter__.return_value = second_connection
+
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.get_message", side_effect=[EOFError(), {"action": "exit"}]),
+            patch("wetlands.module_executor._detach_standard_streams"),
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+            mock_listener.accept.side_effect = [first_context, second_context]
+
+            module_executor.launch_listener(persistent=True)
+
+            assert mock_listener.accept.call_count == 2
+            second_connection.send.assert_called_with({"action": "exited"})
+
+    def test_persistent_launch_listener_survives_auth_failure(self):
+        connection = MagicMock()
+        context = MagicMock()
+        context.__enter__.return_value = connection
+
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.get_message", side_effect=[{"action": "exit"}]),
+            patch("wetlands.module_executor._detach_standard_streams"),
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+            mock_listener.accept.side_effect = [AuthenticationError("bad key"), context]
+
+            module_executor.launch_listener(authkey=b"root-auth-key", persistent=True)
+
+            assert mock_listener.accept.call_count == 2
+            connection.send.assert_called_with({"action": "exited"})
+
+    def test_persistent_launch_listener_survives_abandoned_auth_connection(self):
+        connection = MagicMock()
+        context = MagicMock()
+        context.__enter__.return_value = connection
+
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.get_message", side_effect=[{"action": "exit"}]),
+            patch("wetlands.module_executor._detach_standard_streams"),
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+            mock_listener.accept.side_effect = [EOFError(), context]
+
+            module_executor.launch_listener(authkey=b"root-auth-key", persistent=True)
+
+            assert mock_listener.accept.call_count == 2
+            connection.send.assert_called_with({"action": "exited"})
+
+    def test_persistent_launch_listener_waits_for_active_task_before_reaccept(self):
+        first_connection = MagicMock()
+        second_connection = MagicMock()
+        first_context = MagicMock()
+        second_context = MagicMock()
+        first_context.__enter__.return_value = first_connection
+        second_context.__enter__.return_value = second_connection
+        task_started = threading.Event()
+        release_task = threading.Event()
+
+        def fake_execution_worker(*_args):
+            task_started.set()
+            release_task.wait(timeout=2)
+
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch(
+                "wetlands.module_executor.get_message",
+                side_effect=[{"action": "execute", "module_path": "/path/to/module.py"}, EOFError(), {"action": "exit"}],
+            ),
+            patch("wetlands.module_executor.execution_worker", side_effect=fake_execution_worker),
+            patch("wetlands.module_executor._detach_standard_streams"),
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+            mock_listener.accept.side_effect = [first_context, second_context]
+
+            listener_thread = threading.Thread(
+                target=module_executor.launch_listener,
+                kwargs={"persistent": True},
+            )
+            listener_thread.start()
+
+            assert task_started.wait(timeout=1)
+            assert mock_listener.accept.call_count == 1
+            release_task.set()
+            listener_thread.join(timeout=2)
+
+            assert not listener_thread.is_alive()
+            assert mock_listener.accept.call_count == 2
+            second_connection.send.assert_called_with({"action": "exited"})
 
     def test_launch_listener_execute_action(self):
         """Test listener handles execute action"""

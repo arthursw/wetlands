@@ -16,6 +16,7 @@ from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.command_generator import Commands, CommandGenerator
 from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.config_parser import ConfigParser
+from wetlands._internal import runtime_state
 from wetlands.environment import Environment
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.process_logger import ProcessLogger
@@ -537,6 +538,22 @@ class EnvironmentManager:
             self.environments[name] = ExternalEnvironment(name, environment_path, self)
         return self.environments[name]
 
+    def attach(self, name: str) -> Environment:
+        """Attach to live persistent workers for an environment name."""
+        authkey = runtime_state.load_or_create_root_authkey(self.wetlands_instance_path)
+        workers = runtime_state.live_workers_for_env(self.wetlands_instance_path, name)
+        if not workers:
+            raise Exception(f"No live authenticated persistent workers found for environment '{name}'.")
+
+        env_path = workers[0].get("env_path")
+        environment = ExternalEnvironment(name, Path(env_path) if env_path else None, self)
+        try:
+            environment.attach_workers(workers, authkey)
+        except Exception as e:
+            raise Exception(f"No live authenticated persistent workers found for environment '{name}'.") from e
+        self.environments[name] = environment
+        return environment
+
     def install(
         self, environment: Environment, dependencies: Dependencies, additional_install_commands: Commands = {}
     ) -> list[str]:
@@ -652,3 +669,10 @@ class EnvironmentManager:
         """Exit all environments"""
         for env in list(self.environments.values()):
             env.exit()
+
+    def detach(self) -> None:
+        """Detach from all external environments without stopping persistent workers."""
+        for env in list(self.environments.values()):
+            if isinstance(env, ExternalEnvironment):
+                env.detach()
+                self._remove_environment(env)

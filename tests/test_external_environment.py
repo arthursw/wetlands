@@ -3,10 +3,12 @@ import time
 import threading
 import pytest
 from pathlib import Path
+from multiprocessing.connection import Client, Listener
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.shell import shell_quote
-from wetlands.external_environment import ExternalEnvironment, _Worker
+from wetlands._internal import runtime_state
+from wetlands.external_environment import ExternalEnvironment, _AttachTimeout, _Worker
 from wetlands.task import Task, TaskStatus
 
 # --- Helper to create a basic ExternalEnvironment with mocked manager ---
@@ -23,7 +25,7 @@ def _make_env(**kwargs):
 
 
 @patch("subprocess.Popen")
-def test_launch(mock_popen):
+def test_launch(mock_popen, tmp_path):
     mock_process = MagicMock()
     mock_process.pid = 12345
 
@@ -49,8 +51,7 @@ def test_launch(mock_popen):
         mock_env_manager = MagicMock()
         mock_env_manager.debug = False
         mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
-        mock_env_manager.wetlands_instance_path = MagicMock()
-        mock_env_manager.wetlands_instance_path.resolve.return_value = Path("/tmp/wetlands")
+        mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
         mock_env_manager.command_executor._process_loggers = {12345: mock_process_logger}
 
         env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
@@ -61,7 +62,7 @@ def test_launch(mock_popen):
         assert env.connection == mock_conn
 
 
-def test_launch_worker_quotes_command_arguments_with_spaces():
+def test_launch_worker_quotes_command_arguments_with_spaces(tmp_path):
     mock_process = MagicMock()
     mock_process.pid = 12345
     mock_process.poll.return_value = None
@@ -72,9 +73,8 @@ def test_launch_worker_quotes_command_arguments_with_spaces():
     mock_env_manager = MagicMock()
     mock_env_manager.debug = False
     mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
-    mock_env_manager.wetlands_instance_path = MagicMock()
-    wetlands_instance_path = Path("/tmp/wetlands state")
-    mock_env_manager.wetlands_instance_path.resolve.return_value = wetlands_instance_path
+    wetlands_instance_path = tmp_path / "wetlands state"
+    mock_env_manager.wetlands_instance_path = wetlands_instance_path
 
     env = ExternalEnvironment("cellpose env", Path("/tmp/cellpose env"), mock_env_manager)
     env.execute_commands = MagicMock(return_value=mock_process)
@@ -90,6 +90,124 @@ def test_launch_worker_quotes_command_arguments_with_spaces():
     command = commands[0]
     assert shell_quote("cellpose env") in command
     assert shell_quote(wetlands_instance_path) in command
+
+
+def test_launch_worker_uses_authenticated_client(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+    env._authkey = b"root-auth-key"
+
+    mock_conn = MagicMock()
+    mock_conn.recv.side_effect = EOFError()
+    mock_conn.closed = False
+
+    with patch("wetlands.external_environment.Client", return_value=mock_conn) as mock_client:
+        env._launch_worker(0, {}, None)
+
+    mock_client.assert_called_once_with(("localhost", 5000), authkey=b"root-auth-key")
+
+
+def test_persistent_launch_records_worker_metadata(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+
+    env = ExternalEnvironment("test_env", tmp_path / "test_env", mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+
+    mock_conn = MagicMock()
+    mock_conn.recv.side_effect = EOFError()
+    mock_conn.closed = False
+
+    with (
+        patch("wetlands.external_environment.Client", return_value=mock_conn),
+        patch("wetlands.external_environment.runtime_state.load_or_create_root_authkey", return_value=b"root-auth-key"),
+    ):
+        env.launch(persistent=True)
+
+    from wetlands._internal.runtime_state import load_workers
+
+    registry = load_workers(tmp_path / "wetlands")
+    assert registry["workers"]["test_env:0"]["pid"] == 12345
+    assert registry["workers"]["test_env:0"]["port"] == 5000
+    assert registry["workers"]["test_env:0"]["persistent"] is True
+
+
+def test_non_persistent_launch_does_not_record_worker_metadata(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+
+    env = ExternalEnvironment("test_env", tmp_path / "test_env", mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+
+    mock_conn = MagicMock()
+    mock_conn.recv.side_effect = EOFError()
+    mock_conn.closed = False
+
+    with (
+        patch("wetlands.external_environment.Client", return_value=mock_conn),
+        patch("wetlands.external_environment.runtime_state.load_or_create_root_authkey", return_value=b"root-auth-key"),
+    ):
+        env.launch()
+
+    from wetlands._internal.runtime_state import load_workers
+
+    assert load_workers(tmp_path / "wetlands")["workers"] == {}
+
+
+def test_persistent_launch_refuses_existing_live_workers(tmp_path):
+    runtime_state.record_worker(
+        tmp_path / "wetlands",
+        env_name="test_env",
+        env_path=tmp_path / "test_env",
+        worker_index=0,
+        pid=12345,
+        port=5000,
+        persistent=True,
+    )
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+
+    env = ExternalEnvironment("test_env", tmp_path / "test_env", mock_env_manager)
+    env.execute_commands = MagicMock()
+
+    with (
+        patch("wetlands.external_environment.runtime_state.pid_exists", return_value=True),
+        pytest.raises(Exception, match="Live persistent workers already exist"),
+    ):
+        env.launch(persistent=True)
+
+    env.execute_commands.assert_not_called()
 
 
 @patch("multiprocessing.connection.Client")
@@ -172,6 +290,7 @@ def _make_mock_worker(index=0):
     """Create a mock _Worker with a mock connection."""
     process = MagicMock()
     process.poll.return_value = None
+    process.pid = 1000 + index
     connection = MagicMock()
     connection.closed = False
     worker = _Worker(index, process, 5000 + index, connection, MagicMock())
@@ -444,6 +563,36 @@ class TestExitWithWorkers:
             w.connection.send.assert_called_once_with({"action": "exit"})
             w.connection.close.assert_called_once()
 
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_detach_closes_connections_without_exit_or_kill(self, mock_kill):
+        env = _make_env()
+        workers = [_make_mock_worker(i) for i in range(2)]
+        env._workers = list(workers)
+        for w in workers:
+            env._idle_workers.put(w)
+
+        env.detach()
+
+        assert env._workers == []
+        assert env._idle_workers.empty()
+        mock_kill.assert_not_called()
+        for w in workers:
+            w.connection.send.assert_not_called()
+            w.connection.close.assert_called_once()
+
+    def test_detach_fails_active_tasks(self):
+        env = _make_env()
+        worker = _make_mock_worker()
+        task = Task()
+        task._set_running()
+        worker._current_task = task
+        env._workers = [worker]
+
+        env.detach()
+
+        assert task.status == TaskStatus.FAILED
+        assert task.error == "Environment is detaching"
+
 
 class TestLaunchedWithWorkers:
     def test_launched_with_live_workers(self):
@@ -458,6 +607,79 @@ class TestLaunchedWithWorkers:
         worker.process.poll.return_value = 1  # exited
         env._workers = [worker]
         assert not env.launched()
+
+    @patch("wetlands.external_environment.runtime_state.pid_exists", return_value=True)
+    def test_launched_with_attached_worker_uses_pid(self, mock_pid_exists):
+        env = _make_env()
+        connection = MagicMock()
+        connection.closed = False
+        worker = _Worker(0, None, 5000, connection, None, pid=12345, persistent=True)
+        env._workers = [worker]
+
+        assert env.launched()
+        mock_pid_exists.assert_called_once_with(12345)
+
+    def test_attach_worker_times_out_when_listener_is_occupied(self):
+        authkey = b"root-auth-key"
+        listener = Listener(("localhost", 0), authkey=authkey)
+        accepted_connection = []
+        accepted = threading.Event()
+        release = threading.Event()
+
+        def accept_once():
+            connection = listener.accept()
+            accepted_connection.append(connection)
+            accepted.set()
+            release.wait(timeout=5)
+            connection.close()
+
+        server_thread = threading.Thread(target=accept_once)
+        server_thread.start()
+        first_client = Client(("localhost", listener.address[1]), authkey=authkey)
+        env = _make_env()
+
+        try:
+            assert accepted.wait(timeout=1)
+            with pytest.raises(TimeoutError):
+                env._connect_worker(listener.address[1], authkey, timeout=0.1)
+        finally:
+            first_client.close()
+            release.set()
+            server_thread.join(timeout=1)
+            listener.close()
+
+        assert accepted_connection
+
+    @patch("wetlands.external_environment.Client")
+    def test_attach_worker_uses_plain_client_without_timeout_for_launch(self, mock_client):
+        connection = MagicMock()
+        mock_client.return_value = connection
+        env = _make_env()
+
+        assert env._connect_worker(5000, b"root-auth-key") == connection
+        mock_client.assert_called_once_with(("localhost", 5000), authkey=b"root-auth-key")
+
+    def test_attach_workers_preserves_registry_when_worker_is_busy(self, tmp_path):
+        root = tmp_path / "wetlands"
+        runtime_state.record_worker(
+            root,
+            env_name="test_env",
+            env_path=tmp_path / "test_env",
+            worker_index=0,
+            pid=12345,
+            port=5000,
+            persistent=True,
+        )
+        mock_env_manager = MagicMock()
+        mock_env_manager.wetlands_instance_path = root
+        env = ExternalEnvironment("test_env", tmp_path / "test_env", mock_env_manager)
+        entry = runtime_state.load_workers(root)["workers"]["test_env:0"]
+
+        env._attach_worker = MagicMock(side_effect=_AttachTimeout("busy"))
+        with pytest.raises(Exception, match="No live authenticated persistent workers"):
+            env.attach_workers([entry], b"root-auth-key")
+
+        assert "test_env:0" in runtime_state.load_workers(root)["workers"]
 
 
 class TestRemoveDeadWorker:
@@ -495,6 +717,21 @@ class TestRemoveDeadWorker:
         env._workers = [worker]
         env._remove_dead_worker(worker)
         mock_kill.assert_not_called()
+
+    @patch("wetlands.external_environment.runtime_state.remove_worker")
+    @patch("wetlands.external_environment.runtime_state.pid_exists", return_value=True)
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_pid")
+    def test_removes_attached_worker_by_pid(self, mock_kill_pid, mock_pid_exists, mock_remove_worker):
+        env = _make_env()
+        connection = MagicMock()
+        connection.closed = False
+        worker = _Worker(0, None, 5000, connection, None, pid=12345, persistent=True)
+        env._workers = [worker]
+
+        env._remove_dead_worker(worker)
+
+        mock_kill_pid.assert_called_once_with(12345)
+        mock_remove_worker.assert_called_once()
 
 
 class TestDeadWorkerCleanup:

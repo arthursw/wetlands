@@ -1,6 +1,9 @@
 import subprocess
 import time
+import socket
+import os
 from pathlib import Path
+from multiprocessing import connection as mp_connection
 from multiprocessing.connection import Client, Connection
 import functools
 import threading
@@ -17,6 +20,7 @@ from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands._internal.shell import shell_quote
+from wetlands._internal import runtime_state
 from wetlands.task import Task, TaskStatus
 
 try:
@@ -31,6 +35,11 @@ if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
 
 MODULE_EXECUTOR_FILE = "module_executor.py"
+ATTACH_CONNECT_TIMEOUT = 2.0
+
+
+class _AttachTimeout(TimeoutError):
+    """Raised when a live worker does not complete attach in time."""
 
 
 def synchronized(method):
@@ -54,6 +63,8 @@ class _Worker:
         "connection",
         "process_logger",
         "reader_thread",
+        "pid",
+        "persistent",
         "_current_task",
         "_last_activity",
     )
@@ -61,19 +72,31 @@ class _Worker:
     def __init__(
         self,
         index: int,
-        process: subprocess.Popen,
+        process: subprocess.Popen | None,
         port: int,
         connection: Connection,
         process_logger: ProcessLogger | None,
+        *,
+        pid: int | None = None,
+        persistent: bool = False,
     ) -> None:
         self.index = index
         self.process = process
         self.port = port
         self.connection = connection
         self.process_logger = process_logger
+        self.pid = pid if pid is not None else (process.pid if process is not None else None)
+        self.persistent = persistent
         self.reader_thread: threading.Thread | None = None
         self._current_task: Task[Any] | None = None
         self._last_activity: float = 0.0
+
+    def alive(self) -> bool:
+        if self.process is not None:
+            return self.process.poll() is None
+        if self.pid is not None:
+            return runtime_state.pid_exists(self.pid)
+        return False
 
 
 class ExternalEnvironment(Environment):
@@ -92,6 +115,8 @@ class ExternalEnvironment(Environment):
         self._additional_activate_commands: Commands = {}
         self._worker_env: Callable[[int], dict[str, str]] | None = None
         self._worker_timeout: float | None = None
+        self._persistent: bool = False
+        self._authkey: bytes | None = None
         self._shutdown_event = threading.Event()
 
     @synchronized
@@ -102,6 +127,7 @@ class ExternalEnvironment(Environment):
         max_workers: int = 1,
         worker_env: Callable[[int], dict[str, str]] | None = None,
         worker_timeout: float | None = None,
+        persistent: bool = False,
     ) -> None:
         """Launches module executor process(es) in the environment.
 
@@ -114,6 +140,8 @@ class ExternalEnvironment(Environment):
             worker_timeout: Optional inactivity timeout in seconds. If set and a
                 worker sends no IPC message within this duration, it is treated as
                 hung: the active task is failed, the worker is killed and replaced.
+            persistent: If True, workers are recorded in the root registry and can
+                later be reconnected with EnvironmentManager.attach().
         """
         if self.launched():
             return
@@ -121,7 +149,16 @@ class ExternalEnvironment(Environment):
         self._additional_activate_commands = additional_activate_commands
         self._worker_env = worker_env
         self._worker_timeout = worker_timeout
+        self._persistent = persistent
+        self._authkey = runtime_state.load_or_create_root_authkey(self.environment_manager.wetlands_instance_path)
         self._shutdown_event.clear()
+        if self._persistent:
+            live_workers = runtime_state.live_workers_for_env(self.environment_manager.wetlands_instance_path, self.name)
+            if live_workers:
+                raise Exception(
+                    f"Live persistent workers already exist for environment '{self.name}'. "
+                    "Use EnvironmentManager.attach() or exit the existing workers before launching again."
+                )
 
         # Ensure debugpy is installed if in debug mode
         if self.environment_manager.debug:
@@ -158,6 +195,7 @@ class ExternalEnvironment(Environment):
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
 
         debug_args = " --debug_port 0" if self.environment_manager.debug else ""
+        persistent_args = " --persistent" if self._persistent else ""
         wetlands_instance_path = self.environment_manager.wetlands_instance_path.resolve()
         commands = [
             " ".join(
@@ -171,6 +209,7 @@ class ExternalEnvironment(Environment):
                 ]
             )
             + debug_args
+            + persistent_args
         ]
 
         log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}
@@ -221,20 +260,34 @@ class ExternalEnvironment(Environment):
         if port == 0:
             raise Exception(f"Could not find the server port for worker {index}.")
 
-        connection = Client(("localhost", port))
-        worker = _Worker(index, process, port, connection, process_logger)
+        authkey = self._authkey or runtime_state.load_or_create_root_authkey(self.environment_manager.wetlands_instance_path)
+        connection = self._connect_worker(port, authkey)
+        worker = _Worker(index, process, port, connection, process_logger, persistent=self._persistent)
 
-        # Start IPC reader thread for this worker
+        if self._persistent:
+            runtime_state.record_worker(
+                self.environment_manager.wetlands_instance_path,
+                env_name=self.name,
+                env_path=self.path,
+                worker_index=index,
+                pid=process.pid,
+                port=port,
+                persistent=True,
+            )
+
+        self._start_reader_thread(worker)
+        return worker
+
+    def _start_reader_thread(self, worker: _Worker) -> None:
+        """Start the IPC reader thread for one worker."""
         reader = threading.Thread(
             target=self._worker_reader_loop,
             args=(worker,),
             daemon=True,
-            name=f"wetlands-reader-{self.name}-{index}",
+            name=f"wetlands-reader-{self.name}-{worker.index}",
         )
         worker.reader_thread = reader
         reader.start()
-
-        return worker
 
     def _worker_reader_loop(self, worker: _Worker) -> None:
         """Daemon thread that reads IPC messages from a worker and dispatches to the current Task."""
@@ -247,6 +300,19 @@ class ExternalEnvironment(Environment):
                 task = worker._current_task
                 if task is not None and not task.status.is_finished():
                     task._set_failed("Worker connection closed unexpectedly")
+                    worker._current_task = None
+                    self._remove_dead_worker(worker)
+                    break
+                if worker.persistent and worker.alive():
+                    with self._lock:
+                        if worker in self._workers:
+                            self._workers.remove(worker)
+                    try:
+                        if worker.connection and not worker.connection.closed:
+                            worker.connection.close()
+                    except OSError:
+                        pass
+                    break
                 worker._current_task = None
                 self._remove_dead_worker(worker)
                 break
@@ -285,8 +351,8 @@ class ExternalEnvironment(Environment):
                     continue
 
                 # Check 1: Is the process dead?
-                if worker.process.poll() is not None:
-                    rc = worker.process.returncode
+                if not worker.alive():
+                    rc = worker.process.returncode if worker.process is not None else None
                     logger.error(f"Worker {worker.index} died (exit code {rc}) while running task {task.id}")
                     task._set_failed(f"Worker process died (exit code {rc})")
                     worker._current_task = None
@@ -332,12 +398,17 @@ class ExternalEnvironment(Environment):
 
         if worker.process and worker.process.poll() is None:
             CommandExecutor.kill_process(worker.process)
+        elif worker.process is None and worker.pid is not None and runtime_state.pid_exists(worker.pid):
+            CommandExecutor.kill_pid(worker.pid)
 
         if worker.process and worker.process.stdout:
             try:
                 worker.process.stdout.close()
             except OSError:
                 pass
+
+        if worker.persistent:
+            runtime_state.remove_worker(self.environment_manager.wetlands_instance_path, self.name, worker.index)
 
         logger.warning(f"Worker {worker.index} removed (dead). {len(self._workers)} worker(s) remaining.")
 
@@ -531,6 +602,123 @@ class ExternalEnvironment(Environment):
         """
         return [self.submit(module_path, function, args=(item,)) for item in iterable]
 
+    def attach_workers(self, worker_entries: Iterable[dict[str, Any]], authkey: bytes) -> None:
+        """Attach this environment to existing persistent worker processes."""
+        self._persistent = True
+        self._authkey = authkey
+        self._shutdown_event.clear()
+        for entry in worker_entries:
+            try:
+                worker = self._attach_worker(entry, authkey)
+            except _AttachTimeout:
+                continue
+            except Exception:
+                runtime_state.remove_worker(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                    int(entry["worker_index"]),
+                )
+                continue
+            self._workers.append(worker)
+            self._idle_workers.put(worker)
+
+        if not self._workers:
+            raise Exception(f"No live authenticated persistent workers found for environment '{self.name}'.")
+
+        first = self._workers[0]
+        self.port = first.port
+        self.process = first.process
+        self.connection = first.connection
+        self._process_logger = first.process_logger
+
+        self._health_thread = threading.Thread(
+            target=self._health_monitor_loop,
+            daemon=True,
+            name=f"wetlands-health-{self.name}",
+        )
+        self._health_thread.start()
+
+    def _attach_worker(self, entry: dict[str, Any], authkey: bytes) -> _Worker:
+        connection = self._connect_worker(int(entry["port"]), authkey, timeout=ATTACH_CONNECT_TIMEOUT)
+        worker = _Worker(
+            int(entry["worker_index"]),
+            None,
+            int(entry["port"]),
+            connection,
+            None,
+            pid=int(entry["pid"]),
+            persistent=True,
+        )
+        self._start_reader_thread(worker)
+        return worker
+
+    def _connect_worker(self, port: int, authkey: bytes, timeout: float | None = None) -> Connection:
+        if timeout is None:
+            return Client(("localhost", port), authkey=authkey)
+
+        address = ("localhost", port)
+        sock = socket.socket(socket.AF_INET)
+        try:
+            sock.settimeout(timeout)
+            sock.connect(address)
+            sock.setblocking(True)
+            connection = Connection(sock.detach())
+        except TimeoutError as e:
+            sock.close()
+            raise _AttachTimeout(f"Timed out connecting to worker on port {port}.") from e
+        except Exception:
+            sock.close()
+            raise
+
+        try:
+            self._answer_challenge_with_timeout(connection, authkey, timeout)
+            self._deliver_challenge_with_timeout(connection, authkey, timeout)
+        except Exception:
+            connection.close()
+            raise
+        return connection
+
+    def _recv_bytes_with_timeout(self, connection: Connection, timeout: float, maxlength: int) -> bytes:
+        if not mp_connection.wait([connection], timeout):
+            raise _AttachTimeout("Timed out waiting for worker authentication.")
+        return connection.recv_bytes(maxlength)
+
+    def _answer_challenge_with_timeout(self, connection: Connection, authkey: bytes, timeout: float) -> None:
+        if not isinstance(authkey, bytes):
+            raise TypeError("authkey should be a byte string")
+        message = self._recv_bytes_with_timeout(connection, timeout, 256)
+        if not message.startswith(mp_connection._CHALLENGE):
+            raise mp_connection.AuthenticationError(f"Protocol error, expected challenge: {message=}")
+        message = message[len(mp_connection._CHALLENGE) :]
+        if len(message) < mp_connection._MD5ONLY_MESSAGE_LENGTH:
+            raise mp_connection.AuthenticationError(f"challenge too short: {len(message)} bytes")
+        digest = mp_connection._create_response(authkey, message)
+        connection.send_bytes(digest)
+        response = self._recv_bytes_with_timeout(connection, timeout, 256)
+        if response != mp_connection._WELCOME:
+            raise mp_connection.AuthenticationError("digest sent was rejected")
+
+    def _deliver_challenge_with_timeout(
+        self,
+        connection: Connection,
+        authkey: bytes,
+        timeout: float,
+        digest_name: str = "sha256",
+    ) -> None:
+        if not isinstance(authkey, bytes):
+            raise TypeError("authkey should be a byte string")
+        message = os.urandom(mp_connection.MESSAGE_LENGTH)
+        message = b"{%s}%s" % (digest_name.encode("ascii"), message)
+        connection.send_bytes(mp_connection._CHALLENGE + message)
+        response = self._recv_bytes_with_timeout(connection, timeout, 256)
+        try:
+            mp_connection._verify_challenge(authkey, message, response)
+        except mp_connection.AuthenticationError:
+            connection.send_bytes(mp_connection._FAILURE)
+            raise
+        else:
+            connection.send_bytes(mp_connection._WELCOME)
+
     def _ensure_debugpy_installed(self) -> None:
         """Install debugpy in the environment if it is not already installed."""
         installed_packages = self.environment_manager.get_installed_packages(self)
@@ -661,7 +849,7 @@ class ExternalEnvironment(Environment):
         """Return true if the environment server process is launched and the connection is open."""
         if self._workers:
             return any(
-                w.process.poll() is None and w.connection is not None and not w.connection.closed for w in self._workers
+                w.alive() and w.connection is not None and not w.connection.closed for w in self._workers
             )
         return (
             self.process is not None
@@ -693,7 +881,12 @@ class ExternalEnvironment(Environment):
                 worker.connection.close()
                 if worker.process and worker.process.stdout:
                     worker.process.stdout.close()
-                CommandExecutor.kill_process(worker.process)
+                if worker.process is not None:
+                    CommandExecutor.kill_process(worker.process)
+                elif worker.pid is not None:
+                    CommandExecutor.kill_pid(worker.pid)
+                if worker.persistent:
+                    runtime_state.remove_worker(self.environment_manager.wetlands_instance_path, self.name, worker.index)
             self._workers.clear()
             while not self._idle_workers.empty():
                 try:
@@ -726,6 +919,36 @@ class ExternalEnvironment(Environment):
 
         self._process_logger = None
         CommandExecutor.kill_process(self.process)
+
+    @synchronized
+    def detach(self) -> None:
+        """Close local connections without stopping persistent worker processes."""
+        self._shutdown_event.set()
+        for worker in list(self._workers):
+            try:
+                if worker.connection and not worker.connection.closed:
+                    worker.connection.close()
+            except OSError:
+                pass
+            if worker._current_task is not None and not worker._current_task.status.is_finished():
+                worker._current_task._set_failed("Environment is detaching")
+            worker._current_task = None
+        self._workers.clear()
+        while not self._idle_workers.empty():
+            try:
+                self._idle_workers.get_nowait()
+            except queue.Empty:
+                break
+        while True:
+            try:
+                task = self._task_queue.get_nowait()
+                task._set_failed("Environment is detaching")
+            except queue.Empty:
+                break
+        self.connection = None
+        self.process = None
+        self.port = None
+        self._process_logger = None
 
     @synchronized
     def delete(self) -> None:

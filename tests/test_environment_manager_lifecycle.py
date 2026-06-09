@@ -8,6 +8,7 @@ from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands._internal.command_generator import Commands, CommandsDict
+from wetlands._internal import runtime_state
 
 
 @pytest.fixture
@@ -180,6 +181,59 @@ class TestRemoveEnvironment:
 
         # Should not raise error
         manager._remove_environment(env)
+
+
+class TestPersistentAttach:
+    def test_attach_connects_to_live_persistent_workers(self, environment_manager_fixture, tmp_path, monkeypatch):
+        manager = environment_manager_fixture
+        manager.wetlands_instance_path = tmp_path / "wetlands"
+        env_path = tmp_path / "envs" / "cellpose"
+        authkey = runtime_state.load_or_create_root_authkey(manager.wetlands_instance_path)
+        runtime_state.record_worker(
+            manager.wetlands_instance_path,
+            env_name="cellpose",
+            env_path=env_path,
+            worker_index=0,
+            pid=12345,
+            port=53122,
+            persistent=True,
+        )
+
+        connection = MagicMock()
+        connection.closed = False
+        monkeypatch.setattr("wetlands._internal.runtime_state.pid_exists", MagicMock(return_value=True))
+        mock_connect = MagicMock(return_value=connection)
+        monkeypatch.setattr(ExternalEnvironment, "_connect_worker", mock_connect)
+        monkeypatch.setattr(ExternalEnvironment, "_start_reader_thread", MagicMock())
+
+        env = manager.attach("cellpose")
+
+        assert isinstance(env, ExternalEnvironment)
+        assert env.path == env_path.resolve()
+        assert env.worker_count == 1
+        mock_connect.assert_called_once_with(53122, authkey, timeout=2.0)
+
+    def test_attach_removes_stale_record_when_connection_fails(self, environment_manager_fixture, tmp_path, monkeypatch):
+        manager = environment_manager_fixture
+        manager.wetlands_instance_path = tmp_path / "wetlands"
+        runtime_state.load_or_create_root_authkey(manager.wetlands_instance_path)
+        runtime_state.record_worker(
+            manager.wetlands_instance_path,
+            env_name="cellpose",
+            env_path=tmp_path / "envs" / "cellpose",
+            worker_index=0,
+            pid=12345,
+            port=53122,
+            persistent=True,
+        )
+
+        monkeypatch.setattr("wetlands._internal.runtime_state.pid_exists", MagicMock(return_value=True))
+        monkeypatch.setattr("wetlands.external_environment.Client", MagicMock(side_effect=ConnectionRefusedError))
+
+        with pytest.raises(Exception, match="No live authenticated persistent workers"):
+            manager.attach("cellpose")
+
+        assert runtime_state.load_workers(manager.wetlands_instance_path)["workers"] == {}
 
 
 # ---- delete Tests ----

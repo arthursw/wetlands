@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import ast
 from pathlib import Path
 from importlib import import_module
 from abc import abstractmethod
@@ -32,6 +33,12 @@ class Environment:
         """Returns the list of functions defined in module mod"""
         return [func.__name__ for func in mod.__dict__.values() if self._is_mod_function(mod, func)]
 
+    def _list_functions_from_source(self, module_path: Path | str) -> list[str]:
+        """Returns top-level function names without importing the module."""
+        module_path = Path(module_path)
+        tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+        return [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
+
     def _import_module(self, module_path: Path | str):
         """Imports the given module (if necessary) and adds it to the module map."""
         module_path = Path(module_path)
@@ -44,12 +51,18 @@ class Environment:
     def import_module(self, module_path: Path | str) -> Any:
         """Imports the given module (if necessary) and returns a fake module object
         that contains the same methods of the module which will be executed within the environment."""
-        module = self._import_module(module_path)
+        try:
+            functions = self._list_functions(self._import_module(module_path))
+        except ModuleNotFoundError:
+            module_path_obj = Path(module_path)
+            if not module_path_obj.exists():
+                raise
+            functions = self._list_functions_from_source(module_path_obj)
 
         class FakeModule:
             pass
 
-        for f in self._list_functions(module):
+        for f in functions:
 
             def fake_function(*args, _wetlands_imported_function=f, **kwargs):
                 return self.execute(module_path, _wetlands_imported_function, args, kwargs)
@@ -69,7 +82,7 @@ class Environment:
         """
         return self.environment_manager.install(self, dependencies, additional_install_commands)
 
-    def launch(self, additional_activate_commands: Commands = {}, max_workers: int = 1) -> None:
+    def launch(self, additional_activate_commands: Commands = {}, max_workers: int = 1, persistent: bool = False) -> None:
         """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Do nothing when InternalEnvironment. See [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
         return
 
@@ -152,6 +165,10 @@ class Environment:
 
     def _exit(self) -> None:
         """Exit the environment, important in ExternalEnvironment"""
+        pass
+
+    def detach(self) -> None:
+        """Detach from a persistent environment without stopping remote workers."""
         pass
 
     def launched(self) -> bool:
