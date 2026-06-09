@@ -32,6 +32,7 @@ There are other minor differences between the two libraries. For example, Wetlan
 - **Embedded Execution**: Run Python functions or scripts inside isolated environments, with both blocking and non-blocking (task-based) APIs.
 - **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks.
 - **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work.
+- **Persistent Workers**: Keep trusted local workers alive and reconnect to them from a later `EnvironmentManager`.
 - **Integrated Debugging**: Debug code running in isolated environments using VS Code or PyCharm with breakpoints and step-through execution.
 - **Scoped Logs**: Keep manager and worker log files under the Wetlands instance directory by default.
 - **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
@@ -115,6 +116,24 @@ Workers that crash or hang are detected and replaced automatically. Set `worker_
 ```python
 env.launch(max_workers=4, worker_timeout=300)  # 5-minute inactivity timeout
 ```
+
+### Persistent workers
+
+By default, `env.exit()` stops workers when you are done.
+For trusted local workflows that need to reconnect from a later manager process, launch with `persistent=True` and detach instead of exiting:
+
+```python
+env.launch(max_workers=2, persistent=True)
+env.detach()  # close local connections, keep workers alive
+
+new_manager = EnvironmentManager()
+env = new_manager.attach("numpy")
+result = env.execute("minimal_module.py", "sum", args=([1, 2, 3],))
+env.exit()  # stop persistent workers and remove their registry entries
+```
+
+Persistent workers use authenticated local TCP connections with a root-local auth key stored under `wetlands/state/auth.key`.
+The API still executes arbitrary Python in the target environment, so it is intended for trusted local use.
 
 See the `examples/` folder and the [documentation](https://arthursw.github.io/wetlands/latest/) for more detailed examples.
 

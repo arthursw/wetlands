@@ -113,6 +113,16 @@ env.launch()
 
     Wetlands runs a background health monitor that checks all workers periodically. If a worker process crashes or exceeds the inactivity timeout, the monitor fails the active task, removes the dead worker, and launches a replacement automatically. See [Worker health monitoring](tasks.md#worker-health-monitoring) for details.
 
+    For trusted local workflows that need workers to survive the current manager process, launch persistent workers:
+
+    ```python
+    env.launch(max_workers=2, persistent=True)
+    ```
+
+    Persistent workers are recorded under the Wetlands instance path and can be reattached later with [`EnvironmentManager.attach()`][wetlands.environment_manager.EnvironmentManager.attach].
+    Use [`env.detach()`][wetlands.environment.Environment.detach] to close the current manager's local connections without stopping persistent workers.
+    Use [`env.exit()`][wetlands.environment.Environment.exit] when you want to stop the workers and remove their registry entries.
+
 #### 4. Execute Code in the Environment
 
 ##### Non-blocking execution with `submit()`
@@ -307,7 +317,7 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 
 #### Summary of Example 1 Flow:
 
-The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment.Environment.launch] starts one or more worker processes inside that environment. [`env.submit()`][wetlands.environment.Environment.submit] dispatches work and returns a [`Task`][wetlands.task.Task] for non-blocking control, while [`env.import_module()`][wetlands.environment.Environment.import_module] and [`env.execute()`][wetlands.environment.Environment.execute] provide blocking shortcuts. [`env.exit()`][wetlands.environment.Environment.exit] cleans up all worker processes.
+The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment.Environment.launch] starts one or more worker processes inside that environment. [`env.submit()`][wetlands.environment.Environment.submit] dispatches work and returns a [`Task`][wetlands.task.Task] for non-blocking control, while [`env.import_module()`][wetlands.environment.Environment.import_module] and [`env.execute()`][wetlands.environment.Environment.execute] provide blocking shortcuts. [`env.exit()`][wetlands.environment.Environment.exit] cleans up all worker processes, while persistent workflows can use [`env.detach()`][wetlands.environment.Environment.detach] and [`EnvironmentManager.attach()`][wetlands.environment_manager.EnvironmentManager.attach] to reconnect later.
 
 ### Next Steps
 

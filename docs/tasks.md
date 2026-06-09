@@ -311,6 +311,45 @@ You can check how many workers are currently alive with the `worker_count` prope
 print(f"Active workers: {env.worker_count}")
 ```
 
+#### Persistent workers and reconnect
+
+By default, workers are tied to the current `EnvironmentManager` connection and [`env.exit()`][wetlands.environment.Environment.exit] stops them.
+For trusted local workflows where workers should remain alive after the current manager disconnects, pass `persistent=True` to `launch()`:
+
+```python
+env.launch(max_workers=2, persistent=True)
+```
+
+Wetlands records persistent worker metadata in `wetlands/state/workers.json` and authenticates local TCP connections with a root-local key stored in `wetlands/state/auth.key`.
+No secret is stored in `workers.json`.
+
+Use [`env.detach()`][wetlands.environment.Environment.detach] to close the current manager's client connections without sending `"exit"` to the workers:
+
+```python
+env.detach()
+```
+
+A later manager using the same `wetlands_instance_path` can reconnect by environment name:
+
+```python
+from wetlands.environment_manager import EnvironmentManager
+
+manager = EnvironmentManager()
+env = manager.attach("cellpose")
+result = env.execute("segment.py", "segment", args=(image_path,))
+```
+
+If all recorded workers are dead, refuse authentication, or cannot be reached, `attach()` raises a clear error and removes stale registry entries.
+If a worker is alive but still finishing work from a previous disconnected client, an attach attempt times out and leaves the registry entry in place so a later attach can succeed.
+Launching another persistent environment with the same name while live persistent workers are already recorded is refused; attach to the existing workers or stop them with `env.exit()` first.
+
+`detach()` fails any local queued or active `Task` objects because the current manager can no longer receive their results.
+If a client disconnects while a worker task is running, the worker lets that task finish before accepting a new connection; the result is lost to the detached manager.
+Use `env.exit()` when you want to stop persistent workers and remove their registry entries.
+
+Persistent workers still execute arbitrary Python functions and scripts through `execute()`, `submit()`, `map()`, and `run_script()`.
+The authenticated TCP transport is intended for trusted local use, not as a remote multi-user service boundary.
+
 #### `map()` — batch execution
 
 [`env.map()`][wetlands.environment.Environment.map] distributes work across workers and yields results, similar to `concurrent.futures.Executor.map()`:

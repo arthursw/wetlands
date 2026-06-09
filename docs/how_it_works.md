@@ -7,8 +7,9 @@ Wetlands leverages **Pixi**, a package management tool for developers, or **Micr
 3.  **Dependency Installation:** Dependencies (Conda packages, Pip packages) are installed into the target environment using `pixi add ...` or `micromamba install ...` and `pip install ...` (executed within the activated environment).
 4.  **Launching Workers (`launch`):**
     *   `launch(max_workers=N)` starts one or more `module_executor` worker processes *within* the activated target environment using `subprocess.Popen`. All workers share the same Conda environment on disk — no duplication.
-    *   Each worker listens on its own local socket using `multiprocessing.connection.Listener`.
+    *   Each worker listens on its own local TCP socket using `multiprocessing.connection.Listener`.
     *   The main process connects to each worker using `multiprocessing.connection.Client`.
+    *   Worker connections are authenticated with the Wetlands root auth key stored at `wetlands/state/auth.key`.
     *   A dedicated IPC reader daemon thread is started per worker to receive messages asynchronously.
     *   A health monitor daemon thread is started to periodically check all workers for liveness and inactivity timeouts (see below).
 5.  **Execution (`submit`/`execute`/`import_module`):**
@@ -29,8 +30,9 @@ Wetlands leverages **Pixi**, a package management tool for developers, or **Micr
     *   If a worker process has exited (crash, OOM kill, etc.), the monitor fails the active task, removes the worker, and launches a replacement with the same configuration.
     *   If `worker_timeout` is set and a worker has not sent any IPC message within that duration, it is treated as hung: the active task is failed, the worker is killed and replaced.
     *   On `env.exit()`, the health monitor stops and any tasks still in the queue are failed with a descriptive error.
-9.  **Direct Execution (`execute_commands`):** This method directly activates the target environment and runs the provided shell commands using `subprocess.Popen` (no worker processes involved here). The user is responsible for managing the launched process and any necessary communication.
-10.  **Isolation:** Each environment created by Wetlands is fully isolated, preventing dependency conflicts between different environments or with the main application's environment.
+9.  **Persistent Worker Reconnect:** When `launch(..., persistent=True)` is used, Wetlands records live worker metadata in `wetlands/state/workers.json` and keeps workers alive after [`env.detach()`][wetlands.environment.Environment.detach]. A later manager using the same `wetlands_instance_path` can call [`EnvironmentManager.attach(name)`][wetlands.environment_manager.EnvironmentManager.attach] to reconnect with the auth key. [`env.exit()`][wetlands.environment.Environment.exit] remains the destructive shutdown path: it sends `"exit"`, stops workers, and removes registry entries.
+10.  **Direct Execution (`execute_commands`):** This method directly activates the target environment and runs the provided shell commands using `subprocess.Popen` (no worker processes involved here). The user is responsible for managing the launched process and any necessary communication.
+11.  **Isolation:** Each environment created by Wetlands is fully isolated, preventing dependency conflicts between different environments or with the main application's environment.
 
 
 ## 🔀 Worker Pool Architecture
@@ -49,6 +51,16 @@ Each worker holds its own subprocess, port, IPC connection, and a dedicated read
 Multi-process is preferred over multi-thread because Wetlands' primary use case is scientific computing (numpy, torch, cellpose, stardist). Separate processes provide true parallelism (no GIL), failure isolation (one crash doesn't kill other tasks), and separate `sys.path`/`sys.argv` per worker. The only cost is memory (~200–400 MB per worker for a typical scientific stack), controlled via `max_workers`.
 
 With `max_workers=1` (the default), the pool is a trivial pass-through: one worker, one connection, one reader thread. Behavior is identical to a single-worker setup.
+
+Persistent workers use the same worker pool model, but attached workers may not have a local `subprocess.Popen` handle in the new manager.
+For those workers, Wetlands uses the recorded PID for liveness checks and cleanup.
+If a manager disconnects while a persistent worker is idle, the worker returns to `accept()` and can authenticate a later manager.
+If the disconnect happens while a task is running, the worker waits for that task thread to finish before accepting more work; the detached manager does not receive the result.
+If a later attach attempt reaches a worker that is alive but still busy, the attach attempt is bounded and the registry entry is preserved for a later retry.
+Persistent workers redirect ongoing stdout/stderr dependence after startup and continue writing worker logs under the Wetlands instance path.
+
+The authenticated local TCP transport is a trusted-local IPC mechanism.
+It does not turn `execute()` or `run_script()` into a sandboxed remote service; those APIs still execute arbitrary Python in the target environment.
 
 ## ⚙️ Under the Hood
 
