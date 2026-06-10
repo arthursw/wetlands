@@ -12,6 +12,8 @@ Designed to be run within isolated environments for sandboxed execution of Pytho
 
 from __future__ import annotations
 
+import __future__
+import ast
 import sys
 import logging
 import threading
@@ -20,6 +22,7 @@ import argparse
 import runpy
 import inspect
 import os
+import tokenize
 from pathlib import Path
 import importlib
 import importlib.util
@@ -37,6 +40,150 @@ def import_from_path(name: str, file_path: str | Path):
         return None
     spec.loader.exec_module(module)
     return module
+
+
+def _annotation_contains_pep604_union(annotation: ast.AST | None) -> bool:
+    if annotation is None:
+        return False
+    return any(isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr) for node in ast.walk(annotation))
+
+
+def _definite_import_time_child_bodies(node: ast.stmt) -> list[list[ast.stmt]]:
+    if isinstance(node, ast.If):
+        if isinstance(node.test, ast.Constant):
+            return [node.body] if node.test.value else [node.orelse]
+        return []
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return [node.body]
+    return []
+
+
+def _body_uses_definite_import_time_pep604_annotations(body: list[ast.stmt]) -> bool:
+    for node in body:
+        annotations: list[ast.AST | None] = []
+        if isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            annotations.append(node.returns)
+            args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+            if node.args.vararg is not None:
+                args.append(node.args.vararg)
+            if node.args.kwarg is not None:
+                args.append(node.args.kwarg)
+            annotations.extend(arg.annotation for arg in args)
+        elif isinstance(node, ast.ClassDef):
+            if _body_uses_definite_import_time_pep604_annotations(node.body):
+                return True
+
+        if any(_annotation_contains_pep604_union(annotation) for annotation in annotations):
+            return True
+        if any(
+            _body_uses_definite_import_time_pep604_annotations(child_body)
+            for child_body in _definite_import_time_child_bodies(node)
+        ):
+            return True
+    return False
+
+
+def _body_may_use_import_time_pep604_annotations(body: list[ast.stmt]) -> bool:
+    for node in body:
+        annotations: list[ast.AST | None] = []
+        if isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            annotations.append(node.returns)
+            args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+            if node.args.vararg is not None:
+                args.append(node.args.vararg)
+            if node.args.kwarg is not None:
+                args.append(node.args.kwarg)
+            annotations.extend(arg.annotation for arg in args)
+        elif isinstance(node, ast.ClassDef):
+            if _body_may_use_import_time_pep604_annotations(node.body):
+                return True
+
+        if any(_annotation_contains_pep604_union(annotation) for annotation in annotations):
+            return True
+        child_bodies: list[list[ast.stmt]] = []
+        if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)):
+            child_bodies.extend([node.body, node.orelse] if hasattr(node, "orelse") else [node.body])
+        elif isinstance(node, ast.Try):
+            child_bodies.extend([node.body, *(handler.body for handler in node.handlers), node.orelse, node.finalbody])
+        if any(_body_may_use_import_time_pep604_annotations(child_body) for child_body in child_bodies):
+            return True
+    return False
+
+
+def _source_uses_definite_import_time_pep604_annotations(source: str, filename: str) -> bool:
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError:
+        return False
+    return _body_uses_definite_import_time_pep604_annotations(tree.body)
+
+
+def _source_may_use_import_time_pep604_annotations(source: str, filename: str) -> bool:
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError:
+        return False
+    return _body_may_use_import_time_pep604_annotations(tree.body)
+
+
+def _get_execution_module_import_lock(module_name: str) -> threading.RLock:
+    with _execution_module_import_locks_lock:
+        lock = _execution_module_import_locks.get(module_name)
+        if lock is None:
+            lock = threading.RLock()
+            _execution_module_import_locks[module_name] = lock
+        return lock
+
+
+def _compile_execution_module_with_postponed_annotations(module_name: str, module_path: Path, source: str):
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None:
+        raise ImportError(f"Cannot import module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        code = compile(
+            source,
+            str(module_path),
+            "exec",
+            flags=__future__.annotations.compiler_flag,
+            dont_inherit=True,
+        )
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+def _import_execution_module(module_path: Path):
+    module_name = module_path.stem
+    sys.path.append(str(module_path.parent))
+    with _get_execution_module_import_lock(module_name):
+        if module_name in sys.modules:
+            return sys.modules[module_name]
+        if sys.version_info >= (3, 10):
+            return importlib.import_module(module_name)
+        if not module_path.exists():
+            return importlib.import_module(module_name)
+
+        with tokenize.open(str(module_path)) as f:
+            source = f.read()
+
+        if _source_uses_definite_import_time_pep604_annotations(source, str(module_path)):
+            return _compile_execution_module_with_postponed_annotations(module_name, module_path, source)
+
+        try:
+            return importlib.import_module(module_name)
+        except TypeError:
+            sys.modules.pop(module_name, None)
+            if not _source_may_use_import_time_pep604_annotations(source, str(module_path)):
+                raise
+            return _compile_execution_module_with_postponed_annotations(module_name, module_path, source)
 
 
 try:
@@ -62,6 +209,8 @@ except Exception:
 
 # Active task handles for cancel support
 _active_tasks: dict[str, object] = {}
+_execution_module_import_locks: dict[str, threading.RLock] = {}
+_execution_module_import_locks_lock = threading.Lock()
 
 port = 0
 logger = logging.getLogger("module_executor")
@@ -178,8 +327,7 @@ def execute_function(message: dict, lock: threading.Lock | None = None, connecti
     """Import a module and execute one of its functions."""
     module_path = Path(message["module_path"])
     logger.debug(f"Import module {module_path}")
-    sys.path.append(str(module_path.parent))
-    module = importlib.import_module(module_path.stem)
+    module = _import_execution_module(module_path)
     if not hasattr(module, message["function"]):
         raise Exception(f"Module {module_path} has no function {message['function']}.")
     args = message.get("args", [])

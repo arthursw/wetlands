@@ -50,3 +50,29 @@
 - `uv run pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py`: 373 passed under Python 3.9 because `uv` reused the active environment.
 - `uv run --python 3.13 pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py`: 373 passed.
 - `uv run ruff check`: passed.
+
+## Follow-Up: Python 3.9 User Module Annotations
+
+### Planned
+- Fix Python 3.9 worker imports for user modules that use PEP 604 annotations without `from __future__ import annotations`.
+- Preserve normal import semantics where Python 3.9 already imports the module successfully.
+
+### Implemented
+- Added a Python 3.9-only execution-module import fallback that compiles affected user modules with postponed annotations.
+- Limited fallback detection to import-time annotations in module/class bodies and function signatures.
+- Narrowed the no-side-effect fallback path to definitely executed import-time annotations, while preserving normal import semantics for skipped branches.
+- Preserved Python 3.9 semantics for annotation `TypeError`s intentionally caught by user `try`/`except` blocks.
+- Serialized the fallback import path per module name to match `sys.modules` behavior and avoid same-stem partial-module races.
+- Added regression tests for the reported import failure, nested import-time annotations, local/skipped-branch/caught-error annotation semantics, and concurrent import serialization.
+
+### Learned
+- The prior compatibility pass fixed Wetlands package imports, but user-provided modules executed inside Python 3.9 workers can also contain PEP 604 annotations.
+- The full integration failure was triggered by `shared_memory_module.py` declaring `ndarray: NDArray | None = None` in a Python 3.9 worker.
+- A targeted rerun of `tests/test_wetlands.py::test_shared_memory_ndarray` passed the original import failure point, then hung later in the NDArray cleanup path; that run was stopped and should be investigated separately if it reproduces outside this fix.
+
+### Verification
+- `python3.9 -m compileall -q src/wetlands`: passed.
+- `uv run --python 3.9 pytest tests/test_python39_compat.py`: 9 passed.
+- `uv run --python 3.9 pytest tests/test_module_executor.py tests/test_task.py`: 82 passed.
+- `uv run --python 3.13 pytest tests/test_python39_compat.py tests/test_module_executor.py tests/test_task.py`: 91 passed.
+- `uv run ruff check`: passed.
