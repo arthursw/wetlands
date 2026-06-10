@@ -30,10 +30,23 @@
 - Use plain `@dataclass(frozen=True)` for `TaskEvent`.
 
 ### Next
-- Wait for review-agent feedback, merge to the main worktree, rerun verification there, and move the feature worktree to Trash.
+- Move the feature worktree to Trash.
 
 ### Verification
 - `python3.9 -m compileall -q src/wetlands`: passed.
 - `uv run --python 3.9 pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py`: 373 passed.
+- `uv run --python 3.13 pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py`: 373 passed.
+- `uv run ruff check`: passed.
+
+## Post-Merge
+
+### Implemented
+- Merged `python39-compat` into `main`.
+- Review agent reported no findings.
+
+### Verification
+- `python3.9 -m compileall -q src/wetlands`: passed.
+- `uv run --python 3.9 pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py`: 373 passed.
+- `uv run pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py`: 373 passed under Python 3.9 because `uv` reused the active environment.
 - `uv run --python 3.13 pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py`: 373 passed.
 - `uv run ruff check`: passed.
