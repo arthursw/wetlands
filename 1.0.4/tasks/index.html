@@ -522,6 +522,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#persistent-workers-and-reconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistent workers and reconnect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#map-batch-execution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1205,6 +1216,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/runtime_state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../reference/wetlands/_internal/settings_manager/" class="md-nav__link">
         
   
@@ -1442,6 +1481,17 @@
   
     <nav class="md-nav" aria-label="Parallel Execution">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#persistent-workers-and-reconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistent workers and reconnect
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#map-batch-execution" class="md-nav__link">
@@ -1836,27 +1886,62 @@
 <p>You can check how many workers are currently alive with the <code>worker_count</code> property:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Active workers: </span><span class="si">{</span><span class="n">env</span><span class="o">.</span><span class="n">worker_count</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div>
+<h4 id="persistent-workers-and-reconnect">Persistent workers and reconnect</h4>
+<p>By default, workers are tied to the current <code>EnvironmentManager</code> connection and <a class="autorefs autorefs-internal" title="            exit()" href="../reference/wetlands/environment/#wetlands.environment.Environment.exit"><code>env.exit()</code></a> stops them.
+For trusted local workflows where workers should remain alive after the current manager disconnects, launch persistent workers directly with <code>persistent=True</code> or use <a class="autorefs autorefs-internal" title="            launch_or_attach(environment, additional_activate_commands={}, *, max_workers=1, worker_env=None, worker_timeout=None, attach_wait=10.0, attach_retry_interval=0.25)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.launch_or_attach"><code>EnvironmentManager.launch_or_attach()</code></a> to attach to existing persistent workers and launch them when needed:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">env</span> <span class="o">=</span> <span class="n">manager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="s2">&quot;cellpose&quot;</span><span class="p">,</span> <span class="n">deps</span><span class="p">)</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">env</span> <span class="o">=</span> <span class="n">manager</span><span class="o">.</span><span class="n">launch_or_attach</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">max_workers</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+</span></code></pre></div>
+<p>If you only want to launch new persistent workers and do not need attach-first behavior, call <code>launch()</code> directly:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">env</span> <span class="o">=</span> <span class="n">manager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="s2">&quot;cellpose&quot;</span><span class="p">,</span> <span class="n">deps</span><span class="p">)</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">persistent</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span></code></pre></div>
+<p>Wetlands records persistent worker metadata in <code>wetlands/state/workers.json</code> and authenticates local TCP connections with a root-local key stored in <code>wetlands/state/auth.key</code>.
+No secret is stored in <code>workers.json</code>.
+<code>launch_or_attach()</code> first tries to attach to existing live persistent workers for that environment name.
+If no live workers remain and the manager already knows the environment, it launches new persistent workers with the supplied launch options.
+Name-only use is reconnect-only unless the manager has already created or loaded that environment; pass an <a class="autorefs autorefs-internal" title="            Environment" href="../reference/wetlands/environment/#wetlands.environment.Environment"><code>Environment</code></a> object or call <a class="autorefs autorefs-internal" title="            create(name, dependencies=None, additional_install_commands={}, use_existing=False)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.create"><code>create()</code></a> or <a class="autorefs autorefs-internal" title="            load(name, environment_path)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.load"><code>load()</code></a> first when a launch fallback is needed.
+Use plain <a class="autorefs autorefs-internal" title="            launch(additional_activate_commands={}, max_workers=1, persistent=False)" href="../reference/wetlands/environment/#wetlands.environment.Environment.launch"><code>env.launch()</code></a> for non-persistent workers.</p>
+<p>Use <a class="autorefs autorefs-internal" title="            detach()" href="../reference/wetlands/environment/#wetlands.environment.Environment.detach"><code>env.detach()</code></a> to close the current manager's client connections without sending <code>"exit"</code> to the workers:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">env</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+</span></code></pre></div>
+<p>A later manager using the same <code>wetlands_instance_path</code> can reconnect by environment name:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">wetlands.environment_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvironmentManager</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="n">manager</span> <span class="o">=</span> <span class="n">EnvironmentManager</span><span class="p">()</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="n">env</span> <span class="o">=</span> <span class="n">manager</span><span class="o">.</span><span class="n">launch_or_attach</span><span class="p">(</span><span class="s2">&quot;cellpose&quot;</span><span class="p">)</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="n">result</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;segment.py&quot;</span><span class="p">,</span> <span class="s2">&quot;segment&quot;</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">image_path</span><span class="p">,))</span>
+</span></code></pre></div>
+<p>If all recorded workers are dead, refuse authentication, or cannot be reached, <code>attach()</code> raises a clear error and removes stale registry entries.
+If a worker is alive but still finishing work from a previous disconnected client, an attach attempt times out and leaves the registry entry in place so a later attach can succeed.
+<code>launch_or_attach()</code> waits briefly for busy live workers to become attachable and will not launch duplicate persistent workers while live records remain.
+Launching another persistent environment with the same name while live persistent workers are already recorded is refused; attach to the existing workers or stop them with <code>env.exit()</code> first.</p>
+<p><code>detach()</code> fails any local queued or active <code>Task</code> objects because the current manager can no longer receive their results.
+If a client disconnects while a worker task is running, the worker lets that task finish before accepting a new connection; the result is lost to the detached manager.
+Use <code>env.exit()</code> when you want to stop persistent workers and remove their registry entries.</p>
+<p>Persistent workers still execute arbitrary Python functions and scripts through <code>execute()</code>, <code>submit()</code>, <code>map()</code>, and <code>run_script()</code>.
+The authenticated TCP transport is intended for trusted local use, not as a remote multi-user service boundary.</p>
 <h4 id="map-batch-execution"><code>map()</code> — batch execution</h4>
 <p><a class="autorefs autorefs-internal" title="            map(module_path, function, iterable, *, timeout=None, ordered=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.map"><code>env.map()</code></a> distributes work across workers and yields results, similar to <code>concurrent.futures.Executor.map()</code>:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
-</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
-</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="n">images</span> <span class="o">=</span> <span class="n">load_images</span><span class="p">(</span><span class="s2">&quot;data/&quot;</span><span class="p">)</span>
-</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="s2">&quot;segment.py&quot;</span><span class="p">,</span> <span class="s2">&quot;segment&quot;</span><span class="p">,</span> <span class="n">images</span><span class="p">))</span>
-</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segmented </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span><span class="si">}</span><span class="s2"> images&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">images</span> <span class="o">=</span> <span class="n">load_images</span><span class="p">(</span><span class="s2">&quot;data/&quot;</span><span class="p">)</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="s2">&quot;segment.py&quot;</span><span class="p">,</span> <span class="s2">&quot;segment&quot;</span><span class="p">,</span> <span class="n">images</span><span class="p">))</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segmented </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span><span class="si">}</span><span class="s2"> images&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <p>Use <code>ordered=False</code> to yield results as they complete (faster when items have varying processing times):</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="s2">&quot;analysis.py&quot;</span><span class="p">,</span> <span class="s2">&quot;analyze&quot;</span><span class="p">,</span> <span class="n">datasets</span><span class="p">,</span> <span class="n">ordered</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
-</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>    <span class="n">save_result</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">env</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="s2">&quot;analysis.py&quot;</span><span class="p">,</span> <span class="s2">&quot;analyze&quot;</span><span class="p">,</span> <span class="n">datasets</span><span class="p">,</span> <span class="n">ordered</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>    <span class="n">save_result</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
 </span></code></pre></div>
 <h4 id="map_tasks-batch-execution-with-full-task-control"><code>map_tasks()</code> — batch execution with full Task control</h4>
 <p><a class="autorefs autorefs-internal" title="            map_tasks(module_path, function, iterable)" href="../reference/wetlands/environment/#wetlands.environment.Environment.map_tasks"><code>env.map_tasks()</code></a> returns a list of <code>Task</code> objects for when you need progress reporting or cancellation on individual items:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">tasks</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">map_tasks</span><span class="p">(</span><span class="s2">&quot;segment.py&quot;</span><span class="p">,</span> <span class="s2">&quot;segment&quot;</span><span class="p">,</span> <span class="n">images</span><span class="p">)</span>
-</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
-</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">tasks</span><span class="p">:</span>
-</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>    <span class="n">task</span><span class="o">.</span><span class="n">listen</span><span class="p">(</span><span class="k">lambda</span> <span class="n">e</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">progress</span><span class="si">:</span><span class="s2">.0%</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">))</span>
-</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>
-</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">tasks</span><span class="p">:</span>
-</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>    <span class="n">task</span><span class="o">.</span><span class="n">wait_for</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="n">tasks</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">map_tasks</span><span class="p">(</span><span class="s2">&quot;segment.py&quot;</span><span class="p">,</span> <span class="s2">&quot;segment&quot;</span><span class="p">,</span> <span class="n">images</span><span class="p">)</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">tasks</span><span class="p">:</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>    <span class="n">task</span><span class="o">.</span><span class="n">listen</span><span class="p">(</span><span class="k">lambda</span> <span class="n">e</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">progress</span><span class="si">:</span><span class="s2">.0%</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">))</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">tasks</span><span class="p">:</span>
+</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>    <span class="n">task</span><span class="o">.</span><span class="n">wait_for</span><span class="p">()</span>
 </span></code></pre></div>
 <hr />
 <h3 id="worker-health-monitoring">Worker Health Monitoring</h3>
@@ -1866,42 +1951,42 @@
 <li><strong>Inactivity timeout</strong>: If <code>worker_timeout</code> is set and a worker has not sent any IPC message (result, progress update, log) within that duration, it is treated as hung. The monitor fails the active task, kills and removes the worker, and launches a replacement.</li>
 </ul>
 <p>Replacement workers are started transparently with the same configuration (environment variables, activation commands) as the original. Queued tasks waiting for a worker are dispatched to the replacement as soon as it is ready.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span>
-</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>    <span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
-</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>    <span class="n">worker_env</span><span class="o">=</span><span class="k">lambda</span> <span class="n">i</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;CUDA_VISIBLE_DEVICES&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">)},</span>
-</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>    <span class="n">worker_timeout</span><span class="o">=</span><span class="mi">600</span><span class="p">,</span>  <span class="c1"># 10-minute inactivity timeout</span>
-</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="p">)</span>
-</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>
-</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="c1"># Workers that crash or hang are replaced automatically.</span>
-</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="c1"># The failed task receives a FAILED status with a descriptive error message.</span>
-</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="s2">&quot;process.py&quot;</span><span class="p">,</span> <span class="s2">&quot;run&quot;</span><span class="p">,</span> <span class="n">items</span><span class="p">))</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="n">env</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>    <span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>    <span class="n">worker_env</span><span class="o">=</span><span class="k">lambda</span> <span class="n">i</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;CUDA_VISIBLE_DEVICES&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">)},</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>    <span class="n">worker_timeout</span><span class="o">=</span><span class="mi">600</span><span class="p">,</span>  <span class="c1"># 10-minute inactivity timeout</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="p">)</span>
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="c1"># Workers that crash or hang are replaced automatically.</span>
+</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="c1"># The failed task receives a FAILED status with a descriptive error message.</span>
+</span><span id="__span-25-9"><a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="s2">&quot;process.py&quot;</span><span class="p">,</span> <span class="s2">&quot;run&quot;</span><span class="p">,</span> <span class="n">items</span><span class="p">))</span>
 </span></code></pre></div>
 <p>The health monitor stops when <code>env.exit()</code> is called. Any tasks still queued at shutdown are failed with a descriptive error message.</p>
 <hr />
 <h3 id="gui-integration">GUI Integration</h3>
 <p>Tasks integrate naturally with GUI frameworks. Since task events are delivered from background threads, use thread-safe mechanisms to update the UI:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">PyQt6.QtCore</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyqtSignal</span><span class="p">,</span> <span class="n">QObject</span>
-</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
-</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">TaskBridge</span><span class="p">(</span><span class="n">QObject</span><span class="p">):</span>
-</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>    <span class="n">progress</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span>
-</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    <span class="n">completed</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">(</span><span class="nb">object</span><span class="p">)</span>
-</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    <span class="n">failed</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
-</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>
-</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="n">bridge</span> <span class="o">=</span> <span class="n">TaskBridge</span><span class="p">()</span>
-</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="n">bridge</span><span class="o">.</span><span class="n">progress</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">progress_bar</span><span class="o">.</span><span class="n">setValue</span><span class="p">)</span>
-</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="n">bridge</span><span class="o">.</span><span class="n">completed</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">on_result</span><span class="p">)</span>
-</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>
-</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="k">def</span><span class="w"> </span><span class="nf">on_event</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>    <span class="k">match</span> <span class="n">event</span><span class="o">.</span><span class="n">type</span><span class="p">:</span>
-</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>        <span class="k">case</span> <span class="n">TaskEventType</span><span class="o">.</span><span class="n">UPDATE</span><span class="p">:</span>
-</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>            <span class="n">bridge</span><span class="o">.</span><span class="n">progress</span><span class="o">.</span><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">progress</span> <span class="ow">or</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">message</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
-</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>        <span class="k">case</span> <span class="n">TaskEventType</span><span class="o">.</span><span class="n">COMPLETION</span><span class="p">:</span>
-</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>            <span class="n">bridge</span><span class="o">.</span><span class="n">completed</span><span class="o">.</span><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">result</span><span class="p">)</span>
-</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>        <span class="k">case</span> <span class="n">TaskEventType</span><span class="o">.</span><span class="n">FAILURE</span><span class="p">:</span>
-</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>            <span class="n">bridge</span><span class="o">.</span><span class="n">failed</span><span class="o">.</span><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">error</span> <span class="ow">or</span> <span class="s2">&quot;Unknown error&quot;</span><span class="p">)</span>
-</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>
-</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="n">task</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="s2">&quot;segment.py&quot;</span><span class="p">,</span> <span class="s2">&quot;segment_image&quot;</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">image</span><span class="p">,),</span> <span class="n">start</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a><span class="n">task</span><span class="o">.</span><span class="n">listen</span><span class="p">(</span><span class="n">on_event</span><span class="p">)</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">PyQt6.QtCore</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyqtSignal</span><span class="p">,</span> <span class="n">QObject</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">TaskBridge</span><span class="p">(</span><span class="n">QObject</span><span class="p">):</span>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    <span class="n">progress</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span>
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>    <span class="n">completed</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">(</span><span class="nb">object</span><span class="p">)</span>
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>    <span class="n">failed</span> <span class="o">=</span> <span class="n">pyqtSignal</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="n">bridge</span> <span class="o">=</span> <span class="n">TaskBridge</span><span class="p">()</span>
+</span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="n">bridge</span><span class="o">.</span><span class="n">progress</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">progress_bar</span><span class="o">.</span><span class="n">setValue</span><span class="p">)</span>
+</span><span id="__span-26-10"><a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="n">bridge</span><span class="o">.</span><span class="n">completed</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">on_result</span><span class="p">)</span>
+</span><span id="__span-26-11"><a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a>
+</span><span id="__span-26-12"><a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="k">def</span><span class="w"> </span><span class="nf">on_event</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+</span><span id="__span-26-13"><a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a>    <span class="k">match</span> <span class="n">event</span><span class="o">.</span><span class="n">type</span><span class="p">:</span>
+</span><span id="__span-26-14"><a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a>        <span class="k">case</span> <span class="n">TaskEventType</span><span class="o">.</span><span class="n">UPDATE</span><span class="p">:</span>
+</span><span id="__span-26-15"><a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a>            <span class="n">bridge</span><span class="o">.</span><span class="n">progress</span><span class="o">.</span><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">progress</span> <span class="ow">or</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">message</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+</span><span id="__span-26-16"><a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>        <span class="k">case</span> <span class="n">TaskEventType</span><span class="o">.</span><span class="n">COMPLETION</span><span class="p">:</span>
+</span><span id="__span-26-17"><a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>            <span class="n">bridge</span><span class="o">.</span><span class="n">completed</span><span class="o">.</span><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">result</span><span class="p">)</span>
+</span><span id="__span-26-18"><a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>        <span class="k">case</span> <span class="n">TaskEventType</span><span class="o">.</span><span class="n">FAILURE</span><span class="p">:</span>
+</span><span id="__span-26-19"><a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>            <span class="n">bridge</span><span class="o">.</span><span class="n">failed</span><span class="o">.</span><span class="n">emit</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">task</span><span class="o">.</span><span class="n">error</span> <span class="ow">or</span> <span class="s2">&quot;Unknown error&quot;</span><span class="p">)</span>
+</span><span id="__span-26-20"><a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>
+</span><span id="__span-26-21"><a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a><span class="n">task</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="s2">&quot;segment.py&quot;</span><span class="p">,</span> <span class="s2">&quot;segment_image&quot;</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">image</span><span class="p">,),</span> <span class="n">start</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-26-22"><a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a><span class="n">task</span><span class="o">.</span><span class="n">listen</span><span class="p">(</span><span class="n">on_event</span><span class="p">)</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
 </span></code></pre></div>
 
 

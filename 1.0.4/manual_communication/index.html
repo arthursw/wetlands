@@ -1100,6 +1100,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/runtime_state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../reference/wetlands/_internal/settings_manager/" class="md-nav__link">
         
   
@@ -1337,7 +1365,7 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">env</span> <span class="o">=</span> <span class="n">environment_manager</span><span class="o">.</span><span class="n">create</span><span class="p">(</span><span class="s2">&quot;cellpose_manual_env&quot;</span><span class="p">,</span> <span class="n">deps</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="execute-a-custom-script-in-the-environment">Execute a Custom Script in the Environment</h3>
-<p>Instead of <a class="autorefs autorefs-internal" title="            launch(additional_activate_commands={}, max_workers=1)" href="../reference/wetlands/environment/#wetlands.environment.Environment.launch"><code>env.launch()</code></a>, we use <a class="autorefs autorefs-internal" title="            execute_commands(commands, additional_activate_commands={}, popen_kwargs={}, wait=False, log_context=None, log=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.execute_commands"><code>env.execute_commands()</code></a>. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script (<a href="https://github.com/arthursw/wetlands/blob/main/examples/manual_communication_module.py"><code>manual_communication_module.py</code></a>) using <code>python -u</code> (unbuffered output, important for reading stdout line-by-line immediately). We capture the <code>Popen</code> object for the launched process. We also redirect stderr to stdout for easier log capture.</p>
+<p>Instead of <a class="autorefs autorefs-internal" title="            launch(additional_activate_commands={}, max_workers=1, persistent=False)" href="../reference/wetlands/environment/#wetlands.environment.Environment.launch"><code>env.launch()</code></a>, we use <a class="autorefs autorefs-internal" title="            execute_commands(commands, additional_activate_commands={}, popen_kwargs={}, wait=False, log_context=None, log=True)" href="../reference/wetlands/environment/#wetlands.environment.Environment.execute_commands"><code>env.execute_commands()</code></a>. This method allows us to run arbitrary shell commands within the activated environment. Here, we execute a specific Python script (<a href="https://github.com/arthursw/wetlands/blob/main/examples/manual_communication_module.py"><code>manual_communication_module.py</code></a>) using <code>python -u</code> (unbuffered output, important for reading stdout line-by-line immediately). We capture the <code>Popen</code> object for the launched process. We also redirect stderr to stdout for easier log capture.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Executing manual_communication_module.py in environment...&quot;</span><span class="p">)</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">process</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">execute_commands</span><span class="p">([</span><span class="s2">&quot;python -u manual_communication_module.py&quot;</span><span class="p">])</span>
 </span></code></pre></div>

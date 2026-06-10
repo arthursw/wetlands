@@ -1080,6 +1080,34 @@
   
   
     <li class="md-nav__item">
+      <a href="reference/wetlands/_internal/runtime_state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="reference/wetlands/_internal/settings_manager/" class="md-nav__link">
         
   
@@ -1278,6 +1306,7 @@
 <li><strong>Embedded Execution</strong>: Run Python functions inside isolated environments, with both blocking and non-blocking (task-based) APIs.</li>
 <li><strong>Task API</strong>: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks. See <a href="tasks/">Tasks and parallel execution</a>.</li>
 <li><strong>Parallel Execution</strong>: Launch multiple worker processes sharing a single Conda environment and distribute work across them. See <a href="tasks/">Tasks and parallel execution</a>.</li>
+<li><strong>Persistent Workers</strong>: Keep trusted local workers alive after a manager disconnects, then reconnect later with <code>EnvironmentManager.attach()</code> or use <code>EnvironmentManager.launch_or_attach()</code> for attach-first persistent startup. See <a href="tasks/#persistent-workers-and-reconnect">Persistent workers and reconnect</a>.</li>
 <li><strong>Pixi &amp; Micromamba</strong>: Wetlands uses either a self-contained <code>pixi</code> or <code>micromamba</code> for fast and lightweight Conda environment handling.</li>
 </ul>
 <hr />

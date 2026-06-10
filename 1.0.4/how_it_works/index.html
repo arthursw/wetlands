@@ -1039,6 +1039,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/runtime_state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../reference/wetlands/_internal/settings_manager/" class="md-nav__link">
         
   
@@ -1190,8 +1218,9 @@
 <li><strong>Dependency Installation:</strong> Dependencies (Conda packages, Pip packages) are installed into the target environment using <code>pixi add ...</code> or <code>micromamba install ...</code> and <code>pip install ...</code> (executed within the activated environment).</li>
 <li><strong>Launching Workers (<code>launch</code>):</strong><ul>
 <li><code>launch(max_workers=N)</code> starts one or more <code>module_executor</code> worker processes <em>within</em> the activated target environment using <code>subprocess.Popen</code>. All workers share the same Conda environment on disk — no duplication.</li>
-<li>Each worker listens on its own local socket using <code>multiprocessing.connection.Listener</code>.</li>
+<li>Each worker listens on its own local TCP socket using <code>multiprocessing.connection.Listener</code>.</li>
 <li>The main process connects to each worker using <code>multiprocessing.connection.Client</code>.</li>
+<li>Worker connections are authenticated with the Wetlands root auth key stored at <code>wetlands/state/auth.key</code>.</li>
 <li>A dedicated IPC reader daemon thread is started per worker to receive messages asynchronously.</li>
 <li>A health monitor daemon thread is started to periodically check all workers for liveness and inactivity timeouts (see below).</li>
 </ul>
@@ -1222,6 +1251,7 @@
 <li>On <code>env.exit()</code>, the health monitor stops and any tasks still in the queue are failed with a descriptive error.</li>
 </ul>
 </li>
+<li><strong>Persistent Worker Reconnect:</strong> <a class="autorefs autorefs-internal" title="            launch_or_attach(environment, additional_activate_commands={}, *, max_workers=1, worker_env=None, worker_timeout=None, attach_wait=10.0, attach_retry_interval=0.25)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.launch_or_attach"><code>EnvironmentManager.launch_or_attach()</code></a> attaches to live persistent workers when possible and otherwise launches new persistent workers for an environment that the manager already knows. Wetlands records live worker metadata in <code>wetlands/state/workers.json</code> and keeps workers alive after <a class="autorefs autorefs-internal" title="            detach()" href="../reference/wetlands/environment/#wetlands.environment.Environment.detach"><code>env.detach()</code></a>. A later manager using the same <code>wetlands_instance_path</code> can call <a class="autorefs autorefs-internal" title="            attach(name)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.attach"><code>EnvironmentManager.attach(name)</code></a>, or <code>launch_or_attach(name)</code> for name-only reconnect, to reconnect with the auth key. <a class="autorefs autorefs-internal" title="            exit()" href="../reference/wetlands/environment/#wetlands.environment.Environment.exit"><code>env.exit()</code></a> remains the destructive shutdown path: it sends <code>"exit"</code>, stops workers, and removes registry entries.</li>
 <li><strong>Direct Execution (<code>execute_commands</code>):</strong> This method directly activates the target environment and runs the provided shell commands using <code>subprocess.Popen</code> (no worker processes involved here). The user is responsible for managing the launched process and any necessary communication.</li>
 <li><strong>Isolation:</strong> Each environment created by Wetlands is fully isolated, preventing dependency conflicts between different environments or with the main application's environment.</li>
 </ol>
@@ -1235,6 +1265,14 @@
 <p>Each worker holds its own subprocess, port, IPC connection, and a dedicated reader thread. Tasks are dispatched to idle workers from an internal pool; when all workers are busy, tasks queue and are dispatched as workers become available. A health monitor thread runs alongside the pool, detecting crashed or hung workers and replacing them transparently.</p>
 <p>Multi-process is preferred over multi-thread because Wetlands' primary use case is scientific computing (numpy, torch, cellpose, stardist). Separate processes provide true parallelism (no GIL), failure isolation (one crash doesn't kill other tasks), and separate <code>sys.path</code>/<code>sys.argv</code> per worker. The only cost is memory (~200–400 MB per worker for a typical scientific stack), controlled via <code>max_workers</code>.</p>
 <p>With <code>max_workers=1</code> (the default), the pool is a trivial pass-through: one worker, one connection, one reader thread. Behavior is identical to a single-worker setup.</p>
+<p>Persistent workers use the same worker pool model, but attached workers may not have a local <code>subprocess.Popen</code> handle in the new manager.
+For those workers, Wetlands uses the recorded PID for liveness checks and cleanup.
+If a manager disconnects while a persistent worker is idle, the worker returns to <code>accept()</code> and can authenticate a later manager.
+If the disconnect happens while a task is running, the worker waits for that task thread to finish before accepting more work; the detached manager does not receive the result.
+If a later attach attempt reaches a worker that is alive but still busy, the attach attempt is bounded and the registry entry is preserved for a later retry.
+Persistent workers redirect ongoing stdout/stderr dependence after startup and continue writing worker logs under the Wetlands instance path.</p>
+<p>The authenticated local TCP transport is a trusted-local IPC mechanism.
+It does not turn <code>execute()</code> or <code>run_script()</code> into a sandboxed remote service; those APIs still execute arbitrary Python in the target environment.</p>
 <h2 id="under-the-hood">⚙️ Under the Hood</h2>
 <p>Wetlands uses the <code>EnvironmentManager.execute_commands()</code> for different operations (to create environments, install dependencies, etc). 
 Behind the scenes, this method creates and executes a temporary script (a bash script on Linux and Mac, and a PowerShell script on Windows) which looks like the following:</p>

@@ -545,6 +545,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#localdependency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LocalDependency
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1099,6 +1110,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/runtime_state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../reference/wetlands/_internal/settings_manager/" class="md-nav__link">
         
   
@@ -1224,6 +1263,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#localdependency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LocalDependency
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1320,37 +1370,58 @@ Defines supported operating systems and architectures.</p>
 <li><strong>dependencies</strong> <em>(optional)</em>: Indicates whether to install sub-dependencies.</li>
 </ul>
 <hr />
+<h3 id="localdependency">LocalDependency</h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">LocalDependency</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">editable</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span>
+</span></code></pre></div>
+<p>Represents a local Python package to install into the environment:</p>
+<ul>
+<li><strong>name</strong> <em>(str)</em>: The package name. Wetlands requires this explicitly so Pixi can record deterministic PEP 508 specs.</li>
+<li><strong>path</strong> <em>(str | Path)</em>: Path to the local package directory. Wetlands resolves it to an absolute path before generating install commands.</li>
+<li><strong>editable</strong> <em>(optional bool)</em>: Whether to install the package in editable mode. Defaults to <code>True</code>.</li>
+</ul>
+<hr />
 <h3 id="dependencies">Dependencies</h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Dependencies</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">python</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">conda</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Dependency</span><span class="p">]]</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">pip</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Dependency</span><span class="p">]]</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Dependencies</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">python</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">conda</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Dependency</span><span class="p">]]</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">channels</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">pip</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Dependency</span><span class="p">]]</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">local</span><span class="p">:</span> <span class="n">NotRequired</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">LocalDependency</span><span class="p">]]</span>
 </span></code></pre></div>
 <p>Top-level dependency configuration:</p>
 <ul>
 <li><strong>python</strong> <em>(optional str)</em>: Specifies the Python version required (e.g., <code>"==3.9"</code>).</li>
 <li><strong>conda</strong> <em>(optional list)</em>: Conda dependencies (package names or <code>Dependency</code> objects).</li>
+<li><strong>channels</strong> <em>(optional list)</em>: Additional Conda channels to configure for Conda dependencies.</li>
 <li><strong>pip</strong> <em>(optional list)</em>: Pip dependencies (package names or <code>Dependency</code> objects).</li>
+<li><strong>local</strong> <em>(optional list)</em>: Local Python packages to install from paths.</li>
 </ul>
 <hr />
 <h2 id="example">🧪 Example</h2>
 <p>Here’s an example dependency specification:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">dependencies</span><span class="p">:</span> <span class="n">Dependencies</span> <span class="o">=</span> <span class="p">{</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="s2">&quot;python&quot;</span><span class="p">:</span> <span class="s2">&quot;==3.11&quot;</span><span class="p">,</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="s2">&quot;conda&quot;</span><span class="p">:</span> <span class="p">[</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>        <span class="s2">&quot;numpy&quot;</span><span class="p">,</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;nvidia::cudatoolkit=11.0.*&quot;</span><span class="p">,</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;linux-64&quot;</span><span class="p">,</span> <span class="s2">&quot;windows-64&quot;</span><span class="p">]},</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;nvidia::nvidia::cudnn=8.0.*&quot;</span><span class="p">,</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;linux-64&quot;</span><span class="p">,</span> <span class="s2">&quot;windows-64&quot;</span><span class="p">]},</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;pyobjc&quot;</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;osx-64&quot;</span><span class="p">,</span> <span class="s2">&quot;osx-arm64&quot;</span><span class="p">],</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="p">],</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="s2">&quot;pip&quot;</span><span class="p">:</span> <span class="p">[</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>        <span class="s2">&quot;tensorflow==2.16.1&quot;</span><span class="p">,</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>        <span class="s2">&quot;csbdeep==0.8.1&quot;</span><span class="p">,</span> 
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>        <span class="s2">&quot;stardist==0.9.1&quot;</span><span class="p">,</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;some-macos-only-package&quot;</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;osx-arm64&quot;</span><span class="p">]},</span>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;helper&quot;</span><span class="p">,</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;dependencies&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="p">]</span>
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="p">}</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">dependencies</span><span class="p">:</span> <span class="n">Dependencies</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="s2">&quot;python&quot;</span><span class="p">:</span> <span class="s2">&quot;==3.11&quot;</span><span class="p">,</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="s2">&quot;conda&quot;</span><span class="p">:</span> <span class="p">[</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="s2">&quot;numpy&quot;</span><span class="p">,</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;nvidia::cudatoolkit=11.0.*&quot;</span><span class="p">,</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;linux-64&quot;</span><span class="p">,</span> <span class="s2">&quot;windows-64&quot;</span><span class="p">]},</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;nvidia::nvidia::cudnn=8.0.*&quot;</span><span class="p">,</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;linux-64&quot;</span><span class="p">,</span> <span class="s2">&quot;windows-64&quot;</span><span class="p">]},</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;pyobjc&quot;</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;osx-64&quot;</span><span class="p">,</span> <span class="s2">&quot;osx-arm64&quot;</span><span class="p">],</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="p">],</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="s2">&quot;pip&quot;</span><span class="p">:</span> <span class="p">[</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>        <span class="s2">&quot;tensorflow==2.16.1&quot;</span><span class="p">,</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>        <span class="s2">&quot;csbdeep==0.8.1&quot;</span><span class="p">,</span> 
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>        <span class="s2">&quot;stardist==0.9.1&quot;</span><span class="p">,</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;some-macos-only-package&quot;</span><span class="p">,</span> <span class="s2">&quot;platforms&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;osx-arm64&quot;</span><span class="p">]},</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;helper&quot;</span><span class="p">,</span> <span class="s2">&quot;optional&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;dependencies&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>    <span class="p">],</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>    <span class="s2">&quot;local&quot;</span><span class="p">:</span> <span class="p">[</span>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;my-package&quot;</span><span class="p">,</span> <span class="s2">&quot;path&quot;</span><span class="p">:</span> <span class="s2">&quot;../my-package&quot;</span><span class="p">},</span>
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>        <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;other-package&quot;</span><span class="p">,</span> <span class="s2">&quot;path&quot;</span><span class="p">:</span> <span class="s2">&quot;../other-package&quot;</span><span class="p">,</span> <span class="s2">&quot;editable&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">},</span>
+</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>    <span class="p">]</span>
+</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="p">}</span>
 </span></code></pre></div>
 <h3 id="explanation">Explanation:</h3>
 <ul>
@@ -1369,12 +1440,21 @@ Defines supported operating systems and architectures.</p>
 <li><code>helper</code>: An <strong>optional</strong> pip package which much be installed without its dependencies.</li>
 </ul>
 </li>
+<li><code>local</code> section:<ul>
+<li><code>my-package</code>: Installed from <code>../my-package</code> in editable mode, which is the default.</li>
+<li><code>other-package</code>: Installed from <code>../other-package</code> in non-editable mode.</li>
 </ul>
+</li>
+</ul>
+<p>Wetlands installs local dependencies after ordinary Conda and pip dependencies.
+With Micromamba, local dependencies are installed in the activated environment using <code>pip install</code>, with <code>-e</code> for editable packages.
+With Pixi, local dependencies are added to the Pixi manifest using <code>pixi add --pypi</code>; editable packages include <code>--editable</code>, and paths are recorded as <code>name @ file://...</code> PEP 508 specs.</p>
 <h2 id="usage-recommendations">✅ Usage Recommendations</h2>
 <ul>
 <li>Use <code>platforms</code> to restrict platform-specific packages (e.g., <code>pyobjc</code> for macOS).</li>
 <li>Use <code>optional</code> for optional feature packages.</li>
 <li>Use <code>dependencies=False</code> to only install the package without its dependencies.</li>
+<li>Use <code>local</code> for local project packages that should be installed automatically when the environment is created or updated.</li>
 </ul>
 
 
