@@ -8,6 +8,7 @@ from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands._internal.command_generator import Commands
+from wetlands._internal.shell import shell_quote
 
 
 @pytest.fixture
@@ -100,6 +101,24 @@ def test_install_in_existing_env(environment_manager_fixture):
     assert any(
         "micromamba activate" in cmd or ". /path/to/micromamba" in cmd for cmd in command_list
     )  # Check general activation pattern
+
+
+def test_install_in_existing_env_includes_local_dependency_commands(environment_manager_fixture, tmp_path):
+    manager, _, mock_execute_and_get_output = environment_manager_fixture
+    env_name = "local-install-env"
+    local_path = tmp_path / "local package"
+    local_path.mkdir()
+    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path}]}
+
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
+    manager.environments[env_name] = env
+
+    manager.install(env, dependencies)
+
+    mock_execute_and_get_output.assert_called_once()
+    called_args, _ = mock_execute_and_get_output.call_args
+    command_list = called_args[0]
+    assert any(f"pip install  -e {shell_quote(local_path.resolve())}" == cmd for cmd in command_list)
 
 
 def test_install_in_main_env(environment_manager_fixture):

@@ -102,6 +102,67 @@ def test_get_install_dependencies_commands_micromamba(mock_command_generator_mic
     )
 
 
+def test_get_install_dependencies_commands_micromamba_local_dependencies(mock_command_generator_micromamba, tmp_path):
+    dependency_manager = DependencyManager(mock_command_generator_micromamba)
+    editable_path = tmp_path / "editable package"
+    non_editable_path = tmp_path / "regular-package"
+    editable_path.mkdir()
+    non_editable_path.mkdir()
+    dependencies: Dependencies = {
+        "local": [
+            {"name": "editable-package", "path": editable_path},
+            {"name": "regular-package", "path": non_editable_path, "editable": False},
+        ],
+    }
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+
+    assert 'echo "Installing local dependency..."' in commands
+    assert any(cmd == f"pip install  -e {shell_quote(editable_path.resolve())}" for cmd in commands)
+    assert any(cmd == f"pip install  {shell_quote(non_editable_path.resolve())}" for cmd in commands)
+
+
+def test_get_install_dependencies_commands_local_dependency_validation(mock_command_generator_micromamba, tmp_path):
+    dependency_manager = DependencyManager(mock_command_generator_micromamba)
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    with pytest.raises(Exception, match="local dependency.*name"):
+        dependency_manager.get_install_dependencies_commands(environment, {"local": [{"path": tmp_path}]})  # type: ignore
+
+    with pytest.raises(Exception, match="local dependency.*path"):
+        dependency_manager.get_install_dependencies_commands(environment, {"local": [{"name": "missing-path"}]})  # type: ignore
+
+    with pytest.raises(Exception, match="local dependency.*empty"):
+        dependency_manager.get_install_dependencies_commands(environment, {"local": [{}]})  # type: ignore
+
+    with pytest.raises(Exception, match="local dependency.*dictionary"):
+        dependency_manager.get_install_dependencies_commands(environment, {"local": ["not-a-dict"]})  # type: ignore
+
+
+def test_get_install_dependencies_commands_local_dependency_echo_does_not_interpolate_name(
+    mock_command_generator_micromamba, tmp_path
+):
+    dependency_manager = DependencyManager(mock_command_generator_micromamba)
+    local_path = tmp_path / "local-package"
+    local_path.mkdir()
+    dependencies: Dependencies = {"local": [{"name": "$(touch /tmp/wetlands-pwn)", "path": local_path}]}
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+
+    assert 'echo "Installing local dependency..."' in commands
+    assert not any(cmd.startswith('echo "Installing local dependency $(') for cmd in commands)
+
+
 def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
     dependency_manager = DependencyManager(mock_command_generator_pixi)
     dependencies: Dependencies = {
@@ -124,4 +185,36 @@ def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
     assert any("pixi add" in cmd and f"--pypi {shell_quote('requests')}" in cmd for cmd in commands)
     assert any(
         re.match(rf"pip\s+install\s+--no-deps\s+{re.escape(shell_quote('cellpose==3.1.0'))}", cmd) for cmd in commands
+    )
+
+
+def test_get_install_dependencies_commands_pixi_local_dependencies(mock_command_generator_pixi, tmp_path):
+    dependency_manager = DependencyManager(mock_command_generator_pixi)
+    editable_path = tmp_path / "editable package"
+    non_editable_path = tmp_path / "regular-package"
+    editable_path.mkdir()
+    non_editable_path.mkdir()
+    dependencies: Dependencies = {
+        "local": [
+            {"name": "editable-package", "path": editable_path},
+            {"name": "regular-package", "path": non_editable_path, "editable": False},
+        ],
+    }
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+    editable_spec = f"editable-package @ {editable_path.resolve().as_uri()}"
+    non_editable_spec = f"regular-package @ {non_editable_path.resolve().as_uri()}"
+
+    assert 'echo "Installing local dependency..."' in commands
+    assert any(
+        cmd == f"pixi add --manifest-path {shell_quote(environment.path)} --pypi --editable {shell_quote(editable_spec)}"
+        for cmd in commands
+    )
+    assert any(
+        cmd == f"pixi add --manifest-path {shell_quote(environment.path)} --pypi {shell_quote(non_editable_spec)}"
+        for cmd in commands
     )

@@ -1,4 +1,5 @@
 import platform
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from wetlands._internal.command_generator import CommandGenerator
@@ -24,11 +25,18 @@ class Dependency(TypedDict):
     dependencies: NotRequired[bool]
 
 
+class LocalDependency(TypedDict):
+    name: str
+    path: str | Path
+    editable: NotRequired[bool]
+
+
 class Dependencies(TypedDict):
     python: NotRequired[str]
     conda: NotRequired[list[str | Dependency]]
     channels: NotRequired[list[str]]
     pip: NotRequired[list[str | Dependency]]
+    local: NotRequired[list[LocalDependency]]
 
 
 class DependencyManager:
@@ -100,6 +108,28 @@ class DependencyManager:
             len(final_dependencies) + len(final_dependencies_no_deps) > 0,
         )
 
+    def normalize_local_dependencies(self, dependencies: Dependencies) -> list[LocalDependency]:
+        """Validate and resolve local Python package dependencies."""
+        local_dependencies = dependencies.get("local", [])
+        normalized_dependencies: list[LocalDependency] = []
+        for dependency in local_dependencies:
+            if not isinstance(dependency, dict) or len(dependency) == 0:
+                raise Exception("Invalid local dependency: each local dependency must be a non-empty dictionary.")
+            name = dependency.get("name")
+            if not isinstance(name, str) or len(name.strip()) == 0:
+                raise Exception("Invalid local dependency: missing required non-empty name.")
+            path = dependency.get("path")
+            if path is None or len(str(path).strip()) == 0:
+                raise Exception(f"Invalid local dependency '{name}': missing required non-empty path.")
+            normalized_dependencies.append(
+                {
+                    "name": name,
+                    "path": Path(path).resolve(),
+                    "editable": dependency.get("editable", True),
+                }
+            )
+        return normalized_dependencies
+
     def get_install_dependencies_commands(self, environment: "Environment", dependencies: Dependencies) -> list[str]:
         """Generates commands to install dependencies in the given environment. Note: this does not activate conda, use self.get_activate_conda_commands() first.
 
@@ -117,6 +147,7 @@ class DependencyManager:
             "conda", dependencies
         )
         pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.format_dependencies("pip", dependencies)
+        local_dependencies = self.normalize_local_dependencies(dependencies)
 
         if hasCondaDependencies and not environment:
             raise Exception(
@@ -162,6 +193,13 @@ class DependencyManager:
                     f'echo "Installing pip dependencies without their dependencies..."',
                     f"pip install {proxy_args} --no-deps {' '.join(pipDependenciesNoDeps)}",
                 ]
+            for local_dependency in local_dependencies:
+                spec = f"{local_dependency['name']} @ {Path(local_dependency['path']).as_uri()}"
+                editable_arg = "--editable " if local_dependency["editable"] else ""
+                install_deps_commands += [
+                    f'echo "Installing local dependency..."',
+                    f"{self.settings_manager.conda_bin} add --manifest-path {shell_quote(environment.path)} --pypi {editable_arg}{shell_quote(spec)}",
+                ]
             return install_deps_commands
 
         if len(conda_dependencies) > 0:
@@ -184,5 +222,11 @@ class DependencyManager:
             install_deps_commands += [
                 f'echo "Installing pip dependencies without their dependencies..."',
                 f"pip install {proxy_args} --no-deps {' '.join(pipDependenciesNoDeps)}",
+            ]
+        for local_dependency in local_dependencies:
+            editable_arg = "-e " if local_dependency["editable"] else ""
+            install_deps_commands += [
+                f'echo "Installing local dependency..."',
+                f"pip install {proxy_args} {editable_arg}{shell_quote(local_dependency['path'])}",
             ]
         return install_deps_commands

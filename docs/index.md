@@ -23,7 +23,7 @@ The name ***Wetlands*** comes from the tropical *environments* where anacondas t
 - **Embedded Execution**: Run Python functions inside isolated environments, with both blocking and non-blocking (task-based) APIs.
 - **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks. See [Tasks and parallel execution](tasks.md).
 - **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work across them. See [Tasks and parallel execution](tasks.md).
-- **Persistent Workers**: Keep trusted local workers alive after a manager disconnects and reconnect later with `EnvironmentManager.attach()`. See [Persistent workers and reconnect](tasks.md#persistent-workers-and-reconnect).
+- **Persistent Workers**: Keep trusted local workers alive after a manager disconnects, then reconnect later with `EnvironmentManager.attach()` or use `EnvironmentManager.launch_or_attach()` for attach-first persistent startup. See [Persistent workers and reconnect](tasks.md#persistent-workers-and-reconnect).
 - **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
 
 ---

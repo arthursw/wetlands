@@ -186,6 +186,7 @@ class CommandExecutor:
         """
         import os
 
+        original_commands = list(commands)
         commands_string = "\n\t\t".join(commands)
         logger.debug(f"Execute commands:\n\n\t\t{commands_string}\n")
         with tempfile.NamedTemporaryFile(
@@ -240,6 +241,7 @@ class CommandExecutor:
                 "bufsize": 1,  # 1 means line buffered
             }
             process = subprocess.Popen(execute_file, **(default_popen_kwargs | popen_kwargs))
+            process._wetlands_script_path = tmp.name  # type: ignore[attr-defined]
 
             # Create ProcessLogger to handle stdout in background if logging is enabled
             if log:
@@ -256,6 +258,13 @@ class CommandExecutor:
 
             if wait:
                 process.wait()
+                if log:
+                    self._get_complete_process_logger(process)
+                if getattr(process, "_conda_exit_detected", False) or process.returncode != 0:
+                    raise Exception(
+                        f'The execution of the commands "{self._commands_excerpt(original_commands)}" failed with '
+                        f"exit code {process.returncode}."
+                    )
             return process
 
     def execute_commands_and_get_output(

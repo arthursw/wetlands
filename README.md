@@ -120,18 +120,22 @@ env.launch(max_workers=4, worker_timeout=300)  # 5-minute inactivity timeout
 ### Persistent workers
 
 By default, `env.exit()` stops workers when you are done.
-For trusted local workflows that need to reconnect from a later manager process, launch with `persistent=True` and detach instead of exiting:
+For trusted local workflows that need to reconnect from a later manager process, launch persistent workers directly with `persistent=True` or use `launch_or_attach()` to attach to existing persistent workers and launch them when needed:
 
 ```python
-env.launch(max_workers=2, persistent=True)
+env = manager.create("cellpose", deps)
+env = manager.launch_or_attach(env, max_workers=2)
 env.detach()  # close local connections, keep workers alive
 
 new_manager = EnvironmentManager()
-env = new_manager.attach("numpy")
+env = new_manager.launch_or_attach("cellpose")
 result = env.execute("minimal_module.py", "sum", args=([1, 2, 3],))
 env.exit()  # stop persistent workers and remove their registry entries
 ```
 
+`launch_or_attach()` first tries to attach to live persistent workers, then launches new persistent workers only when the manager already knows the environment and no live workers remain.
+Passing only a name is reconnect-only unless the manager has already created or loaded that environment.
+Use plain `env.launch()` for non-persistent workers.
 Persistent workers use authenticated local TCP connections with a root-local auth key stored under `wetlands/state/auth.key`.
 The API still executes arbitrary Python in the target environment, so it is intended for trusted local use.
 

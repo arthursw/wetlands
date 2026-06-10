@@ -1,5 +1,7 @@
 import re
 import platform
+import time
+from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 import subprocess
@@ -252,6 +254,8 @@ class EnvironmentManager:
         """
         if not sys.version.startswith(dependencies.get("python", "").replace("=", "")):
             return False
+        if len(dependencies.get("local", [])) > 0:
+            return False
 
         conda_dependencies, condaDependenciesNoDeps, hasCondaDependencies = self.dependency_manager.format_dependencies(
             "conda", dependencies, False, False
@@ -479,7 +483,12 @@ class EnvironmentManager:
 
         logger.log_environment(f"Creating environment '{name}'", name, stage="create")
         log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": name, "stage": "install"}
-        self.command_executor.execute_commands(create_env_commands, wait=True, log_context=log_context)
+        try:
+            self.command_executor.execute_commands(create_env_commands, wait=True, log_context=log_context)
+        except Exception:
+            if self.environments.get(name) is environment:
+                del self.environments[name]
+            raise
         logger.log_environment(f"Environment '{name}' created successfully", name, stage="create")
         return self.environments[name]
 
@@ -553,6 +562,105 @@ class EnvironmentManager:
             raise Exception(f"No live authenticated persistent workers found for environment '{name}'.") from e
         self.environments[name] = environment
         return environment
+
+    def launch_or_attach(
+        self,
+        environment: str | Environment,
+        additional_activate_commands: Commands = {},
+        *,
+        max_workers: int = 1,
+        worker_env: Callable[[int], dict[str, str]] | None = None,
+        worker_timeout: float | None = None,
+        attach_wait: float = 10.0,
+        attach_retry_interval: float = 0.25,
+    ) -> Environment:
+        """Attach to live persistent workers, or launch persistent workers when no live workers exist."""
+        if attach_wait < 0:
+            raise Exception("attach_wait must be greater than or equal to 0.")
+        if attach_retry_interval <= 0:
+            raise Exception("attach_retry_interval must be greater than 0.")
+
+        if isinstance(environment, Environment):
+            name = environment.name
+            launch_environment: Environment | None = environment
+        elif isinstance(environment, str):
+            name = environment
+            launch_environment = self.environments.get(name)
+        else:
+            raise Exception("environment must be an environment name or an Environment object.")
+
+        known_environment = self.environments.get(name, launch_environment)
+        if known_environment is not None and known_environment.launched():
+            return known_environment
+        if launch_environment is not None and launch_environment.launched():
+            return launch_environment
+        if isinstance(known_environment, InternalEnvironment):
+            return known_environment
+        if isinstance(launch_environment, InternalEnvironment):
+            return launch_environment
+
+        deadline = time.monotonic() + attach_wait
+        attach_error: Exception | None = None
+        while True:
+            try:
+                return self.attach(name)
+            except Exception as e:
+                attach_error = e
+                if not runtime_state.live_workers_for_env(self.wetlands_instance_path, name):
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise Exception(
+                        f"Persistent workers exist for environment '{name}' but could not be attached yet. "
+                        "Try again later or stop them with env.exit() before launching new persistent workers."
+                    ) from attach_error
+                time.sleep(min(attach_retry_interval, remaining))
+
+        if launch_environment is None:
+            raise Exception(
+                f"Cannot launch environment '{name}' from a name alone because this manager has not created or loaded it. "
+                "Pass an Environment object or call create() or load() before launch_or_attach()."
+            ) from attach_error
+
+        if not isinstance(launch_environment, ExternalEnvironment):
+            return launch_environment
+
+        try:
+            launch_environment.launch(
+                additional_activate_commands,
+                max_workers=max_workers,
+                worker_env=worker_env,
+                worker_timeout=worker_timeout,
+                persistent=True,
+            )
+        except Exception as launch_error:
+            if "Live persistent workers already exist" in str(launch_error):
+                return self._retry_attach_until_deadline(name, deadline, attach_retry_interval, launch_error)
+            raise
+        self.environments[name] = launch_environment
+        return launch_environment
+
+    def _retry_attach_until_deadline(
+        self,
+        name: str,
+        deadline: float,
+        attach_retry_interval: float,
+        original_error: Exception,
+    ) -> Environment:
+        last_error = original_error
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise Exception(
+                    f"Persistent workers for environment '{name}' could not be attached before attach_wait expired "
+                    "after another persistent launch was detected."
+                ) from last_error
+
+            time.sleep(min(attach_retry_interval, remaining))
+            try:
+                return self.attach(name)
+            except Exception as attach_error:
+                last_error = attach_error
 
     def install(
         self, environment: Environment, dependencies: Dependencies, additional_install_commands: Commands = {}

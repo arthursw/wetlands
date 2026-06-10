@@ -256,9 +256,15 @@ class ExternalEnvironment(Environment):
             port = 0
 
         if process.poll() is not None:
-            raise Exception(f"Worker {index} exited with return code {process.returncode}.")
+            raise Exception(
+                f"Worker {index} exited with return code {process.returncode} before reporting a port."
+                f"{self._worker_startup_failure_details(process, process_logger)}"
+            )
         if port == 0:
-            raise Exception(f"Could not find the server port for worker {index}.")
+            raise Exception(
+                f"Could not find the server port for worker {index}."
+                f"{self._worker_startup_failure_details(process, process_logger)}"
+            )
 
         authkey = self._authkey or runtime_state.load_or_create_root_authkey(self.environment_manager.wetlands_instance_path)
         connection = self._connect_worker(port, authkey)
@@ -277,6 +283,24 @@ class ExternalEnvironment(Environment):
 
         self._start_reader_thread(worker)
         return worker
+
+    def _worker_startup_failure_details(self, process: subprocess.Popen, process_logger: ProcessLogger) -> str:
+        details: list[str] = []
+        script_path = getattr(process, "_wetlands_script_path", None)
+        if script_path:
+            details.append(f"Startup script: {script_path}")
+
+        try:
+            output = process_logger.get_output()
+        except Exception:
+            output = []
+        if output:
+            tail = [str(line) for line in output[-20:]]
+            details.append("Recent worker output:\n" + "\n".join(tail))
+
+        if not details:
+            return ""
+        return "\n" + "\n".join(details)
 
     def _start_reader_thread(self, worker: _Worker) -> None:
         """Start the IPC reader thread for one worker."""

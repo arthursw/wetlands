@@ -22,6 +22,11 @@ def test_execute_commands_failure(executor):
     assert process.returncode == 1
 
 
+def test_execute_commands_wait_failure_raises(executor):
+    with pytest.raises(Exception, match="failed"):
+        executor.execute_commands(["echo dependency solve failed", "exit 1"], wait=True)
+
+
 def test_get_output_success(executor):
     output = executor.execute_commands_and_get_output(["echo Hello"])
     assert output == ["Hello"]

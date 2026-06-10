@@ -145,6 +145,44 @@ def test_create_dependencies_not_met_create_external(environment_manager_fixture
     assert any("pandas" in cmd for cmd in command_list if "pip" in cmd and "install" in cmd)
 
 
+def test_create_includes_local_dependency_commands(environment_manager_fixture, monkeypatch, tmp_path):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "local-package-env"
+    local_path = tmp_path / "local package"
+    local_path.mkdir()
+    dependencies: Dependencies = {
+        "local": [
+            {"name": "local-package", "path": local_path},
+        ],
+    }
+
+    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+
+    manager.create(env_name, dependencies=dependencies)
+
+    mock_execute.assert_called()
+    called_args, _ = mock_execute.call_args
+    command_list = called_args[0]
+    assert any(f"pip install  -e {shell_quote(local_path.resolve())}" == cmd for cmd in command_list)
+
+
+def test_create_raises_and_does_not_report_success_when_install_commands_fail(
+    environment_manager_fixture, monkeypatch, caplog
+):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "broken-env"
+    dependencies: Dependencies = {"pip": ["missing-package==0"]}
+    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
+    mock_execute.side_effect = Exception("dependency solving failed")
+
+    with caplog.at_level("INFO"):
+        with pytest.raises(Exception, match="dependency solving failed"):
+            manager.create(env_name, dependencies=dependencies)
+
+    assert env_name not in manager.environments
+    assert f"Environment '{env_name}' created successfully" not in caplog.text
+
+
 def test_create_with_python_version(environment_manager_fixture, monkeypatch):
     manager, mock_execute_output, _ = environment_manager_fixture
     env_name = "py-versioned-env"
@@ -245,6 +283,19 @@ def test_create_with_use_existing_returns_main_env(environment_manager_fixture, 
     assert env is manager.main_environment
     # Should not execute any creation commands
     mock_execute_output.assert_not_called()
+
+
+def test_create_with_use_existing_creates_new_for_local_dependencies(environment_manager_fixture, tmp_path):
+    manager, mock_execute, _ = environment_manager_fixture
+    local_path = tmp_path / "local package"
+    local_path.mkdir()
+    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path}]}
+
+    env = manager.create("new_env", dependencies=dependencies, use_existing=True)
+
+    assert isinstance(env, ExternalEnvironment)
+    assert env.name == "new_env"
+    mock_execute.assert_called_once()
 
 
 def test_create_with_use_existing_returns_existing_env(environment_manager_fixture, monkeypatch):

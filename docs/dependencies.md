@@ -28,19 +28,39 @@ Represents an individual dependency with additional metadata:
 
 ---
 
+### LocalDependency
+```python
+class LocalDependency(TypedDict):
+    name: str
+    path: str | Path
+    editable: NotRequired[bool]
+```
+
+Represents a local Python package to install into the environment:
+
+- **name** *(str)*: The package name. Wetlands requires this explicitly so Pixi can record deterministic PEP 508 specs.
+- **path** *(str | Path)*: Path to the local package directory. Wetlands resolves it to an absolute path before generating install commands.
+- **editable** *(optional bool)*: Whether to install the package in editable mode. Defaults to `True`.
+
+---
+
 ### Dependencies
 ```python
 class Dependencies(TypedDict):
     python: NotRequired[str]
     conda: NotRequired[list[str | Dependency]]
+    channels: NotRequired[list[str]]
     pip: NotRequired[list[str | Dependency]]
+    local: NotRequired[list[LocalDependency]]
 ```
 
 Top-level dependency configuration:
 
 - **python** *(optional str)*: Specifies the Python version required (e.g., `"==3.9"`).
 - **conda** *(optional list)*: Conda dependencies (package names or `Dependency` objects).
+- **channels** *(optional list)*: Additional Conda channels to configure for Conda dependencies.
 - **pip** *(optional list)*: Pip dependencies (package names or `Dependency` objects).
+- **local** *(optional list)*: Local Python packages to install from paths.
 
 ---
 
@@ -63,6 +83,10 @@ dependencies: Dependencies = {
         "stardist==0.9.1",
         {"name": "some-macos-only-package", "platforms": ["osx-arm64"]},
         {"name": "helper", "optional": True, "dependencies": False}
+    ],
+    "local": [
+        {"name": "my-package", "path": "../my-package"},
+        {"name": "other-package", "path": "../other-package", "editable": False},
     ]
 }
 ```
@@ -80,6 +104,13 @@ dependencies: Dependencies = {
     - `"csbdeep==0.8.1"` and `"stardist==0.9.1"`: Required deep learning packages for image restoration and segmentation.
     - `"some-macos-only-package"`: Only installed on **macOS Apple Silicon** (`osx-arm64`).
     - `helper`: An **optional** pip package which much be installed without its dependencies.
+- `local` section:
+    - `my-package`: Installed from `../my-package` in editable mode, which is the default.
+    - `other-package`: Installed from `../other-package` in non-editable mode.
+
+Wetlands installs local dependencies after ordinary Conda and pip dependencies.
+With Micromamba, local dependencies are installed in the activated environment using `pip install`, with `-e` for editable packages.
+With Pixi, local dependencies are added to the Pixi manifest using `pixi add --pypi`; editable packages include `--editable`, and paths are recorded as `name @ file://...` PEP 508 specs.
 
 
 ## ✅ Usage Recommendations
@@ -87,3 +118,4 @@ dependencies: Dependencies = {
 - Use `platforms` to restrict platform-specific packages (e.g., `pyobjc` for macOS).
 - Use `optional` for optional feature packages.
 - Use `dependencies=False` to only install the package without its dependencies.
+- Use `local` for local project packages that should be installed automatically when the environment is created or updated.

@@ -324,11 +324,11 @@ class TestLogContextPropagation:
         try:
             # Execute commands in different contexts
             process1 = executor.execute_commands(
-                ["python", "-c", "print('env1_output')"], log_context={"env_name": "env1"}, wait=True
+                ["python -c \"print('env1_output')\""], log_context={"env_name": "env1"}, wait=True
             )
 
             process2 = executor.execute_commands(
-                ["python", "-c", "print('env2_output')"], log_context={"env_name": "env2"}, wait=True
+                ["python -c \"print('env2_output')\""], log_context={"env_name": "env2"}, wait=True
             )
 
             time.sleep(0.2)

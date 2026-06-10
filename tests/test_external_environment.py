@@ -119,6 +119,37 @@ def test_launch_worker_uses_authenticated_client(tmp_path):
     mock_client.assert_called_once_with(("localhost", 5000), authkey=b"root-auth-key")
 
 
+def test_launch_worker_port_failure_includes_output_tail_and_script_path(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+    mock_process.returncode = None
+    mock_process._wetlands_script_path = "/tmp/wetlands-worker-start.sh"
+
+    mock_process_logger = MagicMock()
+    mock_process_logger.wait_for_line.return_value = None
+    mock_process_logger.get_output.return_value = [
+        "Traceback (most recent call last):",
+        "ModuleNotFoundError: No module named 'wetlands'",
+    ]
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+
+    with pytest.raises(Exception) as exc_info:
+        env._launch_worker(0, {}, None)
+
+    message = str(exc_info.value)
+    assert "Could not find the server port for worker 0" in message
+    assert "ModuleNotFoundError: No module named 'wetlands'" in message
+    assert "/tmp/wetlands-worker-start.sh" in message
+
+
 def test_persistent_launch_records_worker_metadata(tmp_path):
     mock_process = MagicMock()
     mock_process.pid = 12345

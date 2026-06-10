@@ -55,6 +55,20 @@ env = environment_manager.create(
 )
 ```
 
+Local Python packages can be installed at creation time with the `local` section.
+Local dependencies default to editable installs:
+
+```python
+env = environment_manager.create(
+    "project_env",
+    {
+        "python": "==3.11",
+        "pip": ["numpy"],
+        "local": [{"name": "my-package", "path": "../my-package"}],
+    },
+)
+```
+
 !!! note
 
     If a `main_conda_environment_path` was provided when instanciating the `EnvironmentManager`, Wetlands will check if `cellpose==3.1.0` is already installed in the main environment and return it if it is the case. If `main_conda_environment_path` is not provided but the required dependencies are only pip packages, Wetlands will check if the dependencies are installed in the current python environment and return it if it is the case.
@@ -91,7 +105,7 @@ For Wetlands to execute code within the isolated environment, we need to launch 
 env.launch()
 ```
 
-!!! note
+!!! note "Parallel workers and health checks"
 
     By default, `launch()` starts a single worker process. For parallel execution, you can start multiple workers sharing the same Conda environment:
 
@@ -113,13 +127,23 @@ env.launch()
 
     Wetlands runs a background health monitor that checks all workers periodically. If a worker process crashes or exceeds the inactivity timeout, the monitor fails the active task, removes the dead worker, and launches a replacement automatically. See [Worker health monitoring](tasks.md#worker-health-monitoring) for details.
 
-    For trusted local workflows that need workers to survive the current manager process, launch persistent workers:
+!!! note "Persistent workers and reconnect"
+
+    By default, `env.exit()` stops workers when you are done.
+    For trusted local workflows that need workers to survive the current manager process, launch persistent workers directly with `persistent=True` or use `launch_or_attach()` to attach to existing persistent workers and launch them when needed:
+
+    ```python
+    env = manager.launch_or_attach(env, max_workers=2)
+    ```
+
+    If you only want to launch new persistent workers and do not need attach-first behavior, call `launch()` directly:
 
     ```python
     env.launch(max_workers=2, persistent=True)
     ```
 
-    Persistent workers are recorded under the Wetlands instance path and can be reattached later with [`EnvironmentManager.attach()`][wetlands.environment_manager.EnvironmentManager.attach].
+    Persistent workers are recorded under the Wetlands instance path and can be reattached later with [`EnvironmentManager.launch_or_attach()`][wetlands.environment_manager.EnvironmentManager.launch_or_attach] or [`EnvironmentManager.attach()`][wetlands.environment_manager.EnvironmentManager.attach].
+    Passing only a name to `launch_or_attach()` is reconnect-only unless the manager already created or loaded that environment.
     Use [`env.detach()`][wetlands.environment.Environment.detach] to close the current manager's local connections without stopping persistent workers.
     Use [`env.exit()`][wetlands.environment.Environment.exit] when you want to stop the workers and remove their registry entries.
 
@@ -317,7 +341,7 @@ The segmentation results (masks) are saved to disk, potentially renaming the out
 
 #### Summary of Example 1 Flow:
 
-The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment.Environment.launch] starts one or more worker processes inside that environment. [`env.submit()`][wetlands.environment.Environment.submit] dispatches work and returns a [`Task`][wetlands.task.Task] for non-blocking control, while [`env.import_module()`][wetlands.environment.Environment.import_module] and [`env.execute()`][wetlands.environment.Environment.execute] provide blocking shortcuts. [`env.exit()`][wetlands.environment.Environment.exit] cleans up all worker processes, while persistent workflows can use [`env.detach()`][wetlands.environment.Environment.detach] and [`EnvironmentManager.attach()`][wetlands.environment_manager.EnvironmentManager.attach] to reconnect later.
+The main script uses [`EnvironmentManager`][wetlands.environment_manager.EnvironmentManager] to prepare an isolated environment. [`env.launch()`][wetlands.environment.Environment.launch] starts one or more non-persistent worker processes inside that environment, while [`EnvironmentManager.launch_or_attach()`][wetlands.environment_manager.EnvironmentManager.launch_or_attach] starts or reconnects persistent workers. [`env.submit()`][wetlands.environment.Environment.submit] dispatches work and returns a [`Task`][wetlands.task.Task] for non-blocking control, while [`env.import_module()`][wetlands.environment.Environment.import_module] and [`env.execute()`][wetlands.environment.Environment.execute] provide blocking shortcuts. [`env.exit()`][wetlands.environment.Environment.exit] cleans up all worker processes, while persistent workflows can use [`env.detach()`][wetlands.environment.Environment.detach] and [`EnvironmentManager.attach()`][wetlands.environment_manager.EnvironmentManager.attach] to reconnect later.
 
 ### Next Steps
 

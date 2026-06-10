@@ -115,6 +115,18 @@ def test_environment_validates_requirements_main_env_empty_deps(environment_mana
     mock_execute_output.assert_not_called()
 
 
+def test_environment_validates_requirements_local_deps_are_not_reused(environment_manager_fixture, tmp_path):
+    manager, mock_execute_output, _ = environment_manager_fixture
+    local_path = tmp_path / "local-package"
+    local_path.mkdir()
+    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path}]}
+
+    result = manager._environment_validates_requirements(manager.main_environment, dependencies)
+
+    assert result is False
+    mock_execute_output.assert_not_called()
+
+
 def test_environment_validates_requirements_main_env_no_path_conda_fails(environment_manager_fixture):
     manager, mock_execute_output, _ = environment_manager_fixture
     manager.main_environment.path = None

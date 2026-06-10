@@ -314,14 +314,26 @@ print(f"Active workers: {env.worker_count}")
 #### Persistent workers and reconnect
 
 By default, workers are tied to the current `EnvironmentManager` connection and [`env.exit()`][wetlands.environment.Environment.exit] stops them.
-For trusted local workflows where workers should remain alive after the current manager disconnects, pass `persistent=True` to `launch()`:
+For trusted local workflows where workers should remain alive after the current manager disconnects, launch persistent workers directly with `persistent=True` or use [`EnvironmentManager.launch_or_attach()`][wetlands.environment_manager.EnvironmentManager.launch_or_attach] to attach to existing persistent workers and launch them when needed:
 
 ```python
+env = manager.create("cellpose", deps)
+env = manager.launch_or_attach(env, max_workers=2)
+```
+
+If you only want to launch new persistent workers and do not need attach-first behavior, call `launch()` directly:
+
+```python
+env = manager.create("cellpose", deps)
 env.launch(max_workers=2, persistent=True)
 ```
 
 Wetlands records persistent worker metadata in `wetlands/state/workers.json` and authenticates local TCP connections with a root-local key stored in `wetlands/state/auth.key`.
 No secret is stored in `workers.json`.
+`launch_or_attach()` first tries to attach to existing live persistent workers for that environment name.
+If no live workers remain and the manager already knows the environment, it launches new persistent workers with the supplied launch options.
+Name-only use is reconnect-only unless the manager has already created or loaded that environment; pass an [`Environment`][wetlands.environment.Environment] object or call [`create()`][wetlands.environment_manager.EnvironmentManager.create] or [`load()`][wetlands.environment_manager.EnvironmentManager.load] first when a launch fallback is needed.
+Use plain [`env.launch()`][wetlands.environment.Environment.launch] for non-persistent workers.
 
 Use [`env.detach()`][wetlands.environment.Environment.detach] to close the current manager's client connections without sending `"exit"` to the workers:
 
@@ -335,12 +347,13 @@ A later manager using the same `wetlands_instance_path` can reconnect by environ
 from wetlands.environment_manager import EnvironmentManager
 
 manager = EnvironmentManager()
-env = manager.attach("cellpose")
+env = manager.launch_or_attach("cellpose")
 result = env.execute("segment.py", "segment", args=(image_path,))
 ```
 
 If all recorded workers are dead, refuse authentication, or cannot be reached, `attach()` raises a clear error and removes stale registry entries.
 If a worker is alive but still finishing work from a previous disconnected client, an attach attempt times out and leaves the registry entry in place so a later attach can succeed.
+`launch_or_attach()` waits briefly for busy live workers to become attachable and will not launch duplicate persistent workers while live records remain.
 Launching another persistent environment with the same name while live persistent workers are already recorded is refused; attach to the existing workers or stop them with `env.exit()` first.
 
 `detach()` fails any local queued or active `Task` objects because the current manager can no longer receive their results.
