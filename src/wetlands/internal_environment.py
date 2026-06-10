@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import runpy
 import sys
 import traceback
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copyreg
 from contextlib import contextmanager, suppress
 from multiprocessing import resource_tracker, shared_memory

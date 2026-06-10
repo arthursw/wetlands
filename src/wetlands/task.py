@@ -59,7 +59,7 @@ class TaskEventType(enum.Enum):
     CANCELATION = "cancelation"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TaskEvent:
     """Emitted by a Task to notify listeners of state changes."""
 
