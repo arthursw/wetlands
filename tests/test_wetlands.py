@@ -8,7 +8,7 @@ import shutil
 
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands.internal_environment import InternalEnvironment
-from wetlands._internal.exceptions import IncompatibilityException
+from wetlands._internal.exceptions import ExecutionException, IncompatibilityException
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 from wetlands.task import Task, TaskStatus, TaskEventType
@@ -491,6 +491,18 @@ def test_shared_memory_ndarray(env_manager, tmp_path):
     env = env_manager.create(env_name, dependencies)
     env.launch()
 
+    version_module_path = tmp_path / "python_version_module.py"
+    with open(version_module_path, "w") as f:
+        f.write("""
+import sys
+
+def python_version():
+    return sys.version_info[:2]
+""")
+
+    python_version_module = env.import_module(str(version_module_path))
+    remote_python_version = python_version_module.python_version()
+
     # Create a module that creates an NDArray
     module_path = tmp_path / "shared_memory_module.py"
     with open(module_path, "w") as f:
@@ -514,6 +526,12 @@ def clean():
     ndarray.unlink()
     ndarray = None
 """)
+
+    if remote_python_version < (3, 10):
+        with pytest.raises(ExecutionException, match="Python 3.10 union annotation syntax"):
+            env.execute(module_path, "create_array", args=((10, 10), "float32"))
+        env.exit()
+        return
 
     # Import the module
     shared_memory_module = env.import_module(str(module_path))

@@ -82,7 +82,32 @@ def test_task_injection_uses_parameter_name_with_postponed_annotations(tmp_path)
     assert result._task_id == "task-py39-annotations"
 
 
-def test_python39_execute_function_imports_user_module_with_pep604_annotations(tmp_path):
+def test_execute_function_imports_user_module_with_pep604_annotations_on_python310_plus(tmp_path):
+    if module_executor.sys.version_info < (3, 10):
+        pytest.skip("PEP 604 annotation evaluation requires Python 3.10+")
+
+    module_path = tmp_path / "user_pep604_module.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            class Marker:
+                pass
+
+            value: Marker | None = Marker()
+
+            def has_value():
+                return value is not None
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = module_executor.execute_function({"module_path": str(module_path), "function": "has_value"})
+
+    assert result is True
+
+
+def test_python39_execute_function_reports_modern_annotation_error(tmp_path):
     python39 = shutil.which("python3.9")
     if python39 is None:
         pytest.skip("python3.9 is not available")
@@ -108,11 +133,10 @@ def test_python39_execute_function_imports_user_module_with_pep604_annotations(t
         f"""
         from wetlands import module_executor
 
-        result = module_executor.execute_function({{
+        module_executor.execute_function({{
             "module_path": {str(module_path)!r},
             "function": "has_value",
         }})
-        assert result is True
         """
     )
 
@@ -124,25 +148,28 @@ def test_python39_execute_function_imports_user_module_with_pep604_annotations(t
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "Python 3.10 union annotation syntax" in result.stderr
+    assert "from __future__ import annotations" in result.stderr
 
 
-def test_python39_execute_function_imports_nested_import_time_pep604_annotations(tmp_path):
+def test_python39_execute_function_accepts_future_annotations(tmp_path):
     python39 = shutil.which("python3.9")
     if python39 is None:
         pytest.skip("python3.9 is not available")
     if shutil.which("uv") is None:
         pytest.skip("uv is not available")
 
-    module_path = tmp_path / "user_nested_pep604_module.py"
+    module_path = tmp_path / "user_future_annotations_module.py"
     module_path.write_text(
         textwrap.dedent(
             """
+            from __future__ import annotations
+
             class Marker:
                 pass
 
-            if True:
-                value: Marker | None = Marker()
+            value: Marker | None = Marker()
 
             def has_value():
                 return value is not None
@@ -173,118 +200,18 @@ def test_python39_execute_function_imports_nested_import_time_pep604_annotations
     assert result.returncode == 0, result.stderr
 
 
-def test_python39_execute_function_preserves_local_only_annotation_semantics(tmp_path):
+def test_python39_execute_function_preserves_non_annotation_pipe_type_error(tmp_path):
     python39 = shutil.which("python3.9")
     if python39 is None:
         pytest.skip("python3.9 is not available")
     if shutil.which("uv") is None:
         pytest.skip("uv is not available")
 
-    module_path = tmp_path / "user_local_annotation_module.py"
+    module_path = tmp_path / "user_bad_pipe_module.py"
     module_path.write_text(
         textwrap.dedent(
             """
-            class Marker:
-                pass
-
-            def has_runtime_annotations(value: int) -> int:
-                local: Marker | None = None
-                annotations = has_runtime_annotations.__annotations__
-                return annotations["value"] is int and annotations["return"] is int
-            """
-        ),
-        encoding="utf-8",
-    )
-    code = textwrap.dedent(
-        f"""
-        from wetlands import module_executor
-
-        result = module_executor.execute_function({{
-            "module_path": {str(module_path)!r},
-            "function": "has_runtime_annotations",
-            "args": [1],
-        }})
-        assert result is True
-        """
-    )
-
-    result = subprocess.run(
-        ["uv", "run", "--python", "3.9", "python", "-c", code],
-        cwd=PROJECT_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_python39_execute_function_preserves_skipped_branch_annotation_semantics(tmp_path):
-    python39 = shutil.which("python3.9")
-    if python39 is None:
-        pytest.skip("python3.9 is not available")
-    if shutil.which("uv") is None:
-        pytest.skip("uv is not available")
-
-    module_path = tmp_path / "user_skipped_annotation_module.py"
-    module_path.write_text(
-        textwrap.dedent(
-            """
-            class Marker:
-                pass
-
-            if False:
-                value: Marker | None = None
-
-            def has_runtime_annotations(value: int) -> int:
-                annotations = has_runtime_annotations.__annotations__
-                return annotations["value"] is int and annotations["return"] is int
-            """
-        ),
-        encoding="utf-8",
-    )
-    code = textwrap.dedent(
-        f"""
-        from wetlands import module_executor
-
-        result = module_executor.execute_function({{
-            "module_path": {str(module_path)!r},
-            "function": "has_runtime_annotations",
-            "args": [1],
-        }})
-        assert result is True
-        """
-    )
-
-    result = subprocess.run(
-        ["uv", "run", "--python", "3.9", "python", "-c", code],
-        cwd=PROJECT_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_python39_execute_function_preserves_caught_annotation_type_error(tmp_path):
-    python39 = shutil.which("python3.9")
-    if python39 is None:
-        pytest.skip("python3.9 is not available")
-    if shutil.which("uv") is None:
-        pytest.skip("uv is not available")
-
-    module_path = tmp_path / "user_caught_annotation_error_module.py"
-    module_path.write_text(
-        textwrap.dedent(
-            """
-            class Marker:
-                pass
-
-            try:
-                value: Marker | None = None
-            except TypeError:
-                value = "caught"
+            value = 1 | "x"
 
             def get_value():
                 return value
@@ -296,11 +223,10 @@ def test_python39_execute_function_preserves_caught_annotation_type_error(tmp_pa
         f"""
         from wetlands import module_executor
 
-        result = module_executor.execute_function({{
+        module_executor.execute_function({{
             "module_path": {str(module_path)!r},
             "function": "get_value",
         }})
-        assert result == "caught"
         """
     )
 
@@ -312,47 +238,43 @@ def test_python39_execute_function_preserves_caught_annotation_type_error(tmp_pa
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "unsupported operand type(s) for |" in result.stderr
+    assert "Python 3.10 union annotation syntax" not in result.stderr
 
 
-def test_python39_execute_function_serializes_pep604_module_import(tmp_path):
+def test_python39_execute_function_preserves_rhs_pipe_type_error_with_future_annotations(tmp_path):
     python39 = shutil.which("python3.9")
     if python39 is None:
         pytest.skip("python3.9 is not available")
     if shutil.which("uv") is None:
         pytest.skip("uv is not available")
 
-    module_path = tmp_path / "user_slow_import_module.py"
+    module_path = tmp_path / "user_future_annotation_bad_rhs_module.py"
     module_path.write_text(
         textwrap.dedent(
             """
-            import time
+            from __future__ import annotations
 
             class Marker:
                 pass
 
-            value: Marker | None = Marker()
-            time.sleep(0.2)
+            value: Marker | None = 1 | "x"
 
-            def has_value():
-                return value is not None
+            def get_value():
+                return value
             """
         ),
         encoding="utf-8",
     )
     code = textwrap.dedent(
         f"""
-        from concurrent.futures import ThreadPoolExecutor
         from wetlands import module_executor
 
-        message = {{
+        module_executor.execute_function({{
             "module_path": {str(module_path)!r},
-            "function": "has_value",
-        }}
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            results = list(executor.map(lambda _: module_executor.execute_function(message), range(2)))
-        assert results == [True, True]
+            "function": "get_value",
+        }})
         """
     )
 
@@ -364,7 +286,141 @@ def test_python39_execute_function_serializes_pep604_module_import(tmp_path):
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "unsupported operand type(s) for |" in result.stderr
+    assert "Python 3.10 union annotation syntax" not in result.stderr
+
+
+def test_python39_execute_function_reports_modern_annotation_error_in_function_signature(tmp_path):
+    python39 = shutil.which("python3.9")
+    if python39 is None:
+        pytest.skip("python3.9 is not available")
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not available")
+
+    module_path = tmp_path / "user_function_signature_annotation_module.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            class Marker:
+                pass
+
+            def run(value: Marker | None = None):
+                return value
+            """
+        ),
+        encoding="utf-8",
+    )
+    code = textwrap.dedent(
+        f"""
+        from wetlands import module_executor
+
+        module_executor.execute_function({{
+            "module_path": {str(module_path)!r},
+            "function": "run",
+        }})
+        """
+    )
+
+    result = subprocess.run(
+        ["uv", "run", "--python", "3.9", "python", "-c", code],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Python 3.10 union annotation syntax" in result.stderr
+    assert "from __future__ import annotations" in result.stderr
+
+
+def test_python39_execute_function_reports_modern_annotation_error_in_multiline_signature(tmp_path):
+    python39 = shutil.which("python3.9")
+    if python39 is None:
+        pytest.skip("python3.9 is not available")
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not available")
+
+    module_path = tmp_path / "user_multiline_signature_annotation_module.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            class Marker:
+                pass
+
+            def run(
+                value: Marker | None = None,
+            ):
+                return value
+            """
+        ),
+        encoding="utf-8",
+    )
+    code = textwrap.dedent(
+        f"""
+        from wetlands import module_executor
+
+        module_executor.execute_function({{
+            "module_path": {str(module_path)!r},
+            "function": "run",
+        }})
+        """
+    )
+
+    result = subprocess.run(
+        ["uv", "run", "--python", "3.9", "python", "-c", code],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Python 3.10 union annotation syntax" in result.stderr
+    assert "from __future__ import annotations" in result.stderr
+
+
+def test_python39_run_script_reports_modern_annotation_error(tmp_path):
+    python39 = shutil.which("python3.9")
+    if python39 is None:
+        pytest.skip("python3.9 is not available")
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not available")
+
+    script_path = tmp_path / "user_pep604_script.py"
+    script_path.write_text(
+        textwrap.dedent(
+            """
+            class Marker:
+                pass
+
+            value: Marker | None = Marker()
+            """
+        ),
+        encoding="utf-8",
+    )
+    code = textwrap.dedent(
+        f"""
+        from wetlands import module_executor
+
+        module_executor.run_script({{
+            "script_path": {str(script_path)!r},
+        }})
+        """
+    )
+
+    result = subprocess.run(
+        ["uv", "run", "--python", "3.9", "python", "-c", code],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Python 3.10 union annotation syntax" in result.stderr
+    assert "from __future__ import annotations" in result.stderr
 
 
 def test_package_metadata_declares_python39_support():

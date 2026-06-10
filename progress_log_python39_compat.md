@@ -58,21 +58,22 @@
 - Preserve normal import semantics where Python 3.9 already imports the module successfully.
 
 ### Implemented
-- Added a Python 3.9-only execution-module import fallback that compiles affected user modules with postponed annotations.
-- Limited fallback detection to import-time annotations in module/class bodies and function signatures.
-- Narrowed the no-side-effect fallback path to definitely executed import-time annotations, while preserving normal import semantics for skipped branches.
-- Preserved Python 3.9 semantics for annotation `TypeError`s intentionally caught by user `try`/`except` blocks.
-- Serialized the fallback import path per module name to match `sys.modules` behavior and avoid same-stem partial-module races.
-- Added regression tests for the reported import failure, nested import-time annotations, local/skipped-branch/caught-error annotation semantics, and concurrent import serialization.
+- Replaced the source-transforming Python 3.9 import fallback with a targeted compatibility error for user modules or scripts that use Python 3.10 union annotations in Python 3.9 environments.
+- Limited the targeted compatibility error to traceback lines whose AST node is actually an annotation using PEP 604 syntax, so ordinary invalid `|` expressions keep their original `TypeError`.
+- Covered multi-line function signatures and modules that already use postponed annotations so the diagnostic avoids common false negatives and false positives.
+- Kept normal import and script execution semantics for user code; Wetlands no longer compiles user modules with postponed annotations on their behalf.
+- Updated the shared-memory integration test so Python 3.9 environments assert the compatibility error via direct remote execution and Python 3.10+ environments keep the existing NDArray roundtrip behavior.
+- Added regression tests that Python 3.9 reports the compatibility error for modern annotations, preserves non-annotation `|` errors, accepts `from __future__ import annotations`, handles multi-line signatures, and that Python 3.10+ imports modern annotations normally.
 
 ### Learned
 - The prior compatibility pass fixed Wetlands package imports, but user-provided modules executed inside Python 3.9 workers can also contain PEP 604 annotations.
 - The full integration failure was triggered by `shared_memory_module.py` declaring `ndarray: NDArray | None = None` in a Python 3.9 worker.
-- A targeted rerun of `tests/test_wetlands.py::test_shared_memory_ndarray` passed the original import failure point, then hung later in the NDArray cleanup path; that run was stopped and should be investigated separately if it reproduces outside this fix.
+- Transforming user modules to postpone annotations preserved the reported integration path but added too much semantic complexity around skipped branches, caught annotation errors, and import concurrency.
+- The final policy is simpler: user code must be valid for the target environment Python version, or it must opt into postponed annotations itself.
 
 ### Verification
 - `python3.9 -m compileall -q src/wetlands`: passed.
-- `uv run --python 3.9 pytest tests/test_python39_compat.py`: 9 passed.
-- `uv run --python 3.9 pytest tests/test_module_executor.py tests/test_task.py`: 82 passed.
-- `uv run --python 3.13 pytest tests/test_python39_compat.py tests/test_module_executor.py tests/test_task.py`: 91 passed.
+- `uv run --python 3.9 pytest tests/test_python39_compat.py tests/test_module_executor.py tests/test_task.py`: 92 passed, 1 skipped.
+- `uv run --python 3.13 pytest tests/test_python39_compat.py tests/test_module_executor.py tests/test_task.py`: 93 passed.
 - `uv run ruff check`: passed.
+- Full integration tests, including `tests/test_wetlands.py::test_shared_memory_ndarray`, were not run in this pass by request.
