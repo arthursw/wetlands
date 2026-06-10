@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import subprocess
 import time
 import socket
@@ -6,6 +8,7 @@ from pathlib import Path
 from multiprocessing import connection as mp_connection
 from multiprocessing.connection import Client, Connection
 import functools
+import hmac
 import threading
 import queue
 from collections.abc import Callable, Iterable, Iterator
@@ -710,16 +713,22 @@ class ExternalEnvironment(Environment):
     def _answer_challenge_with_timeout(self, connection: Connection, authkey: bytes, timeout: float) -> None:
         if not isinstance(authkey, bytes):
             raise TypeError("authkey should be a byte string")
+        challenge = mp_connection._CHALLENGE if hasattr(mp_connection, "_CHALLENGE") else mp_connection.CHALLENGE
+        welcome = mp_connection._WELCOME if hasattr(mp_connection, "_WELCOME") else mp_connection.WELCOME
         message = self._recv_bytes_with_timeout(connection, timeout, 256)
-        if not message.startswith(mp_connection._CHALLENGE):
+        if not message.startswith(challenge):
             raise mp_connection.AuthenticationError(f"Protocol error, expected challenge: {message=}")
-        message = message[len(mp_connection._CHALLENGE) :]
-        if len(message) < mp_connection._MD5ONLY_MESSAGE_LENGTH:
+        message = message[len(challenge) :]
+        md5only_message_length = getattr(mp_connection, "_MD5ONLY_MESSAGE_LENGTH", None)
+        if md5only_message_length is not None and len(message) < md5only_message_length:
             raise mp_connection.AuthenticationError(f"challenge too short: {len(message)} bytes")
-        digest = mp_connection._create_response(authkey, message)
+        if hasattr(mp_connection, "_create_response"):
+            digest = mp_connection._create_response(authkey, message)
+        else:
+            digest = hmac.new(authkey, message, "md5").digest()
         connection.send_bytes(digest)
         response = self._recv_bytes_with_timeout(connection, timeout, 256)
-        if response != mp_connection._WELCOME:
+        if response != welcome:
             raise mp_connection.AuthenticationError("digest sent was rejected")
 
     def _deliver_challenge_with_timeout(
@@ -731,17 +740,26 @@ class ExternalEnvironment(Environment):
     ) -> None:
         if not isinstance(authkey, bytes):
             raise TypeError("authkey should be a byte string")
-        message = os.urandom(mp_connection.MESSAGE_LENGTH)
-        message = b"{%s}%s" % (digest_name.encode("ascii"), message)
-        connection.send_bytes(mp_connection._CHALLENGE + message)
-        response = self._recv_bytes_with_timeout(connection, timeout, 256)
-        try:
-            mp_connection._verify_challenge(authkey, message, response)
-        except mp_connection.AuthenticationError:
-            connection.send_bytes(mp_connection._FAILURE)
-            raise
+        challenge = mp_connection._CHALLENGE if hasattr(mp_connection, "_CHALLENGE") else mp_connection.CHALLENGE
+        welcome = mp_connection._WELCOME if hasattr(mp_connection, "_WELCOME") else mp_connection.WELCOME
+        failure = mp_connection._FAILURE if hasattr(mp_connection, "_FAILURE") else mp_connection.FAILURE
+        if hasattr(mp_connection, "_verify_challenge"):
+            message = os.urandom(mp_connection.MESSAGE_LENGTH)
+            message = b"{%s}%s" % (digest_name.encode("ascii"), message)
         else:
-            connection.send_bytes(mp_connection._WELCOME)
+            message = os.urandom(mp_connection.MESSAGE_LENGTH)
+        connection.send_bytes(challenge + message)
+        response = self._recv_bytes_with_timeout(connection, timeout, 256)
+        if hasattr(mp_connection, "_verify_challenge"):
+            try:
+                mp_connection._verify_challenge(authkey, message, response)
+            except mp_connection.AuthenticationError:
+                connection.send_bytes(failure)
+                raise
+        elif response != hmac.new(authkey, message, "md5").digest():
+            connection.send_bytes(failure)
+            raise mp_connection.AuthenticationError("digest received was wrong")
+        connection.send_bytes(welcome)
 
     def _ensure_debugpy_installed(self) -> None:
         """Install debugpy in the environment if it is not already installed."""
