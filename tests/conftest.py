@@ -12,36 +12,66 @@ import wetlands.environment_manager as env_mgr_module
 def pytest_addoption(parser):
     """Add custom pytest command-line options."""
     parser.addoption(
+        "--backend",
+        action="store",
+        default="all",
+        choices=("all", "pixi", "micromamba"),
+        help="Select external environment backend tests to run: all, pixi, or micromamba",
+    )
+    parser.addoption(
         "--skip-micromamba",
         action="store_true",
         default=False,
-        help="Skip micromamba tests to speed up development (run pixi tests only)",
+        help="Compatibility alias for --backend=pixi",
     )
 
 
 def pytest_configure(config):
     """Register custom markers."""
-    config.addinivalue_line("markers", "integration: mark test as an integration test that should not be mocked")
+    config.addinivalue_line(
+        "markers",
+        "integration: real external environments, pixi/micromamba commands, worker processes, or package installs",
+    )
+    config.addinivalue_line(
+        "markers",
+        "agent_integration: representative integration subset suitable for agent validation after broad changes",
+    )
+    config.addinivalue_line("markers", "compat: cross-Python compatibility tests, especially Python 3.9 subprocess runs")
+    config.addinivalue_line("markers", "manual: complete, expensive, or flaky-by-nature tests for local/manual/scheduled runs")
+    config.addinivalue_line("markers", "slow: non-manual tests expected to take noticeably longer than unit tests")
     config.addinivalue_line("markers", "micromamba: mark test as micromamba-specific")
 
 
-def pytest_generate_tests(metafunc):
-    """Filter parametrized tests based on --skip-micromamba flag."""
-    if metafunc.config.getoption("--skip-micromamba"):
-        # If test uses env_manager fixture with micromamba parameter, skip micromamba variants
-        if "env_manager" in metafunc.fixturenames:
-            # This marks that we should skip micromamba for this test
-            metafunc.config._skip_micromamba_tests = True
+def _selected_backend(config):
+    backend = config.getoption("--backend")
+    if config.getoption("--skip-micromamba"):
+        if backend not in ("all", "pixi"):
+            raise pytest.UsageError("--skip-micromamba cannot be combined with --backend=micromamba")
+        return "pixi"
+    return backend
+
+
+def _backend_from_nodeid(nodeid):
+    if "micromamba_root/" in nodeid:
+        return "micromamba"
+    if "pixi_root/" in nodeid:
+        return "pixi"
+    return None
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip tests that use micromamba parameter when --skip-micromamba is set."""
-    if config.getoption("--skip-micromamba"):
-        skip_micromamba = pytest.mark.skip(reason="Skipped with --skip-micromamba flag")
-        for item in items:
-            # Check if the test is parametrized with micromamba
-            if "micromamba_root/" in item.nodeid:
-                item.add_marker(skip_micromamba)
+    """Skip parametrized env_manager backend variants according to --backend."""
+    selected_backend = _selected_backend(config)
+    if selected_backend == "all":
+        return
+
+    skip_other_backend = pytest.mark.skip(reason=f"Skipped with --backend={selected_backend}")
+    for item in items:
+        if "env_manager" not in getattr(item, "fixturenames", ()):
+            continue
+        item_backend = _backend_from_nodeid(item.nodeid)
+        if item_backend is not None and item_backend != selected_backend:
+            item.add_marker(skip_other_backend)
 
 
 # Store original functions before mocking

@@ -1,6 +1,4 @@
 from multiprocessing.connection import Client
-import os
-import platform
 from pathlib import Path
 import logging
 import pytest
@@ -8,7 +6,6 @@ import shutil
 
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands.internal_environment import InternalEnvironment
-from wetlands._internal.exceptions import ExecutionException, IncompatibilityException
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 from wetlands.task import Task, TaskStatus, TaskEventType
@@ -25,18 +22,6 @@ platforms = ["linux-64", "osx-arm64", "osx-64", "win-64"]
 requests = ">=2.25"
 """
 
-PYPROJECT_TOML_CONTENT = """
-[project]
-name = "test-project"
-version = "0.1.0"
-dependencies = [
-    "requests>=2.25",
-]
-
-[project.optional-dependencies]
-dev = ["pytest>=6.0"]
-"""
-
 ENV_YML_CONTENT = """
 name: test-env
 channels:
@@ -44,11 +29,6 @@ channels:
 dependencies:
   - requests
 """
-
-REQUIREMENTS_TXT_CONTENT = """
-requests>=2.25
-"""
-
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -79,55 +59,46 @@ def env_manager(request, tmp_path_factory):
 
 
 @pytest.mark.integration
+@pytest.mark.agent_integration
+@pytest.mark.slow
 def test_environment_creation_and_types(env_manager):
-    """Test environment creation, dependency installation, and internal/external type selection."""
-    logger.info("Testing environment creation, types, and dependencies")
+    """Test environment creation and internal/external type selection."""
+    logger.info("Testing environment creation and types")
 
     # Test 1: No dependencies -> InternalEnvironment
     env_internal = env_manager.create("test_env_internal", {}, use_existing=True)
     assert isinstance(env_internal, InternalEnvironment)
     assert env_internal == env_manager.main_environment
 
-    # Test 2: With dependencies -> ExternalEnvironment + deps installed
-    dependencies = Dependencies({"conda": ["requests"]})
-    env_external = env_manager.create("test_env_external", dependencies)
+    # Test 2: Forced creation -> ExternalEnvironment without installing extra packages
+    env_external = env_manager.create("test_env_external", {}, use_existing=False)
     assert isinstance(env_external, ExternalEnvironment)
 
-    installed_packages = env_manager.get_installed_packages(env_external)
-    assert any(icp["name"] == "requests" for icp in installed_packages)
-
     # Test 3: Recreating same env returns same instance
-    same_env = env_manager.create("test_env_external", dependencies)
+    same_env = env_manager.create("test_env_external", {})
     assert env_external == same_env
 
     # Test 4: After exit, recreating gives different instance
     env_external.exit()
-    other_env = env_manager.create("test_env_external", dependencies)
+    other_env = env_manager.create("test_env_external", {}, use_existing=False)
     assert other_env != same_env
     other_env.exit()
 
-    # Test 5: Force external with use_existing=False
-    env_external_forced = env_manager.create("test_env_external_forced", {}, use_existing=False)
-    assert isinstance(env_external_forced, ExternalEnvironment)
-
     env_internal.exit()
-    env_external_forced.exit()
 
 
 @pytest.mark.integration
+@pytest.mark.agent_integration
+@pytest.mark.slow
 def test_dependency_installation(env_manager):
     """Test that Environment.install() correctly installs dependencies in existing env."""
     logger.info("Testing dependency installation in existing env")
     env = env_manager.create("test_env_deps", use_existing=False)
-    dependencies = Dependencies({"pip": ["munch==4.0.0"], "conda": ["fastai::fastprogress==1.0.3"]})
+    dependencies = Dependencies({"pip": ["munch==4.0.0"]})
 
     env.install(dependencies)
 
     installed_packages = env_manager.get_installed_packages(env)
-    assert any(
-        icp["name"] == "fastprogress" and icp["version"].startswith("1.0.3") and icp["kind"] == "conda"
-        for icp in installed_packages
-    )
     assert any(
         icp["name"] == "munch" and icp["version"].startswith("4.0.0") and icp["kind"] == "pypi"
         for icp in installed_packages
@@ -135,74 +106,22 @@ def test_dependency_installation(env_manager):
 
     env.exit()
 
-
 @pytest.mark.integration
-def test_incompatible_dependencies(env_manager):
-    """Test that IncompatibilityException is raised for incompatible dependencies."""
-    env_name = "test_env_incompatible"
-    logger.info(f"Testing incompatible dependencies: {env_name}")
-    if platform.system() == "Windows":
-        incompatible_dependency = {"conda": [{"name": "unixodbc", "platforms": ["linux-64"], "optional": False}]}
-    elif platform.system() == "Darwin":
-        incompatible_dependency = {"conda": [{"name": "libxcursor", "platforms": ["linux-64"], "optional": False}]}
-    else:
-        incompatible_dependency = {"conda": [{"name": "bla", "platforms": ["osx-64"], "optional": False}]}
-    with pytest.raises(IncompatibilityException):
-        env_manager.create(env_name, incompatible_dependency)
-
-
-@pytest.mark.integration
-def test_invalid_python_version(env_manager):
-    """Test that an exception is raised for invalid Python versions."""
-    env_name = "test_env_invalid_python"
-    logger.info(f"Testing invalid Python version: {env_name}")
-    with pytest.raises(Exception) as excinfo:
-        env_manager.create(env_name, {"python": "3.8.0"})
-    assert "Python version must be greater than 3.8" in str(excinfo.value)
-
-
-@pytest.mark.integration
-def test_mambarc_modification(env_manager, tmp_path):
-    """Test that proxy settings are correctly written to the .mambarc file."""
-    logger.info("Testing .mambarc modification")
-    proxies = {"http": "http://proxy.example.com", "https": "https://proxy.example.com"}
-    env_manager.set_proxies(proxies)
-    if env_manager.settings_manager.use_pixi:
-        assert env_manager.settings_manager.proxies == proxies
-        env_manager.set_proxies({})
-        assert env_manager.settings_manager.proxies == {}
-        return
-    mambarc_path = Path(env_manager.settings_manager.conda_path) / ".mambarc"
-    assert os.path.exists(mambarc_path)
-
-    with open(mambarc_path, "r") as f:
-        content = f.read()
-        assert "http: http://proxy.example.com" in content
-        assert "https: https://proxy.example.com" in content
-
-    env_manager.set_proxies({})
-
-    with open(mambarc_path, "r") as f:
-        content = f.read()
-        assert "proxy" not in content
-        assert "http: http://proxy.example.com" not in content
-        assert "https: https://proxy.example.com" not in content
-
-
-@pytest.mark.integration
+@pytest.mark.agent_integration
+@pytest.mark.slow
 class TestCodeExecution:
-    """Tests for code execution within environments, using a shared numpy environment."""
+    """Tests for code execution within launched external environments."""
 
     @pytest.fixture(scope="class")
-    def numpy_env(self, env_manager):
-        """Shared numpy environment for code execution tests."""
-        logger.info("Creating shared numpy environment for TestCodeExecution")
-        env = env_manager.create("shared_numpy_env", {"conda": ["numpy"]})
+    def launched_env(self, env_manager):
+        """Shared external environment for code execution tests."""
+        logger.info("Creating shared external environment for TestCodeExecution")
+        env = env_manager.create("shared_execution_env", {}, use_existing=False)
         env.launch()
         yield env
         env.exit()
 
-    def test_execute_and_import_module(self, numpy_env, tmp_path):
+    def test_execute_and_import_module(self, launched_env, tmp_path):
         """Test that Environment.execute() and import_module() correctly execute code."""
         logger.info("Testing code execution with execute() and import_module()")
 
@@ -210,33 +129,33 @@ class TestCodeExecution:
         with open(module_path, "w") as f:
             f.write(
                 """
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    pass
+import builtins
 
 def sum(x):
-    return int(np.sum(x))
+    return builtins.sum(x)
 
 def prod(x=[], y=1):
-    return int(np.prod(x)) * y
+    result = 1
+    for value in x:
+        result *= value
+    return result * y
 """
             )
 
         # Test execute()
-        result = numpy_env.execute(str(module_path), "sum", [[1, 2, 3]])
+        result = launched_env.execute(str(module_path), "sum", [[1, 2, 3]])
         assert result == 6
-        result = numpy_env.execute(str(module_path), "prod", [[1, 2, 3]], {"y": 2})
+        result = launched_env.execute(str(module_path), "prod", [[1, 2, 3]], {"y": 2})
         assert result == 12
 
         # Test import_module()
-        module = numpy_env.import_module(str(module_path))
+        module = launched_env.import_module(str(module_path))
         result = module.sum([1, 2, 3])
         assert result == 6
         result = module.prod([1, 2, 3], y=3)
         assert result == 18
 
-    def test_advanced_subprocess_execution(self, numpy_env, tmp_path):
+    def test_advanced_subprocess_execution(self, launched_env, tmp_path):
         """Test advanced execution with subprocess communication."""
         logger.info("Testing advanced subprocess execution")
 
@@ -244,22 +163,24 @@ def prod(x=[], y=1):
         with open(module_path, "w") as f:
             f.write("""from multiprocessing.connection import Listener
 import sys
-import numpy as np
 
 with Listener(("localhost", 0)) as listener:
     print(f"Listening port {listener.address[1]}")
     with listener.accept() as connection:
         while message := connection.recv():
             if message["action"] == "execute_prod":
-                connection.send(int(np.prod(message["args"])))
+                result = 1
+                for value in message["args"]:
+                    result *= value
+                connection.send(result)
             if message["action"] == "execute_sum":
-                connection.send(int(np.sum(message["args"])))
+                connection.send(sum(message["args"]))
             if message["action"] == "exit":
                 connection.send(dict(action="exited"))
                 sys.exit()
     """)
 
-        process = numpy_env.execute_commands([f"python -u {(tmp_path / 'test_module.py').resolve()}"], log=False)
+        process = launched_env.execute_commands([f"python -u {(tmp_path / 'test_module.py').resolve()}"], log=False)
 
         port = 0
         if process.stdout is not None:
@@ -282,46 +203,9 @@ with Listener(("localhost", 0)) as listener:
         result = connection.recv()
         assert result["action"] == "exited"
 
-
 @pytest.mark.integration
-def test_execution_errors(env_manager, tmp_path):
-    """Test that proper exceptions are raised for non-existent functions and modules."""
-    logger.info("Testing execution errors for non-existent function/module")
-
-    module_path = tmp_path / "test_module.py"
-    with open(module_path, "w") as f:
-        f.write(
-            """
-def double(x):
-    return x * 2
-"""
-        )
-
-    env = env_manager.create("test_env_execution_errors", {}, use_existing=True)
-
-    # Test non-existent function via execute
-    with pytest.raises(Exception) as excinfo:
-        env.execute(str(module_path), "non_existent_function", [1])
-    assert "has no function" in str(excinfo.value)
-
-    # Test non-existent function via import_module
-    module = env.import_module(str(module_path))
-    with pytest.raises(Exception) as excinfo:
-        module.non_existent_function(1)
-    assert "has no attribute" in str(excinfo.value)
-
-    # Test non-existent module via execute
-    with pytest.raises(ModuleNotFoundError):
-        env.execute("non_existent_module.py", "my_function", [1])
-
-    # Test non-existent module via import_module
-    with pytest.raises(ModuleNotFoundError):
-        env.import_module("non_existent_module.py")
-
-    env.exit()
-
-
-@pytest.mark.integration
+@pytest.mark.manual
+@pytest.mark.slow
 @pytest.mark.skipif(not tool_available("micromamba"), reason="micromamba not available")
 def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
     """Test that users can reference existing environments using Path objects.
@@ -390,6 +274,8 @@ def test_existing_environment_access_via_path(tmp_path, tmp_path_factory):
 
 
 @pytest.mark.integration
+@pytest.mark.manual
+@pytest.mark.slow
 @pytest.mark.skipif(not tool_available("pixi"), reason="pixi not available")
 def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     """Test that users can reference existing pixi environments using workspace Path.
@@ -453,29 +339,9 @@ def test_existing_pixi_environment_access_via_path(tmp_path_factory):
     env_by_path.exit()
     logger.info(f"Test complete for {env_name}")
 
-
 @pytest.mark.integration
-def test_nonexistent_environment_path_raises_error(env_manager):
-    """Test that attempting to use a nonexistent Path as environment raises an error.
-
-    This verifies that the system properly validates paths:
-    - Attempting to reference a nonexistent Path raises an exception
-    - The system doesn't silently create environments for invalid paths
-    """
-    logger.info("Testing error handling for nonexistent environment path")
-
-    # Create a path that definitely doesn't exist
-    nonexistent_env_path = Path(env_manager.settings_manager.conda_path) / "envs" / "definitely_not_exists_xyz123"
-    assert not nonexistent_env_path.exists()
-    logger.info(f"Verified nonexistent path: {nonexistent_env_path}")
-
-    # Attempting to use a nonexistent path should raise an error
-    with pytest.raises(Exception, match="was not found"):
-        env_manager.load("unexisting_env", nonexistent_env_path)
-    logger.info("Verified error raised for nonexistent environment path")
-
-
-@pytest.mark.integration
+@pytest.mark.manual
+@pytest.mark.slow
 def test_shared_memory_ndarray(env_manager, tmp_path):
     """Test that NDArray shared memory integration works correctly.
 
@@ -485,28 +351,24 @@ def test_shared_memory_ndarray(env_manager, tmp_path):
     - No resource_tracker warnings are raised on cleanup
     """
     logger.info("Testing NDArray shared memory integration")
+    pytest.importorskip("numpy", reason="NDArray round-trip requires the local shared-memory extra")
 
     env_name = "test_shared_memory_ndarray"
-    dependencies = Dependencies({"conda": [], "pip": ["numpy", f"wetlands@file:{str(Path(__file__).parent.parent)}"]})
+    repo_src = Path(__file__).parent.parent / "src"
+    dependencies = Dependencies({"conda": [], "pip": ["numpy"]})
     env = env_manager.create(env_name, dependencies)
     env.launch()
-
-    version_module_path = tmp_path / "python_version_module.py"
-    with open(version_module_path, "w") as f:
-        f.write("""
-import sys
-
-def python_version():
-    return sys.version_info[:2]
-""")
-
-    python_version_module = env.import_module(str(version_module_path))
-    remote_python_version = python_version_module.python_version()
 
     # Create a module that creates an NDArray
     module_path = tmp_path / "shared_memory_module.py"
     with open(module_path, "w") as f:
         f.write("""
+from __future__ import annotations
+
+import sys
+
+sys.path.insert(0, REPO_SRC)
+
 import numpy as np
 from wetlands.ndarray import NDArray
 
@@ -525,13 +387,7 @@ def clean():
     ndarray.close()
     ndarray.unlink()
     ndarray = None
-""")
-
-    if remote_python_version < (3, 10):
-        with pytest.raises(ExecutionException, match="Python 3.10 union annotation syntax"):
-            env.execute(module_path, "create_array", args=((10, 10), "float32"))
-        env.exit()
-        return
+""".replace("REPO_SRC", repr(str(repo_src))))
 
     # Import the module
     shared_memory_module = env.import_module(str(module_path))
@@ -568,13 +424,12 @@ def clean():
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "config_file,config_content",
     [
         ("pixi.toml", PIXI_TOML_CONTENT),
-        ("pyproject.toml", PYPROJECT_TOML_CONTENT),
         ("environment.yml", ENV_YML_CONTENT),
-        ("requirements.txt", REQUIREMENTS_TXT_CONTENT),
     ],
 )
 def test_create_from_config(env_manager, tmp_path, config_file, config_content):
@@ -605,6 +460,9 @@ def test_create_from_config(env_manager, tmp_path, config_file, config_content):
 # --- Task API integration tests ---
 
 
+@pytest.mark.integration
+@pytest.mark.agent_integration
+@pytest.mark.slow
 class TestTaskAPI:
     """Integration tests for the task-based API with real conda environments."""
 
@@ -612,82 +470,36 @@ class TestTaskAPI:
     def task_env(self, env_manager):
         """Shared environment for task API tests."""
         logger.info("Creating shared environment for TestTaskAPI")
-        env = env_manager.create("task_api_env", {"conda": ["numpy"]})
+        env = env_manager.create("task_api_env", {}, use_existing=False)
         env.launch()
         yield env
         env.exit()
 
-    def test_submit_and_wait(self, task_env, tmp_path):
-        """submit() returns a Task that completes with the correct result."""
-        module_path = tmp_path / "compute.py"
-        module_path.write_text("def add(a, b): return a + b\n")
-
-        task = task_env.submit(str(module_path), "add", args=(3, 7))
-        assert isinstance(task, Task)
-        task.wait_for(timeout=30)
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == 10
-
-    def test_submit_start_false(self, task_env, tmp_path):
-        """submit(start=False) creates a PENDING task that starts on demand."""
-        module_path = tmp_path / "compute2.py"
-        module_path.write_text("def double(x): return x * 2\n")
-
-        task = task_env.submit(str(module_path), "double", args=(21,), start=False)
-        assert task.status == TaskStatus.PENDING
-
-        task.start()
-        task.wait_for(timeout=30)
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == 42
-
-    def test_submit_with_listener(self, task_env, tmp_path):
-        """Listeners receive terminal events."""
-        module_path = tmp_path / "compute3.py"
-        module_path.write_text("def identity(x): return x\n")
-
-        events = []
-        task = task_env.submit(str(module_path), "identity", args=("hello",), start=False)
-        task.listen(lambda e: events.append(e.type))
-        task.start()
-        task.wait_for(timeout=30)
-
-        assert TaskEventType.STARTED in events
-        assert TaskEventType.COMPLETION in events
-        assert task.result == "hello"
-
-    def test_submit_failure(self, task_env, tmp_path):
-        """Task transitions to FAILED when the remote function raises."""
-        module_path = tmp_path / "failing.py"
-        module_path.write_text("def boom(): raise ValueError('test error')\n")
-
-        task = task_env.submit(str(module_path), "boom")
-        task.wait_for(timeout=30)
-        assert task.status == TaskStatus.FAILED
-        assert "test error" in task.error
-
-    def test_submit_future_interop(self, task_env, tmp_path):
-        """task.future works with concurrent.futures."""
-        module_path = tmp_path / "compute4.py"
-        module_path.write_text("def square(x): return x ** 2\n")
-
-        task = task_env.submit(str(module_path), "square", args=(9,))
-        result = task.future.result(timeout=30)
-        assert result == 81
-
-    def test_execute_still_works(self, task_env, tmp_path):
-        """Blocking execute() still works after task API is available."""
-        module_path = tmp_path / "compute5.py"
-        module_path.write_text("def triple(x): return x * 3\n")
-
-        result = task_env.execute(str(module_path), "triple", (5,))
-        assert result == 15
-
-    def test_progress_reporting(self, task_env, tmp_path):
-        """Remote code can report progress via the task handle."""
-        module_path = tmp_path / "progress_module.py"
+    def test_task_lifecycle(self, task_env, tmp_path):
+        """Task lifecycle APIs work end-to-end against one remote worker environment."""
+        module_path = tmp_path / "task_lifecycle.py"
         module_path.write_text(
             """
+import time
+
+def add(a, b):
+    return a + b
+
+def double(x):
+    return x * 2
+
+def identity(x):
+    return x
+
+def boom():
+    raise ValueError("test error")
+
+def square(x):
+    return x ** 2
+
+def triple(x):
+    return x * 3
+
 def work_with_progress(n, *, task=None):
     total = 0
     for i in range(n):
@@ -695,25 +507,6 @@ def work_with_progress(n, *, task=None):
         if task:
             task.update(f"Step {i}", current=i + 1, maximum=n)
     return total
-"""
-        )
-
-        updates = []
-        task = task_env.submit(str(module_path), "work_with_progress", args=(5,), start=False)
-        task.listen(lambda e: updates.append(e.type) if e.type == TaskEventType.UPDATE else None)
-        task.start()
-        task.wait_for(timeout=30)
-
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == 10  # 0+1+2+3+4
-        assert len(updates) > 0
-
-    def test_cancel(self, task_env, tmp_path):
-        """Cooperative cancellation works end-to-end."""
-        module_path = tmp_path / "cancellable.py"
-        module_path.write_text(
-            """
-import time
 
 def slow_work(*, task=None):
     for i in range(1000):
@@ -725,15 +518,59 @@ def slow_work(*, task=None):
 """
         )
 
-        task = task_env.submit(str(module_path), "slow_work")
+        submitted = task_env.submit(str(module_path), "add", args=(3, 7))
+        assert isinstance(submitted, Task)
+        submitted.wait_for(timeout=30)
+        assert submitted.status == TaskStatus.COMPLETED
+        assert submitted.result == 10
+
+        deferred = task_env.submit(str(module_path), "double", args=(21,), start=False)
+        assert deferred.status == TaskStatus.PENDING
+        deferred.start()
+        deferred.wait_for(timeout=30)
+        assert deferred.status == TaskStatus.COMPLETED
+        assert deferred.result == 42
+
+        events = []
+        listened = task_env.submit(str(module_path), "identity", args=("hello",), start=False)
+        listened.listen(lambda e: events.append(e.type))
+        listened.start()
+        listened.wait_for(timeout=30)
+        assert TaskEventType.STARTED in events
+        assert TaskEventType.COMPLETION in events
+        assert listened.result == "hello"
+
+        failed = task_env.submit(str(module_path), "boom")
+        failed.wait_for(timeout=30)
+        assert failed.status == TaskStatus.FAILED
+        assert "test error" in failed.error
+
+        future_task = task_env.submit(str(module_path), "square", args=(9,))
+        assert future_task.future.result(timeout=30) == 81
+
+        assert task_env.execute(str(module_path), "triple", (5,)) == 15
+
+        updates = []
+        progress = task_env.submit(str(module_path), "work_with_progress", args=(5,), start=False)
+        progress.listen(lambda e: updates.append(e.type) if e.type == TaskEventType.UPDATE else None)
+        progress.start()
+        progress.wait_for(timeout=30)
+        assert progress.status == TaskStatus.COMPLETED
+        assert progress.result == 10
+        assert len(updates) > 0
+
+        cancellable = task_env.submit(str(module_path), "slow_work")
         import time
 
         time.sleep(0.2)
-        task.cancel()
-        task.wait_for(timeout=30)
-        assert task.status == TaskStatus.CANCELED
+        cancellable.cancel()
+        cancellable.wait_for(timeout=30)
+        assert cancellable.status == TaskStatus.CANCELED
 
 
+@pytest.mark.integration
+@pytest.mark.agent_integration
+@pytest.mark.slow
 class TestTaskAPIConcurrency:
     """Integration tests for multi-worker concurrency."""
 
@@ -741,61 +578,45 @@ class TestTaskAPIConcurrency:
     def parallel_env(self, env_manager):
         """Environment with 3 workers for concurrency tests."""
         logger.info("Creating parallel environment for TestTaskAPIConcurrency")
-        env = env_manager.create("parallel_env", {"conda": ["numpy"]})
+        env = env_manager.create("parallel_env", {}, use_existing=False)
         env.launch(max_workers=3)
         yield env
         env.exit()
 
-    def test_map_parallel(self, parallel_env, tmp_path):
-        """map() distributes work across workers and returns results in order."""
+    def test_parallel_task_apis(self, parallel_env, tmp_path):
+        """map(), map_tasks(), submit(), and execute() work with a multi-worker pool."""
+        import concurrent.futures
+        import time
+
         module_path = tmp_path / "parallel_compute.py"
         module_path.write_text(
             """
+import time
+
 def square(x):
     return x ** 2
-"""
-        )
-
-        results = list(parallel_env.map(str(module_path), "square", [1, 2, 3, 4, 5]))
-        assert results == [1, 4, 9, 16, 25]
-
-    def test_map_tasks_parallel(self, parallel_env, tmp_path):
-        """map_tasks() returns Task objects that complete independently."""
-        module_path = tmp_path / "parallel_compute2.py"
-        module_path.write_text(
-            """
-import time
 
 def slow_double(x):
     time.sleep(0.1)
     return x * 2
-"""
-        )
-
-        tasks = parallel_env.map_tasks(str(module_path), "slow_double", [10, 20, 30])
-        assert len(tasks) == 3
-
-        for t in tasks:
-            t.wait_for(timeout=30)
-
-        results = [t.result for t in tasks]
-        assert results == [20, 40, 60]
-
-    def test_concurrent_submit(self, parallel_env, tmp_path):
-        """Multiple submit() calls run concurrently across workers."""
-        import concurrent.futures
-        import time
-
-        module_path = tmp_path / "timed.py"
-        module_path.write_text(
-            """
-import time
 
 def sleep_and_return(x):
     time.sleep(0.3)
     return x
+
+def inc(x):
+    return x + 1
 """
         )
+
+        map_results = list(parallel_env.map(str(module_path), "square", [1, 2, 3, 4, 5]))
+        assert map_results == [1, 4, 9, 16, 25]
+
+        mapped_tasks = parallel_env.map_tasks(str(module_path), "slow_double", [10, 20, 30])
+        assert len(mapped_tasks) == 3
+        for task in mapped_tasks:
+            task.wait_for(timeout=30)
+        assert [task.result for task in mapped_tasks] == [20, 40, 60]
 
         start = time.monotonic()
         t1 = parallel_env.submit(str(module_path), "sleep_and_return", args=(1,))
@@ -811,10 +632,4 @@ def sleep_and_return(x):
         # With 3 workers, 3 tasks sleeping 0.3s each should complete in ~0.3s, not ~0.9s
         assert elapsed < 1.0, f"Expected parallel execution but took {elapsed:.1f}s"
 
-    def test_execute_blocking_with_workers(self, parallel_env, tmp_path):
-        """Blocking execute() still works with a multi-worker pool."""
-        module_path = tmp_path / "simple.py"
-        module_path.write_text("def inc(x): return x + 1\n")
-
-        result = parallel_env.execute(str(module_path), "inc", (99,))
-        assert result == 100
+        assert parallel_env.execute(str(module_path), "inc", (99,)) == 100

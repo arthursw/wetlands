@@ -3,6 +3,7 @@ from __future__ import annotations
 import copyreg
 from contextlib import contextmanager, suppress
 from multiprocessing import resource_tracker, shared_memory
+from typing import Optional, Union
 
 import numpy as np
 
@@ -28,10 +29,10 @@ class NDArray:
 
     def __init__(
         self,
-        array: np.ndarray | None = None,
-        shm: shared_memory.SharedMemory | None = None,
-        shape: tuple | None = None,
-        dtype: str | type | None = None,
+        array: Optional[np.ndarray] = None,
+        shm: Optional[shared_memory.SharedMemory] = None,
+        shape: Optional[tuple] = None,
+        dtype: Optional[Union[str, type]] = None,
     ):
         if array is not None:
             if shm is None:
@@ -170,10 +171,10 @@ def _pickle_ndarray(obj: NDArray):
 
 
 def update_ndarray(
-    array: np.ndarray | None = None,
-    ndarray: NDArray | None = None,
-    shape: tuple | None = None,
-    dtype: str | type | None = None,
+    array: Optional[np.ndarray] = None,
+    ndarray: Optional[NDArray] = None,
+    shape: Optional[tuple] = None,
+    dtype: Optional[Union[str, type]] = None,
 ):
     """updates ndarray from array:
     if ndarray is None: create an NDArray from array
@@ -198,7 +199,7 @@ def update_ndarray(
         return NDArray(shape=shape, dtype=dtype)
 
 
-def create_shared_array(shape: tuple, dtype: str | type):
+def create_shared_array(shape: tuple, dtype: Union[str, type]):
     # Create the shared memory
     shm = shared_memory.SharedMemory(create=True, size=int(np.prod(shape) * np.dtype(dtype).itemsize))
     # Create a NumPy array backed by shared memory
@@ -228,7 +229,7 @@ def unwrap(shmw: dict):
 
 
 def release_shared_memory(
-    shm: shared_memory.SharedMemory | None,
+    shm: Optional[shared_memory.SharedMemory],
     unlink: bool = True,
 ):
     if shm is None:

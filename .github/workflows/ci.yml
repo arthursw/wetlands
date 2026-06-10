@@ -5,6 +5,9 @@ on:
     branches:
       - master
       - main
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
 
 permissions:
   contents: write
@@ -12,7 +15,7 @@ permissions:
 jobs:
 
   lint:
-    if: "!contains(github.event.head_commit.message, '[skip tests]')" # skip the job if the commit message contains "[skip tests]"
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip tests]')
     name: Lint
     runs-on: ubuntu-latest
     steps:
@@ -28,7 +31,7 @@ jobs:
         run: uv run ruff check
 
   test:
-    if: "!contains(github.event.head_commit.message, '[skip tests]')" # skip the job if the commit message contains "[skip tests]"
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip tests]')
     name: Test (${{ matrix.platform }} Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.platform }}
     strategy:
@@ -45,12 +48,46 @@ jobs:
       - name: Install dependencies
         run: uv pip install ".[docs]" --system
       - name: Run tests
-        run: uv run pytest tests --ignore=tests/test_wetlands.py --ignore=tests/test_installer.py
+        run: uv run pytest tests -m "not integration and not compat and not manual"
+
+  compat:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip tests]')
+    name: Python 3.9 Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv pip install ".[docs]" --system
+      - name: Run compatibility tests
+        run: UV_PROJECT_ENVIRONMENT=.venv-py39 uv run --python 3.9 pytest -m compat
+
+  agent-integration:
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    name: Agent Integration (pixi)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv pip install ".[docs]" --system
+      - name: Run pixi agent integration tests
+        run: UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --python 3.13 pytest -m "not manual and not compat and agent_integration" --backend=pixi
 
   deploy:
-    if: always() # if: always() ensures the deploy job runs even if lint and test were skipped — but still requires them to finish successfully if they did run.
+    if: github.event_name == 'push' && always() # Deploy only after push-triggered checks finish.
     name: Deploy
-    needs: [lint, test]
+    needs: [lint, test, compat]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -179,9 +179,39 @@ Check for code errors with `uv run ruff check` and format the code with `uv run 
 
 ### Tests
 
-Test Wetlands with `uv`: `uv run pytest tests/`
+Wetlands uses pytest markers to keep routine checks fast while preserving real environment coverage.
 
-To skip tests that install Conda environments, run: `uv run pytest tests/ --ignore=tests/test_wetlands.py`
+Fast unit tests skip real external environments, cross-Python subprocess checks, and manual-only tests:
+
+`uv run pytest -m "not integration and not compat and not manual"`
+
+Compatibility tests exercise cross-Python behavior, especially Python 3.9:
+
+`UV_PROJECT_ENVIRONMENT=.venv-py39 uv run --python 3.9 pytest -m compat`
+
+Agent integration runs a small representative set of real pixi environment and worker tests:
+
+`UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --python 3.13 pytest -m "not manual and not compat and (not integration or agent_integration)" --backend=pixi`
+
+Manual full suite:
+
+`uv run pytest`
+
+Manual full suite for one backend:
+
+`uv run pytest --backend=pixi`
+
+`uv run pytest --backend=micromamba`
+
+Marker categories:
+
+- `integration`: tests that use real external environments, real pixi/micromamba commands, worker processes in external environments, or real package installs.
+- `agent_integration`: a small representative integration subset agents may run after broad environment or executor changes.
+- `compat`: cross-Python compatibility tests, especially tests invoking Python 3.9.
+- `manual`: complete, expensive, or flaky-by-nature tests intended for local manual or scheduled CI runs.
+- `slow`: non-manual tests expected to take noticeably longer than normal unit tests.
+
+Agents should normally run the fast unit tests, add `compat` only when Python-version behavior changes, and run agent integration after broad environment, dependency, worker, or executor changes.
 
 For debugging with `ipdb`: `uv run pytest tests/ --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb`
 

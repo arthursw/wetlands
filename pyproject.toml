@@ -69,6 +69,14 @@ lint.ignore = ["E701", "F541"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: real external environments, pixi/micromamba commands, worker processes, or package installs",
+    "agent_integration: representative integration subset suitable for agent validation after broad changes",
+    "compat: cross-Python compatibility tests, especially Python 3.9 subprocess runs",
+    "manual: complete, expensive, or flaky-by-nature tests for local/manual/scheduled runs",
+    "slow: non-manual tests expected to take noticeably longer than unit tests",
+    "micromamba: mark test as micromamba-specific",
+]
 log_cli = true
 log_cli_level = "DEBUG"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"

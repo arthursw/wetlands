@@ -17,6 +17,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10
 
 from wetlands import module_executor
 
+pytestmark = pytest.mark.compat
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
