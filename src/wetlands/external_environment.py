@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
 
 MODULE_EXECUTOR_FILE = "module_executor.py"
-ATTACH_CONNECT_TIMEOUT = 2.0
+ATTACH_CONNECT_TIMEOUT = 5.0
 
 
 class _AttachTimeout(TimeoutError):
