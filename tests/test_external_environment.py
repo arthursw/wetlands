@@ -612,6 +612,25 @@ class TestExitWithWorkers:
             w.connection.send.assert_not_called()
             w.connection.close.assert_called_once()
 
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_detach_notifies_persistent_workers_without_exit_or_kill(self, mock_kill):
+        env = _make_env()
+        workers = [_make_mock_worker(i) for i in range(2)]
+        for worker in workers:
+            worker.persistent = True
+        env._workers = list(workers)
+        for w in workers:
+            env._idle_workers.put(w)
+
+        env.detach()
+
+        assert env._workers == []
+        assert env._idle_workers.empty()
+        mock_kill.assert_not_called()
+        for w in workers:
+            w.connection.send.assert_called_once_with({"action": "detach"})
+            w.connection.close.assert_called_once()
+
     def test_detach_fails_active_tasks(self):
         env = _make_env()
         worker = _make_mock_worker()

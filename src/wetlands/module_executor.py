@@ -419,6 +419,15 @@ def launch_listener(authkey: bytes | None = None, persistent: bool = False):
                             send_message(lock, connection, dict(action="exited"))
                             listener.close()
                             return
+
+                        elif message["action"] == "detach":
+                            logger.info("detach")
+                            if persistent:
+                                for thread in task_threads:
+                                    thread.join()
+                                task_threads.clear()
+                                break
+                            return
                 except Exception as e:
                     handle_execution_error(lock, connection, e)
 

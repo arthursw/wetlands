@@ -999,6 +999,8 @@ class ExternalEnvironment(Environment):
         for worker in list(self._workers):
             try:
                 if worker.connection and not worker.connection.closed:
+                    if worker.persistent:
+                        worker.connection.send(dict(action="detach"))
                     worker.connection.close()
             except OSError:
                 pass
