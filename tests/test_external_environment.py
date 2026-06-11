@@ -4,6 +4,7 @@ import threading
 import pytest
 from pathlib import Path
 from multiprocessing.connection import Client, Listener
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.shell import shell_quote
@@ -14,7 +15,7 @@ from wetlands.task import Task, TaskStatus
 # --- Helper to create a basic ExternalEnvironment with mocked manager ---
 
 
-def _make_env(**kwargs):
+def _make_env(**kwargs) -> Any:
     env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
     for k, v in kwargs.items():
         setattr(env, k, v)
@@ -317,7 +318,7 @@ def test_exit(mock_kill):
 # --- Worker pool tests ---
 
 
-def _make_mock_worker(index=0):
+def _make_mock_worker(index=0) -> Any:
     """Create a mock _Worker with a mock connection."""
     process = MagicMock()
     process.poll.return_value = None
@@ -644,7 +645,7 @@ class TestLaunchedWithWorkers:
         env = _make_env()
         connection = MagicMock()
         connection.closed = False
-        worker = _Worker(0, None, 5000, connection, None, pid=12345, persistent=True)
+        worker = cast(Any, _Worker(0, None, 5000, connection, None, pid=12345, persistent=True))
         env._workers = [worker]
 
         assert env.launched()
@@ -666,13 +667,14 @@ class TestLaunchedWithWorkers:
 
         server_thread = threading.Thread(target=accept_once)
         server_thread.start()
-        first_client = Client(("localhost", listener.address[1]), authkey=authkey)
+        listener_port = cast(tuple[str, int], listener.address)[1]
+        first_client = Client(("localhost", listener_port), authkey=authkey)
         env = _make_env()
 
         try:
             assert accepted.wait(timeout=1)
             with pytest.raises(TimeoutError):
-                env._connect_worker(listener.address[1], authkey, timeout=0.1)
+                env._connect_worker(listener_port, authkey, timeout=0.1)
         finally:
             first_client.close()
             release.set()
@@ -756,7 +758,7 @@ class TestRemoveDeadWorker:
         env = _make_env()
         connection = MagicMock()
         connection.closed = False
-        worker = _Worker(0, None, 5000, connection, None, pid=12345, persistent=True)
+        worker = cast(Any, _Worker(0, None, 5000, connection, None, pid=12345, persistent=True))
         env._workers = [worker]
 
         env._remove_dead_worker(worker)
@@ -794,6 +796,7 @@ class TestDeadWorkerCleanup:
         env._dispatch_to_worker(worker, task)
 
         assert task.status == TaskStatus.FAILED
+        assert task.error is not None
         assert "Failed to send" in task.error
         assert worker not in env._workers
 
@@ -908,6 +911,7 @@ class TestHealthMonitor:
                 env._try_replace_worker(w.index)
 
         assert task.status == TaskStatus.FAILED
+        assert task.error is not None
         assert "exit code" in task.error
         assert worker not in env._workers
         env._try_replace_worker.assert_called_once_with(0)
@@ -949,6 +953,7 @@ class TestHealthMonitor:
                     env._try_replace_worker(w.index)
 
         assert task.status == TaskStatus.FAILED
+        assert task.error is not None
         assert "timed out" in task.error
         assert worker not in env._workers
 
@@ -998,8 +1003,10 @@ class TestExitFailsQueuedTasks:
         env._exit()
 
         assert task1.status == TaskStatus.FAILED
+        assert task1.error is not None
         assert "shutting down" in task1.error
         assert task2.status == TaskStatus.FAILED
+        assert task2.error is not None
         assert "shutting down" in task2.error
         assert env._task_queue.empty()
 

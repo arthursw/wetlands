@@ -11,10 +11,10 @@ import sys
 from typing import Any, Literal, Union
 import json5
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ImportError:
-    import tomli as tomllib  # type: ignore
+else:
+    import tomli as tomllib
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion
@@ -487,7 +487,7 @@ class EnvironmentManager:
             return self.environments[name]
 
         if dependencies is None:
-            dependencies = {}
+            dependencies = Dependencies()
         elif not isinstance(dependencies, dict):
             raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
 
@@ -833,7 +833,9 @@ class EnvironmentManager:
             with open(wetlands_debug_ports_path, "w") as f:
                 json5.dump(wetlands_debug_ports, f, indent=4, quote_keys=True)
         except Exception as e:
-            e.add_note(f"Error while updating the debug ports file {wetlands_debug_ports_path}.")
+            add_note = getattr(e, "add_note", None)
+            if add_note is not None:
+                add_note(f"Error while updating the debug ports file {wetlands_debug_ports_path}.")
             raise e
         return
 

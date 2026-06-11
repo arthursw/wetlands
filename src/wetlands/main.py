@@ -103,9 +103,11 @@ def setup_and_launch_vscode(args):
             try:
                 existing_launch_configs = json5.load(f)
             except Exception as e:
-                e.add_note(
-                    f"The launch config file {launch_json_path} cannot be read. Try deleting or fixing it before debugging."
-                )
+                add_note = getattr(e, "add_note", None)
+                if add_note is not None:
+                    add_note(
+                        f"The launch config file {launch_json_path} cannot be read. Try deleting or fixing it before debugging."
+                    )
                 raise e
             # Find the config "Python Debugger: Remote Attach Wetlands" and replace it
             # If the config does not exist: append it to the configs

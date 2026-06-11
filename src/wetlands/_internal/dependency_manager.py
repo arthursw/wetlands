@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import platform
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+from typing_extensions import NotRequired, TypedDict
 
 from wetlands._internal.command_generator import CommandGenerator
 from wetlands._internal.shell import shell_quote
-
-try:
-    from typing import NotRequired, TypedDict, Literal  # type: ignore
-except ImportError:
-    from typing_extensions import NotRequired, TypedDict, Literal  # type: ignore
 
 from wetlands._internal.exceptions import IncompatibilityException
 
@@ -197,7 +193,7 @@ class DependencyManager:
                 ]
             for local_dependency in local_dependencies:
                 spec = f"{local_dependency['name']} @ {Path(local_dependency['path']).as_uri()}"
-                editable_arg = "--editable " if local_dependency["editable"] else ""
+                editable_arg = "--editable " if local_dependency.get("editable", True) else ""
                 install_deps_commands += [
                     f'echo "Installing local dependency..."',
                     f"{self.settings_manager.conda_bin} add --manifest-path {shell_quote(environment.path)} --pypi {editable_arg}{shell_quote(spec)}",
@@ -226,7 +222,7 @@ class DependencyManager:
                 f"pip install {proxy_args} --no-deps {' '.join(pipDependenciesNoDeps)}",
             ]
         for local_dependency in local_dependencies:
-            editable_arg = "-e " if local_dependency["editable"] else ""
+            editable_arg = "-e " if local_dependency.get("editable", True) else ""
             install_deps_commands += [
                 f'echo "Installing local dependency..."',
                 f"pip install {proxy_args} {editable_arg}{shell_quote(local_dependency['path'])}",

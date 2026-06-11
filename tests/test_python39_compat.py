@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10
-    import tomli as tomllib  # type: ignore[no-redef]
+else:
+    import tomli as tomllib
 
 from wetlands import module_executor
 

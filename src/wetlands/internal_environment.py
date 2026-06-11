@@ -86,7 +86,10 @@ class InternalEnvironment(Environment):
             except Exception as e:
                 task._set_failed(str(e), traceback.format_tb(e.__traceback__))
 
-        task._set_start_fn(lambda: self._pool.submit(_dispatch))
+        def _start() -> None:
+            self._pool.submit(_dispatch)
+
+        task._set_start_fn(_start)
         if start:
             task.start()
         return task
@@ -110,7 +113,10 @@ class InternalEnvironment(Environment):
             except Exception as e:
                 task._set_failed(str(e), traceback.format_tb(e.__traceback__))
 
-        task._set_start_fn(lambda: self._pool.submit(_dispatch))
+        def _start() -> None:
+            self._pool.submit(_dispatch)
+
+        task._set_start_fn(_start)
         if start:
             task.start()
         return task

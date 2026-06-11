@@ -3,7 +3,7 @@ from __future__ import annotations
 import copyreg
 from contextlib import contextmanager, suppress
 from multiprocessing import resource_tracker, shared_memory
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -91,7 +91,8 @@ class NDArray:
         # So we want to unregister the shm when unpickling
         try:
             # For Python >= 3.13, disable tracking (unlink when process exists) with track=False
-            shm = shared_memory.SharedMemory(name=state["name"], track=False)
+            shared_memory_factory: Any = shared_memory.SharedMemory
+            shm = shared_memory_factory(name=state["name"], track=False)
         except TypeError:
             # For Python < 3.13, unregister manually
             shm = shared_memory.SharedMemory(name=state["name"])

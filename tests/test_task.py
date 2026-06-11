@@ -238,8 +238,17 @@ class TestTaskContextManager:
         task = Task()
         started = []
         cancelled = []
-        task._set_start_fn(lambda: (started.append(True), task._set_running()))
-        task._set_cancel_fn(lambda: (cancelled.append(True), task._set_canceled()))
+
+        def start() -> None:
+            started.append(True)
+            task._set_running()
+
+        def cancel() -> None:
+            cancelled.append(True)
+            task._set_canceled()
+
+        task._set_start_fn(start)
+        task._set_cancel_fn(cancel)
 
         with task:
             assert task.status == TaskStatus.RUNNING

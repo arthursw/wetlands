@@ -1,12 +1,13 @@
 """Parser for configuration files (pixi.toml, pyproject.toml, environment.yml)."""
 
 from pathlib import Path
+import sys
 from typing import Optional, Union
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ImportError:
-    import tomli as tomllib  # type: ignore
+else:
+    import tomli as tomllib
 
 import yaml
 

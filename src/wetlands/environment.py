@@ -6,7 +6,7 @@ import ast
 from pathlib import Path
 from importlib import import_module
 from abc import abstractmethod
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any, TYPE_CHECKING, Union
 from types import ModuleType
 import inspect
@@ -84,7 +84,15 @@ class Environment:
         """
         return self.environment_manager.install(self, dependencies, additional_install_commands)
 
-    def launch(self, additional_activate_commands: Commands = {}, max_workers: int = 1, persistent: bool = False) -> None:
+    def launch(
+        self,
+        additional_activate_commands: Commands = {},
+        *,
+        max_workers: int = 1,
+        worker_env: Callable[[int], dict[str, str]] | None = None,
+        worker_timeout: float | None = None,
+        persistent: bool = False,
+    ) -> None:
         """Launch the environment, only available in [ExternalEnvironment][wetlands.external_environment.ExternalEnvironment]. Do nothing when InternalEnvironment. See [`ExternalEnvironment.launch`][wetlands.external_environment.ExternalEnvironment.launch]"""
         return
 

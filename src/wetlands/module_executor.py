@@ -47,7 +47,10 @@ def _annotation_contains_pep604_union(annotation: ast.AST | None) -> bool:
 
 
 def _node_contains_line(node: ast.AST, line_number: int) -> bool:
-    return node.lineno <= line_number <= getattr(node, "end_lineno", node.lineno)
+    node_line = getattr(node, "lineno", None)
+    if node_line is None:
+        return False
+    return node_line <= line_number <= getattr(node, "end_lineno", node_line)
 
 
 def _module_uses_future_annotations(tree: ast.Module) -> bool:
@@ -147,6 +150,7 @@ _active_tasks: dict[str, object] = {}
 port = 0
 logger = logging.getLogger("module_executor")
 _detached_stdio = False
+args: argparse.Namespace | None = None
 
 
 def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -> Path:
@@ -420,6 +424,7 @@ def launch_listener(authkey: bytes | None = None, persistent: bool = False):
 
 
 if __name__ == "__main__":
+    assert args is not None
     launch_listener(authkey=load_root_authkey(args.wetlands_instance_path), persistent=args.persistent)
 
 logger.debug("Exit")

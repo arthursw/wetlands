@@ -13,11 +13,13 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar, cast
 
 import sys
 
-if sys.version_info >= (3, 11):
+if TYPE_CHECKING:
+    from typing_extensions import Self
+elif sys.version_info >= (3, 11):
     from typing import Self
 else:
     try:
@@ -25,12 +27,15 @@ else:
     except ImportError:
         Self = Any  # type: ignore[assignment,misc]
 
-try:
+if TYPE_CHECKING:
     from wetlands._internal.exceptions import ExecutionException
-except ImportError:
-    # When loaded in isolated environments via import_from_path,
-    # wetlands package is not available. RemoteTaskHandle doesn't need it.
-    ExecutionException = Exception  # type: ignore[assignment,misc]
+else:
+    try:
+        from wetlands._internal.exceptions import ExecutionException
+    except ImportError:
+        # When loaded in isolated environments via import_from_path,
+        # wetlands package is not available. RemoteTaskHandle doesn't need it.
+        ExecutionException = Exception
 
 T = TypeVar("T")
 
@@ -89,6 +94,7 @@ class Task(Generic[T]):
         self._future: Future[T] = Future()
         self._lock = threading.RLock()
         self._done_event = threading.Event()
+        self._payload: dict[str, Any] = {}
 
         # Set by the environment before dispatch
         self._start_fn: Callable[[], None] | None = None
@@ -334,7 +340,7 @@ class Task(Generic[T]):
         """Handle an IPC message from the remote worker."""
         action = message.get("action")
         if action == "execution finished":
-            self._set_completed(message.get("result"))
+            self._set_completed(cast(T, message.get("result")))
         elif action == "error":
             self._set_failed(message.get("exception", "Unknown error"), message.get("traceback"))
         elif action == "update":

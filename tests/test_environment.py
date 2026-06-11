@@ -1,12 +1,24 @@
+from __future__ import annotations
+
 import pytest
 from pathlib import Path
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 from types import ModuleType
 from wetlands.environment import Environment
+from wetlands._internal.command_generator import Commands
 
 
 class DummyEnvironment(Environment):
-    def launch(self, additional_activate_commands={}, log_output_in_thread=True):
+    def launch(
+        self,
+        additional_activate_commands: Commands = {},
+        *,
+        max_workers: int = 1,
+        worker_env: Callable[[int], dict[str, str]] | None = None,
+        worker_timeout: float | None = None,
+        persistent: bool = False,
+    ):
         pass
 
     def execute(self, module_path, function, args=[], kwargs={}):

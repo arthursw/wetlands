@@ -6,6 +6,7 @@ import socket
 import os
 from pathlib import Path
 from multiprocessing import connection as mp_connection
+from multiprocessing.context import AuthenticationError
 from multiprocessing.connection import Client, Connection
 import functools
 import hmac
@@ -43,6 +44,14 @@ ATTACH_CONNECT_TIMEOUT = 2.0
 
 class _AttachTimeout(TimeoutError):
     """Raised when a live worker does not complete attach in time."""
+
+
+def _mp_connection_attr(*names: str) -> Any:
+    """Return the first available multiprocessing.connection attribute."""
+    for name in names:
+        if hasattr(mp_connection, name):
+            return getattr(mp_connection, name)
+    raise AttributeError(f"multiprocessing.connection has none of: {', '.join(names)}")
 
 
 def synchronized(method):
@@ -107,7 +116,7 @@ class ExternalEnvironment(Environment):
     process: subprocess.Popen | None = None
     connection: Connection | None = None
 
-    def __init__(self, name: str, path: Path, environment_manager: "EnvironmentManager") -> None:
+    def __init__(self, name: str, path: Path | None, environment_manager: "EnvironmentManager") -> None:
         super().__init__(name, path, environment_manager)
         self._lock = threading.RLock()
         self._process_logger: ProcessLogger | None = None
@@ -713,23 +722,24 @@ class ExternalEnvironment(Environment):
     def _answer_challenge_with_timeout(self, connection: Connection, authkey: bytes, timeout: float) -> None:
         if not isinstance(authkey, bytes):
             raise TypeError("authkey should be a byte string")
-        challenge = mp_connection._CHALLENGE if hasattr(mp_connection, "_CHALLENGE") else mp_connection.CHALLENGE
-        welcome = mp_connection._WELCOME if hasattr(mp_connection, "_WELCOME") else mp_connection.WELCOME
+        challenge = _mp_connection_attr("_CHALLENGE", "CHALLENGE")
+        welcome = _mp_connection_attr("_WELCOME", "WELCOME")
         message = self._recv_bytes_with_timeout(connection, timeout, 256)
         if not message.startswith(challenge):
-            raise mp_connection.AuthenticationError(f"Protocol error, expected challenge: {message=}")
+            raise AuthenticationError(f"Protocol error, expected challenge: {message=}")
         message = message[len(challenge) :]
         md5only_message_length = getattr(mp_connection, "_MD5ONLY_MESSAGE_LENGTH", None)
         if md5only_message_length is not None and len(message) < md5only_message_length:
-            raise mp_connection.AuthenticationError(f"challenge too short: {len(message)} bytes")
+            raise AuthenticationError(f"challenge too short: {len(message)} bytes")
         if hasattr(mp_connection, "_create_response"):
-            digest = mp_connection._create_response(authkey, message)
+            create_response = getattr(mp_connection, "_create_response")
+            digest = create_response(authkey, message)
         else:
             digest = hmac.new(authkey, message, "md5").digest()
         connection.send_bytes(digest)
         response = self._recv_bytes_with_timeout(connection, timeout, 256)
         if response != welcome:
-            raise mp_connection.AuthenticationError("digest sent was rejected")
+            raise AuthenticationError("digest sent was rejected")
 
     def _deliver_challenge_with_timeout(
         self,
@@ -740,25 +750,27 @@ class ExternalEnvironment(Environment):
     ) -> None:
         if not isinstance(authkey, bytes):
             raise TypeError("authkey should be a byte string")
-        challenge = mp_connection._CHALLENGE if hasattr(mp_connection, "_CHALLENGE") else mp_connection.CHALLENGE
-        welcome = mp_connection._WELCOME if hasattr(mp_connection, "_WELCOME") else mp_connection.WELCOME
-        failure = mp_connection._FAILURE if hasattr(mp_connection, "_FAILURE") else mp_connection.FAILURE
+        challenge = _mp_connection_attr("_CHALLENGE", "CHALLENGE")
+        welcome = _mp_connection_attr("_WELCOME", "WELCOME")
+        failure = _mp_connection_attr("_FAILURE", "FAILURE")
+        message_length = _mp_connection_attr("MESSAGE_LENGTH")
         if hasattr(mp_connection, "_verify_challenge"):
-            message = os.urandom(mp_connection.MESSAGE_LENGTH)
+            message = os.urandom(message_length)
             message = b"{%s}%s" % (digest_name.encode("ascii"), message)
         else:
-            message = os.urandom(mp_connection.MESSAGE_LENGTH)
+            message = os.urandom(message_length)
         connection.send_bytes(challenge + message)
         response = self._recv_bytes_with_timeout(connection, timeout, 256)
         if hasattr(mp_connection, "_verify_challenge"):
             try:
-                mp_connection._verify_challenge(authkey, message, response)
-            except mp_connection.AuthenticationError:
+                verify_challenge = getattr(mp_connection, "_verify_challenge")
+                verify_challenge(authkey, message, response)
+            except AuthenticationError:
                 connection.send_bytes(failure)
                 raise
         elif response != hmac.new(authkey, message, "md5").digest():
             connection.send_bytes(failure)
-            raise mp_connection.AuthenticationError("digest received was wrong")
+            raise AuthenticationError("digest received was wrong")
         connection.send_bytes(welcome)
 
     def _ensure_debugpy_installed(self) -> None:
