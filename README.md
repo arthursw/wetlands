@@ -137,6 +137,8 @@ env.exit()  # stop persistent workers and remove their registry entries
 Passing only a name is reconnect-only unless the manager has already created or loaded that environment.
 Use plain `env.launch()` for non-persistent workers.
 Persistent workers use authenticated local TCP connections with a root-local auth key stored under `wetlands/state/auth.key`.
+Attach makes one bounded connection attempt to each live worker.
+If a live worker is busy or cannot complete authentication, Wetlands raises an error with the worker PID, port, and commands to stop it through Wetlands or the operating system.
 The API still executes arbitrary Python in the target environment, so it is intended for trusted local use.
 
 See the `examples/` folder and the [documentation](https://arthursw.github.io/wetlands/latest/) for more detailed examples.

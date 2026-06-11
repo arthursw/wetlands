@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import platform
-import time
 from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
@@ -28,7 +27,7 @@ from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.config_parser import ConfigParser
 from wetlands._internal import runtime_state
 from wetlands.environment import Environment
-from wetlands.external_environment import ExternalEnvironment
+from wetlands.external_environment import ATTACH_CONNECT_TIMEOUT, ExternalEnvironment
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands._internal.shell import shell_quote
 from wetlands.logger import logger, enable_file_logging, LOG_SOURCE_ENVIRONMENT
@@ -620,8 +619,11 @@ class EnvironmentManager:
             self.environments[name] = ExternalEnvironment(name, environment_path, self)
         return self.environments[name]
 
-    def _attach_once(self, name: str) -> Environment:
-        """Attach to live persistent workers once for an environment name."""
+    def attach(self, name: str, *, attach_timeout: float = ATTACH_CONNECT_TIMEOUT) -> Environment:
+        """Attach to live persistent workers for an environment name."""
+        if attach_timeout <= 0:
+            raise Exception("attach_timeout must be greater than 0.")
+
         authkey = runtime_state.load_or_create_root_authkey(self.wetlands_instance_path)
         workers = runtime_state.live_workers_for_env(self.wetlands_instance_path, name)
         if not workers:
@@ -630,34 +632,48 @@ class EnvironmentManager:
         env_path = workers[0].get("env_path")
         environment = ExternalEnvironment(name, Path(env_path) if env_path else None, self)
         try:
-            environment.attach_workers(workers, authkey)
+            environment.attach_workers(workers, authkey, timeout=attach_timeout)
         except Exception as e:
+            live_workers = runtime_state.live_workers_for_env(self.wetlands_instance_path, name)
+            if live_workers:
+                raise Exception(self._persistent_attach_failure_message(name, live_workers)) from e
             raise Exception(f"No live authenticated persistent workers found for environment '{name}'.") from e
         self.environments[name] = environment
         return environment
 
-    def attach(self, name: str, *, attach_wait: float = 10.0, attach_retry_interval: float = 0.25) -> Environment:
-        """Attach to live persistent workers for an environment name."""
-        if attach_wait < 0:
-            raise Exception("attach_wait must be greater than or equal to 0.")
-        if attach_retry_interval <= 0:
-            raise Exception("attach_retry_interval must be greater than 0.")
+    def _persistent_attach_failure_message(self, name: str, workers: list[dict[str, Any]]) -> str:
+        worker_lines = []
+        pid_commands = []
+        for entry in workers:
+            worker_index = entry.get("worker_index", "<unknown>")
+            pid = entry.get("pid", "<unknown>")
+            port = entry.get("port", "<unknown>")
+            env_path = entry.get("env_path")
+            line = f"- worker {worker_index}: pid={pid}, port={port}"
+            if env_path:
+                line += f", env_path={env_path}"
+            worker_lines.append(line)
+            if isinstance(pid, int):
+                if platform.system() == "Windows":
+                    pid_commands.append(f"taskkill /PID {pid} /T /F")
+                else:
+                    pid_commands.append(f"kill {pid}")
 
-        deadline = time.monotonic() + attach_wait
-        last_error: Exception | None = None
-        while True:
-            try:
-                return self._attach_once(name)
-            except Exception as e:
-                last_error = e
-                if not runtime_state.live_workers_for_env(self.wetlands_instance_path, name):
-                    raise
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise Exception(
-                        f"Persistent workers for environment '{name}' could not be attached before attach_wait expired."
-                    ) from last_error
-                time.sleep(min(attach_retry_interval, remaining))
+        wetlands_command = (
+            f"wetlands -wip {shell_quote(self.wetlands_instance_path.resolve())} kill -n {shell_quote(name)}"
+        )
+        manual_commands = "\n".join(f"- {command}" for command in pid_commands) or "- no worker PID was recorded"
+        return (
+            f"Persistent workers for environment '{name}' are running but could not be attached.\n\n"
+            "The worker may be busy finishing a previous connection, stuck, or unable to complete authentication.\n\n"
+            "Live worker records:\n"
+            f"{chr(10).join(worker_lines)}\n\n"
+            "Options:\n"
+            "- Try again later.\n"
+            f"- Stop through Wetlands: {wetlands_command}\n"
+            "Manual stop commands:\n"
+            f"{manual_commands}"
+        )
 
     def launch_or_attach(
         self,
@@ -667,14 +683,11 @@ class EnvironmentManager:
         max_workers: int = 1,
         worker_env: Callable[[int], dict[str, str]] | None = None,
         worker_timeout: float | None = None,
-        attach_wait: float = 10.0,
-        attach_retry_interval: float = 0.25,
+        attach_timeout: float = ATTACH_CONNECT_TIMEOUT,
     ) -> Environment:
         """Attach to live persistent workers, or launch persistent workers when no live workers exist."""
-        if attach_wait < 0:
-            raise Exception("attach_wait must be greater than or equal to 0.")
-        if attach_retry_interval <= 0:
-            raise Exception("attach_retry_interval must be greater than 0.")
+        if attach_timeout <= 0:
+            raise Exception("attach_timeout must be greater than 0.")
 
         if isinstance(environment, Environment):
             name = environment.name
@@ -695,28 +708,14 @@ class EnvironmentManager:
         if isinstance(launch_environment, InternalEnvironment):
             return launch_environment
 
-        deadline = time.monotonic() + attach_wait
-        attach_error: Exception | None = None
-        while True:
-            try:
-                return self._attach_once(name)
-            except Exception as e:
-                attach_error = e
-                if not runtime_state.live_workers_for_env(self.wetlands_instance_path, name):
-                    break
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise Exception(
-                        f"Persistent workers exist for environment '{name}' but could not be attached yet. "
-                        "Try again later or stop them with env.exit() before launching new persistent workers."
-                    ) from attach_error
-                time.sleep(min(attach_retry_interval, remaining))
+        if runtime_state.live_workers_for_env(self.wetlands_instance_path, name):
+            return self.attach(name, attach_timeout=attach_timeout)
 
         if launch_environment is None:
             raise Exception(
                 f"Cannot launch environment '{name}' from a name alone because this manager has not created or loaded it. "
                 "Pass an Environment object or call create() or load() before launch_or_attach()."
-            ) from attach_error
+            )
 
         if not isinstance(launch_environment, ExternalEnvironment):
             return launch_environment
@@ -731,32 +730,11 @@ class EnvironmentManager:
             )
         except Exception as launch_error:
             if "Live persistent workers already exist" in str(launch_error):
-                return self._retry_attach_until_deadline(name, deadline, attach_retry_interval, launch_error)
+                if runtime_state.live_workers_for_env(self.wetlands_instance_path, name):
+                    return self.attach(name, attach_timeout=attach_timeout)
             raise
         self.environments[name] = launch_environment
         return launch_environment
-
-    def _retry_attach_until_deadline(
-        self,
-        name: str,
-        deadline: float,
-        attach_retry_interval: float,
-        original_error: Exception,
-    ) -> Environment:
-        last_error = original_error
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise Exception(
-                    f"Persistent workers for environment '{name}' could not be attached before attach_wait expired "
-                    "after another persistent launch was detected."
-                ) from last_error
-
-            time.sleep(min(attach_retry_interval, remaining))
-            try:
-                return self._attach_once(name)
-            except Exception as attach_error:
-                last_error = attach_error
 
     def install(
         self, environment: Environment, dependencies: Dependencies, additional_install_commands: Commands = {}

@@ -352,8 +352,9 @@ result = env.execute("segment.py", "segment", args=(image_path,))
 ```
 
 If all recorded workers are dead, refuse authentication, or cannot be reached, `attach()` raises a clear error and removes stale registry entries.
-If a worker is alive but still finishing work from a previous disconnected client, an attach attempt times out and leaves the registry entry in place so a later attach can succeed.
-`launch_or_attach()` waits briefly for busy live workers to become attachable and will not launch duplicate persistent workers while live records remain.
+If a worker is alive but still finishing work from a previous disconnected client, stuck, or unable to complete authentication, `attach()` makes one bounded attempt and then raises an error with the worker PID, port, and recovery commands.
+Timed-out live worker records are left in place so a later attach can succeed.
+`launch_or_attach()` will not launch duplicate persistent workers while live records remain.
 Launching another persistent environment with the same name while live persistent workers are already recorded is refused; attach to the existing workers or stop them with `env.exit()` first.
 
 `detach()` fails any local queued or active `Task` objects because the current manager can no longer receive their results.

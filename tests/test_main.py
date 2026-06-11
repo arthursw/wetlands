@@ -222,10 +222,10 @@ class TestListEnvironments:
 
 
 class TestKillEnvironment:
-    @patch("wetlands.main.psutil.Process")
+    @patch("wetlands.main.CommandExecutor.kill_pid")
     @patch("wetlands.main.get_matching_processes")
     @patch("wetlands.main.get_wetlands_instance_paths")
-    def test_kill_environment_single_process(self, mock_get_paths, mock_get_processes, mock_process_class):
+    def test_kill_environment_single_process(self, mock_get_paths, mock_get_processes, mock_kill_pid):
         """Test killing a single matching process"""
         args = MagicMock()
         args.name = "test_env"
@@ -234,13 +234,6 @@ class TestKillEnvironment:
 
         mock_process = MagicMock()
         mock_process.pid = 1234
-        mock_parent_process = MagicMock()
-        mock_child_process = MagicMock()
-
-        mock_parent_process.children.return_value = [mock_child_process]
-        mock_parent_process.is_running.return_value = True
-        mock_child_process.is_running.return_value = True
-        mock_process_class.return_value = mock_parent_process
 
         mock_get_processes.return_value = [
             {
@@ -257,8 +250,7 @@ class TestKillEnvironment:
         mock_get_paths.return_value = ["/tmp/wetlands"]
 
         kill_environment(args)
-        mock_child_process.kill.assert_called_once()
-        mock_parent_process.kill.assert_called_once()
+        mock_kill_pid.assert_called_once_with(1234)
 
     @patch("wetlands.main.get_matching_processes")
     def test_kill_environment_no_process_found(self, mock_get_processes):

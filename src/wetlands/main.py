@@ -8,6 +8,8 @@ import psutil
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
+from wetlands._internal.command_executor import CommandExecutor
+
 
 def process_match(process_args_list: list[str], name: str | None = None):
     # Ignore non python processes
@@ -312,12 +314,7 @@ def kill_environment(args):
         )
         return
 
-    parent = psutil.Process(process.pid)
-    for child in parent.children(recursive=True):  # Get all child processes
-        if child.is_running():
-            child.kill()
-    if parent.is_running():
-        parent.kill()
+    CommandExecutor.kill_pid(process.pid)
     return
 
 

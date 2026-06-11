@@ -144,6 +144,8 @@ env.launch()
 
     Persistent workers are recorded under the Wetlands instance path and can be reattached later with [`EnvironmentManager.launch_or_attach()`][wetlands.environment_manager.EnvironmentManager.launch_or_attach] or [`EnvironmentManager.attach()`][wetlands.environment_manager.EnvironmentManager.attach].
     Passing only a name to `launch_or_attach()` is reconnect-only unless the manager already created or loaded that environment.
+    Attach makes one bounded connection attempt to each live worker.
+    If a live worker is busy or cannot complete authentication, Wetlands raises an error with the worker PID, port, and commands to stop it through Wetlands or the operating system.
     Use [`env.detach()`][wetlands.environment.Environment.detach] to close the current manager's local connections without stopping persistent workers.
     Use [`env.exit()`][wetlands.environment.Environment.exit] when you want to stop the workers and remove their registry entries.
 

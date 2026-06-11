@@ -638,7 +638,12 @@ class ExternalEnvironment(Environment):
         """
         return [self.submit(module_path, function, args=(item,)) for item in iterable]
 
-    def attach_workers(self, worker_entries: Iterable[dict[str, Any]], authkey: bytes) -> None:
+    def attach_workers(
+        self,
+        worker_entries: Iterable[dict[str, Any]],
+        authkey: bytes,
+        timeout: float = ATTACH_CONNECT_TIMEOUT,
+    ) -> None:
         """Attach this environment to existing persistent worker processes."""
         self._persistent = True
         self._authkey = authkey
@@ -647,7 +652,7 @@ class ExternalEnvironment(Environment):
             worker_index = entry.get("worker_index", "<unknown>")
             port = entry.get("port", "<unknown>")
             try:
-                worker = self._attach_worker(entry, authkey)
+                worker = self._attach_worker(entry, authkey, timeout=timeout)
             except _AttachTimeout as e:
                 logger.warning(
                     "Timed out attaching to persistent worker %s for environment '%s' on port %s: %s",
@@ -692,8 +697,13 @@ class ExternalEnvironment(Environment):
         )
         self._health_thread.start()
 
-    def _attach_worker(self, entry: dict[str, Any], authkey: bytes) -> _Worker:
-        connection = self._connect_worker(int(entry["port"]), authkey, timeout=ATTACH_CONNECT_TIMEOUT)
+    def _attach_worker(
+        self,
+        entry: dict[str, Any],
+        authkey: bytes,
+        timeout: float = ATTACH_CONNECT_TIMEOUT,
+    ) -> _Worker:
+        connection = self._connect_worker(int(entry["port"]), authkey, timeout=timeout)
         worker = _Worker(
             int(entry["worker_index"]),
             None,
@@ -710,6 +720,10 @@ class ExternalEnvironment(Environment):
         if timeout is None:
             return Client(("localhost", port), authkey=authkey)
 
+        # Client() has no timeout parameter and can block during both socket
+        # connect and the multiprocessing auth handshake. Persistent attach uses
+        # this bounded equivalent so a busy or stale worker can produce an
+        # actionable error instead of hanging the caller.
         address = ("localhost", port)
         sock = socket.socket(socket.AF_INET)
         try:

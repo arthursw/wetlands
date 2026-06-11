@@ -214,7 +214,7 @@ class CommandExecutor:
                 else ["/bin/bash", tmp.name]
             )
             if not self._is_windows():
-                subprocess.run(["chmod", "u+x", tmp.name])
+                Path(tmp.name).chmod(0o700)
             logger.debug(f"Script file: {tmp.name}")
 
             if remove_python_env_vars:
