@@ -620,8 +620,8 @@ class EnvironmentManager:
             self.environments[name] = ExternalEnvironment(name, environment_path, self)
         return self.environments[name]
 
-    def attach(self, name: str) -> Environment:
-        """Attach to live persistent workers for an environment name."""
+    def _attach_once(self, name: str) -> Environment:
+        """Attach to live persistent workers once for an environment name."""
         authkey = runtime_state.load_or_create_root_authkey(self.wetlands_instance_path)
         workers = runtime_state.live_workers_for_env(self.wetlands_instance_path, name)
         if not workers:
@@ -635,6 +635,29 @@ class EnvironmentManager:
             raise Exception(f"No live authenticated persistent workers found for environment '{name}'.") from e
         self.environments[name] = environment
         return environment
+
+    def attach(self, name: str, *, attach_wait: float = 10.0, attach_retry_interval: float = 0.25) -> Environment:
+        """Attach to live persistent workers for an environment name."""
+        if attach_wait < 0:
+            raise Exception("attach_wait must be greater than or equal to 0.")
+        if attach_retry_interval <= 0:
+            raise Exception("attach_retry_interval must be greater than 0.")
+
+        deadline = time.monotonic() + attach_wait
+        last_error: Exception | None = None
+        while True:
+            try:
+                return self._attach_once(name)
+            except Exception as e:
+                last_error = e
+                if not runtime_state.live_workers_for_env(self.wetlands_instance_path, name):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise Exception(
+                        f"Persistent workers for environment '{name}' could not be attached before attach_wait expired."
+                    ) from last_error
+                time.sleep(min(attach_retry_interval, remaining))
 
     def launch_or_attach(
         self,
@@ -676,7 +699,7 @@ class EnvironmentManager:
         attach_error: Exception | None = None
         while True:
             try:
-                return self.attach(name)
+                return self._attach_once(name)
             except Exception as e:
                 attach_error = e
                 if not runtime_state.live_workers_for_env(self.wetlands_instance_path, name):
@@ -731,7 +754,7 @@ class EnvironmentManager:
 
             time.sleep(min(attach_retry_interval, remaining))
             try:
-                return self.attach(name)
+                return self._attach_once(name)
             except Exception as attach_error:
                 last_error = attach_error
 

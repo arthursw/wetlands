@@ -236,6 +236,32 @@ class TestPersistentAttach:
 
         assert runtime_state.load_workers(manager.wetlands_instance_path)["workers"] == {}
 
+    def test_attach_retries_while_persistent_worker_remains_live(
+        self, environment_manager_fixture, tmp_path, monkeypatch
+    ):
+        manager = environment_manager_fixture
+        manager.wetlands_instance_path = tmp_path / "wetlands"
+        runtime_state.load_or_create_root_authkey(manager.wetlands_instance_path)
+        runtime_state.record_worker(
+            manager.wetlands_instance_path,
+            env_name="cellpose",
+            env_path=tmp_path / "envs" / "cellpose",
+            worker_index=0,
+            pid=12345,
+            port=53122,
+            persistent=True,
+        )
+        env = ExternalEnvironment("cellpose", tmp_path / "envs" / "cellpose", manager)
+        attach_once = MagicMock(side_effect=[Exception("worker still unwinding previous connection"), env])
+
+        monkeypatch.setattr("wetlands._internal.runtime_state.pid_exists", MagicMock(return_value=True))
+        monkeypatch.setattr(manager, "_attach_once", attach_once)
+
+        result = manager.attach("cellpose", attach_wait=1.0, attach_retry_interval=0.01)
+
+        assert result is env
+        assert attach_once.call_count == 2
+
 
 class TestLaunchOrAttach:
     def test_environment_object_launches_persistent_workers_with_launch_options(
@@ -275,13 +301,13 @@ class TestLaunchOrAttach:
         env = ExternalEnvironment("cellpose", tmp_path / "envs" / "cellpose", manager)
         env.launch = MagicMock()
         attached = ExternalEnvironment("cellpose", tmp_path / "envs" / "cellpose", manager)
-        attach = MagicMock(return_value=attached)
-        monkeypatch.setattr(manager, "attach", attach)
+        attach_once = MagicMock(return_value=attached)
+        monkeypatch.setattr(manager, "_attach_once", attach_once)
 
         result = manager.launch_or_attach(env)
 
         assert result is attached
-        attach.assert_called_once_with("cellpose")
+        attach_once.assert_called_once_with("cellpose")
         env.launch.assert_not_called()
 
     def test_already_launched_external_environment_is_returned_without_attach_or_launch(
@@ -343,17 +369,17 @@ class TestLaunchOrAttach:
         env.launch = MagicMock()
         attached = ExternalEnvironment("cellpose", tmp_path / "envs" / "cellpose", manager)
         manager.environments["cellpose"] = env
-        attach = MagicMock(side_effect=[Exception("worker busy"), attached])
+        attach_once = MagicMock(side_effect=[Exception("worker busy"), attached])
         live_workers = MagicMock(return_value=[{"env_name": "cellpose", "worker_index": 0}])
         sleep = MagicMock()
-        monkeypatch.setattr(manager, "attach", attach)
+        monkeypatch.setattr(manager, "_attach_once", attach_once)
         monkeypatch.setattr("wetlands.environment_manager.runtime_state.live_workers_for_env", live_workers)
         monkeypatch.setattr("wetlands.environment_manager.time.sleep", sleep)
 
         result = manager.launch_or_attach("cellpose", attach_wait=1.0, attach_retry_interval=0.1)
 
         assert result is attached
-        assert attach.call_count == 2
+        assert attach_once.call_count == 2
         sleep.assert_called_once_with(0.1)
         env.launch.assert_not_called()
 
@@ -364,15 +390,15 @@ class TestLaunchOrAttach:
         env = ExternalEnvironment("cellpose", tmp_path / "envs" / "cellpose", manager)
         env.launch = MagicMock()
         manager.environments["cellpose"] = env
-        attach = MagicMock(side_effect=Exception("worker busy"))
+        attach_once = MagicMock(side_effect=Exception("worker busy"))
         live_workers = MagicMock(return_value=[{"env_name": "cellpose", "worker_index": 0}])
-        monkeypatch.setattr(manager, "attach", attach)
+        monkeypatch.setattr(manager, "_attach_once", attach_once)
         monkeypatch.setattr("wetlands.environment_manager.runtime_state.live_workers_for_env", live_workers)
 
         with pytest.raises(Exception, match="Persistent workers exist .* could not be attached yet"):
             manager.launch_or_attach("cellpose", attach_wait=0)
 
-        attach.assert_called_once_with("cellpose")
+        attach_once.assert_called_once_with("cellpose")
         env.launch.assert_not_called()
 
     def test_duplicate_persistent_launch_race_retries_attach(self, environment_manager_fixture, tmp_path, monkeypatch):
@@ -381,17 +407,17 @@ class TestLaunchOrAttach:
         env.launch = MagicMock(side_effect=Exception("Live persistent workers already exist for environment 'cellpose'."))
         attached = ExternalEnvironment("cellpose", tmp_path / "envs" / "cellpose", manager)
         manager.environments["cellpose"] = env
-        attach = MagicMock(side_effect=[Exception("none yet"), Exception("worker busy"), attached])
+        attach_once = MagicMock(side_effect=[Exception("none yet"), Exception("worker busy"), attached])
         live_workers = MagicMock(side_effect=[[], [{"env_name": "cellpose", "worker_index": 0}]])
         sleep = MagicMock()
-        monkeypatch.setattr(manager, "attach", attach)
+        monkeypatch.setattr(manager, "_attach_once", attach_once)
         monkeypatch.setattr("wetlands.environment_manager.runtime_state.live_workers_for_env", live_workers)
         monkeypatch.setattr("wetlands.environment_manager.time.sleep", sleep)
 
         result = manager.launch_or_attach("cellpose", attach_wait=1.0, attach_retry_interval=0.1)
 
         assert result is attached
-        assert attach.call_count == 3
+        assert attach_once.call_count == 3
         env.launch.assert_called_once()
         assert sleep.call_count == 2
 
