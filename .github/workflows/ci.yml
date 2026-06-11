@@ -101,12 +101,13 @@ jobs:
         with:
           python-version: 3.x
 
-      - name: Set up cache
-        run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
+      - name: Set up cache key
+        id: cache-key
+        run: echo "cache_id=$(date --utc '+%V')" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache@v4
         with:
-          key: mkdocs-material-${{ env.cache_id }}
+          key: mkdocs-material-${{ steps.cache-key.outputs.cache_id }}
           path: .cache
           restore-keys: |
             mkdocs-material-
