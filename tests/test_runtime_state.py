@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 
 from wetlands._internal import runtime_state
@@ -14,7 +15,8 @@ def test_authkey_created_once_and_reused(tmp_path):
     assert second == first
     key_path = root / "state" / "auth.key"
     assert key_path.read_bytes() == first
-    assert stat.S_IMODE(key_path.stat().st_mode) & 0o777 == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(key_path.stat().st_mode) & 0o777 == 0o600
 
 
 def test_worker_registry_does_not_store_authkey(tmp_path):
