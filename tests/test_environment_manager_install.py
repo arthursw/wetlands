@@ -108,7 +108,7 @@ def test_install_in_existing_env_includes_local_dependency_commands(environment_
     env_name = "local-install-env"
     local_path = tmp_path / "local package"
     local_path.mkdir()
-    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path}]}
+    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path, "editable": True}]}
 
     env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
     manager.environments[env_name] = env
@@ -119,6 +119,26 @@ def test_install_in_existing_env_includes_local_dependency_commands(environment_
     called_args, _ = mock_execute_and_get_output.call_args
     command_list = called_args[0]
     assert any(f"pip install  -e {shell_quote(local_path.resolve())}" == cmd for cmd in command_list)
+
+
+def test_install_in_existing_env_includes_non_editable_local_dependency_commands(
+    environment_manager_fixture, tmp_path
+):
+    manager, _, mock_execute_and_get_output = environment_manager_fixture
+    env_name = "local-install-env"
+    local_path = tmp_path / "local package"
+    local_path.mkdir()
+    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path, "editable": False}]}
+
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
+    manager.environments[env_name] = env
+
+    manager.install(env, dependencies)
+
+    mock_execute_and_get_output.assert_called_once()
+    called_args, _ = mock_execute_and_get_output.call_args
+    command_list = called_args[0]
+    assert any(f"pip install  {shell_quote(local_path.resolve())}" == cmd for cmd in command_list)
 
 
 def test_install_in_main_env(environment_manager_fixture):
@@ -184,3 +204,52 @@ def test_install_in_existing_env_pixi(environment_manager_pixi_fixture):
 
     # Check for install commands targeting the environment
     assert any("new_dep==1.0" in cmd for cmd in command_list if f"{pixi_bin} add" in cmd)
+
+
+def test_install_in_existing_env_pixi_includes_editable_local_dependency_commands(
+    environment_manager_pixi_fixture, tmp_path
+):
+    manager, _, mock_execute_and_get_output = environment_manager_pixi_fixture
+    env_name = "local-install-env"
+    local_path = tmp_path / "local package"
+    local_path.mkdir()
+    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path, "editable": True}]}
+
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
+    manager.environments[env_name] = env
+
+    manager.install(env, dependencies)
+
+    mock_execute_and_get_output.assert_called_once()
+    called_args, _ = mock_execute_and_get_output.call_args
+    command_list = called_args[0]
+    spec = f"local-package @ {local_path.resolve().as_uri()}"
+    assert any(
+        cmd
+        == f"{manager.settings_manager.conda_bin} add --manifest-path {shell_quote(env.path)} --pypi --editable {shell_quote(spec)}"
+        for cmd in command_list
+    )
+
+
+def test_install_in_existing_env_pixi_includes_non_editable_local_dependency_commands(
+    environment_manager_pixi_fixture, tmp_path
+):
+    manager, _, mock_execute_and_get_output = environment_manager_pixi_fixture
+    env_name = "local-install-env"
+    local_path = tmp_path / "local package"
+    local_path.mkdir()
+    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path, "editable": False}]}
+
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
+    manager.environments[env_name] = env
+
+    manager.install(env, dependencies)
+
+    mock_execute_and_get_output.assert_called_once()
+    called_args, _ = mock_execute_and_get_output.call_args
+    command_list = called_args[0]
+    spec = f"local-package @ {local_path.resolve().as_uri()}"
+    assert any(
+        cmd == f"{manager.settings_manager.conda_bin} add --manifest-path {shell_quote(env.path)} --pypi {shell_quote(spec)}"
+        for cmd in command_list
+    )

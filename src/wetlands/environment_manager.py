@@ -10,6 +10,12 @@ import subprocess
 import sys
 from typing import Any, Literal, Union
 import json5
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore
+
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion
 
@@ -398,6 +404,53 @@ class EnvironmentManager:
             optional_dependencies=optional_dependencies,
         )
 
+    def _add_project_install_dependency(
+        self,
+        dependencies: Dependencies,
+        config_path: str | Path,
+        install_project: bool,
+        project_path: str | Path | None,
+        project_editable: bool,
+    ) -> None:
+        """Append the project itself as a local package dependency when requested."""
+        if not install_project:
+            if project_path is not None:
+                raise ValueError("project_path can only be provided when install_project=True.")
+            if project_editable:
+                raise ValueError("project_editable=True can only be provided when install_project=True.")
+            return
+
+        config_path = Path(config_path)
+        if project_path is None:
+            file_type = ConfigParser().detect_config_file_type(config_path)
+            if file_type != "pyproject":
+                raise ValueError(
+                    "project_path is required when install_project=True and config_path is not a pyproject.toml file."
+                )
+            project_path = config_path.parent
+
+        resolved_project_path = Path(project_path).resolve()
+        project_pyproject_path = resolved_project_path / "pyproject.toml"
+        if not project_pyproject_path.exists():
+            raise ValueError(f"Project pyproject.toml not found: {project_pyproject_path}")
+
+        with open(project_pyproject_path, "rb") as f:
+            project_config = tomllib.load(f)
+
+        project_name = project_config.get("project", {}).get("name")
+        if not isinstance(project_name, str) or not project_name.strip():
+            raise ValueError(f"Project pyproject.toml must define [project].name: {project_pyproject_path}")
+
+        local_dependencies = dependencies.get("local", [])
+        local_dependencies.append(
+            {
+                "name": project_name,
+                "path": resolved_project_path,
+                "editable": project_editable,
+            }
+        )
+        dependencies["local"] = local_dependencies
+
     def create(
         self,
         name: str,
@@ -501,6 +554,9 @@ class EnvironmentManager:
         optional_dependencies: list[str] | None = None,
         additional_install_commands: Commands = {},
         use_existing: bool = False,
+        install_project: bool = False,
+        project_path: str | Path | None = None,
+        project_editable: bool = False,
     ) -> Environment:
         """Creates a new Conda environment from a config file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt) or returns an existing one.
 
@@ -510,14 +566,29 @@ class EnvironmentManager:
                 optional_dependencies: List of optional dependency groups to extract from pyproject.toml.
                 additional_install_commands: Platform-specific commands during installation.
                 use_existing: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
+                install_project: If True, install the project itself using normal pixi/pip local package semantics.
+                project_path: Path to the project to install. Defaults to the config file parent only for pyproject.toml configs.
+                project_editable: If True, install the project in editable mode.
 
         Returns:
                 The created or existing environment (ExternalEnvironment if created, or an existing environment if use_existing=True and match found).
         """
+        if not install_project:
+            if project_path is not None:
+                raise ValueError("project_path can only be provided when install_project=True.")
+            if project_editable:
+                raise ValueError("project_editable=True can only be provided when install_project=True.")
 
         # Parse config file
         dependencies = self._parse_dependencies_from_config(
             config_path, environment_name=name, optional_dependencies=optional_dependencies
+        )
+        self._add_project_install_dependency(
+            dependencies,
+            config_path,
+            install_project=install_project,
+            project_path=project_path,
+            project_editable=project_editable,
         )
 
         # Use create() with parsed dependencies

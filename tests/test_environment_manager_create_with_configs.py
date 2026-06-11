@@ -1,5 +1,7 @@
 """Tests for EnvironmentManager.create() method with config file support."""
 
+from __future__ import annotations
+
 import pytest
 import tempfile
 from pathlib import Path
@@ -8,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies
+from wetlands._internal.shell import shell_quote
 
 
 # --- Fixtures ---
@@ -167,6 +170,24 @@ pytest>=6.0
     return req_file
 
 
+def make_project(project_path: Path, name: str | None = "local-project") -> Path:
+    """Create a minimal pyproject.toml for a local project."""
+    project_path.mkdir(parents=True, exist_ok=True)
+    if name is None:
+        content = """
+[project]
+version = "0.1.0"
+"""
+    else:
+        content = f"""
+[project]
+name = "{name}"
+version = "0.1.0"
+"""
+    (project_path / "pyproject.toml").write_text(content)
+    return project_path
+
+
 # --- Tests for create() with config files ---
 
 
@@ -195,6 +216,19 @@ class TestCreateWithPyprojectToml:
         env = manager.create_from_config(name="test_env", config_path=sample_pyproject_toml_with_pixi)
 
         assert env is not None
+
+    def test_create_with_pyproject_installs_project_from_config_parent(
+        self, environment_manager_for_config_tests, sample_pyproject_toml_no_pixi
+    ):
+        """Test install_project=True defaults project_path to the pyproject.toml parent."""
+        manager, _, mock_execute = environment_manager_for_config_tests
+
+        manager.create_from_config(name="test_env", config_path=sample_pyproject_toml_no_pixi, install_project=True)
+
+        mock_execute.assert_called_once()
+        command_list = mock_execute.call_args.args[0]
+        expected_project_path = sample_pyproject_toml_no_pixi.parent.resolve()
+        assert any(cmd == f"pip install  {shell_quote(expected_project_path)}" for cmd in command_list)
 
     def test_create_with_pyproject_optional_deps(
         self, environment_manager_for_config_tests, sample_pyproject_toml_no_pixi
@@ -229,6 +263,26 @@ class TestCreateWithEnvironmentYml:
         env = manager.create_from_config(name="test_env", config_path=sample_environment_yml)
 
         assert env is not None
+
+    def test_create_with_environment_yml_installs_explicit_project_path(
+        self, environment_manager_for_config_tests, sample_environment_yml, tmp_path
+    ):
+        """Test non-pyproject configs can install a project when project_path is explicit."""
+        manager, _, mock_execute = environment_manager_for_config_tests
+        project_path = make_project(tmp_path / "project", name="env-file-project")
+
+        manager.create_from_config(
+            name="test_env",
+            config_path=sample_environment_yml,
+            install_project=True,
+            project_path=project_path,
+        )
+
+        mock_execute.assert_called_once()
+        command_list = mock_execute.call_args.args[0]
+        assert any("numpy>=1.20" in cmd for cmd in command_list)
+        assert any("requests>=2.25" in cmd for cmd in command_list)
+        assert any(cmd == f"pip install  {shell_quote(project_path.resolve())}" for cmd in command_list)
 
     def test_create_with_environment_yml_no_extra_params(
         self, environment_manager_for_config_tests, sample_environment_yml
@@ -323,6 +377,76 @@ class TestCreateParameterValidation:
         )
 
         assert env is not None
+
+    def test_install_project_with_non_pyproject_config_requires_project_path(
+        self, environment_manager_for_config_tests, sample_environment_yml
+    ):
+        """Test project_path is required when installing a project from non-pyproject configs."""
+        manager, _, _ = environment_manager_for_config_tests
+
+        with pytest.raises(ValueError, match="project_path is required"):
+            manager.create_from_config(name="test_env", config_path=sample_environment_yml, install_project=True)
+
+    def test_install_project_requires_project_pyproject(
+        self, environment_manager_for_config_tests, sample_environment_yml, tmp_path
+    ):
+        """Test installed projects must contain pyproject.toml."""
+        manager, _, _ = environment_manager_for_config_tests
+        project_path = tmp_path / "missing-pyproject"
+        project_path.mkdir()
+
+        with pytest.raises(ValueError, match="Project pyproject.toml not found"):
+            manager.create_from_config(
+                name="test_env",
+                config_path=sample_environment_yml,
+                install_project=True,
+                project_path=project_path,
+            )
+
+    def test_install_project_requires_project_name(
+        self, environment_manager_for_config_tests, sample_environment_yml, tmp_path
+    ):
+        """Test installed projects must define [project].name."""
+        manager, _, _ = environment_manager_for_config_tests
+        project_path = make_project(tmp_path / "project-without-name", name=None)
+
+        with pytest.raises(ValueError, match=r"\[project\]\.name"):
+            manager.create_from_config(
+                name="test_env",
+                config_path=sample_environment_yml,
+                install_project=True,
+                project_path=project_path,
+            )
+
+    def test_project_path_requires_install_project(
+        self, environment_manager_for_config_tests, sample_environment_yml, tmp_path
+    ):
+        """Test project_path is rejected when install_project is disabled."""
+        manager, _, _ = environment_manager_for_config_tests
+        project_path = make_project(tmp_path / "project")
+
+        with pytest.raises(ValueError, match="project_path can only be provided"):
+            manager.create_from_config(name="test_env", config_path=sample_environment_yml, project_path=project_path)
+
+    def test_project_path_requires_install_project_before_config_parse(
+        self, environment_manager_for_config_tests, temp_config_dir, tmp_path
+    ):
+        """Test project_path is rejected before reading the config file."""
+        manager, _, _ = environment_manager_for_config_tests
+        project_path = make_project(tmp_path / "project")
+        missing_config = temp_config_dir / "environment.yml"
+
+        with pytest.raises(ValueError, match="project_path can only be provided"):
+            manager.create_from_config(name="test_env", config_path=missing_config, project_path=project_path)
+
+    def test_project_editable_requires_install_project(
+        self, environment_manager_for_config_tests, sample_environment_yml
+    ):
+        """Test project_editable is rejected when install_project is disabled."""
+        manager, _, _ = environment_manager_for_config_tests
+
+        with pytest.raises(ValueError, match="project_editable=True can only be provided"):
+            manager.create_from_config(name="test_env", config_path=sample_environment_yml, project_editable=True)
 
 
 class TestCreateIntegrationWithDependencyManager:
