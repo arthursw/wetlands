@@ -644,11 +644,29 @@ class ExternalEnvironment(Environment):
         self._authkey = authkey
         self._shutdown_event.clear()
         for entry in worker_entries:
+            worker_index = entry.get("worker_index", "<unknown>")
+            port = entry.get("port", "<unknown>")
             try:
                 worker = self._attach_worker(entry, authkey)
-            except _AttachTimeout:
+            except _AttachTimeout as e:
+                logger.warning(
+                    "Timed out attaching to persistent worker %s for environment '%s' on port %s: %s",
+                    worker_index,
+                    self.name,
+                    port,
+                    e,
+                    exc_info=True,
+                )
                 continue
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Discarding persistent worker %s for environment '%s' on port %s after attach failure: %s",
+                    worker_index,
+                    self.name,
+                    port,
+                    e,
+                    exc_info=True,
+                )
                 runtime_state.remove_worker(
                     self.environment_manager.wetlands_instance_path,
                     self.name,
