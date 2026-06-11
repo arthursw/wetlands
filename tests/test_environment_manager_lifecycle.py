@@ -5,7 +5,7 @@ import json5
 import pytest
 
 from wetlands.environment_manager import EnvironmentManager
-from wetlands.external_environment import ExternalEnvironment
+from wetlands.external_environment import ATTACH_CONNECT_TIMEOUT, ExternalEnvironment
 from wetlands.internal_environment import InternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands._internal.command_generator import Commands, CommandsDict
@@ -212,7 +212,7 @@ class TestPersistentAttach:
         assert isinstance(env, ExternalEnvironment)
         assert env.path == env_path.resolve()
         assert env.worker_count == 1
-        mock_connect.assert_called_once_with(53122, authkey, timeout=2.0)
+        mock_connect.assert_called_once_with(53122, authkey, timeout=ATTACH_CONNECT_TIMEOUT)
 
     def test_attach_removes_stale_record_when_connection_fails(self, environment_manager_fixture, tmp_path, monkeypatch):
         manager = environment_manager_fixture
