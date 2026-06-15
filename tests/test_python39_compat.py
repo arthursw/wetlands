@@ -203,7 +203,7 @@ def test_python39_execute_function_accepts_future_annotations(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_python39_execute_function_preserves_non_annotation_pipe_type_error(tmp_path):
+def test_python39_execute_function_reports_pipe_type_error_as_likely_modern_annotation_error(tmp_path):
     python39 = shutil.which("python3.9")
     if python39 is None:
         pytest.skip("python3.9 is not available")
@@ -243,10 +243,13 @@ def test_python39_execute_function_preserves_non_annotation_pipe_type_error(tmp_
 
     assert result.returncode != 0
     assert "unsupported operand type(s) for |" in result.stderr
-    assert "Python 3.10 union annotation syntax" not in result.stderr
+    assert "with a `|` type error" in result.stderr
+    assert "often caused by Python 3.10 union annotation syntax" in result.stderr
 
 
-def test_python39_execute_function_preserves_rhs_pipe_type_error_with_future_annotations(tmp_path):
+def test_python39_execute_function_reports_future_annotation_rhs_pipe_type_error_as_likely_modern_annotation_error(
+    tmp_path,
+):
     python39 = shutil.which("python3.9")
     if python39 is None:
         pytest.skip("python3.9 is not available")
@@ -291,7 +294,8 @@ def test_python39_execute_function_preserves_rhs_pipe_type_error_with_future_ann
 
     assert result.returncode != 0
     assert "unsupported operand type(s) for |" in result.stderr
-    assert "Python 3.10 union annotation syntax" not in result.stderr
+    assert "with a `|` type error" in result.stderr
+    assert "often caused by Python 3.10 union annotation syntax" in result.stderr
 
 
 def test_python39_execute_function_reports_modern_annotation_error_in_function_signature(tmp_path):
@@ -380,6 +384,65 @@ def test_python39_execute_function_reports_modern_annotation_error_in_multiline_
     )
 
     assert result.returncode != 0
+    assert "Python 3.10 union annotation syntax" in result.stderr
+    assert "from __future__ import annotations" in result.stderr
+
+
+def test_python39_execute_function_reports_nested_modern_annotation_error(tmp_path):
+    python39 = shutil.which("python3.9")
+    if python39 is None:
+        pytest.skip("python3.9 is not available")
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not available")
+
+    tool_path = tmp_path / "tool_module.py"
+    tool_path.write_text(
+        textwrap.dedent(
+            """
+            class Marker:
+                pass
+
+            value: Marker | None = Marker()
+            """
+        ),
+        encoding="utf-8",
+    )
+    worker_path = tmp_path / "worker_module.py"
+    worker_path.write_text(
+        textwrap.dedent(
+            f"""
+            import importlib.util
+
+            def run():
+                spec = importlib.util.spec_from_file_location("tool_module", {str(tool_path)!r})
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod.value
+            """
+        ),
+        encoding="utf-8",
+    )
+    code = textwrap.dedent(
+        f"""
+        from wetlands import module_executor
+
+        module_executor.execute_function({{
+            "module_path": {str(worker_path)!r},
+            "function": "run",
+        }})
+        """
+    )
+
+    result = subprocess.run(
+        ["uv", "run", "--python", "3.9", "python", "-c", code],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert str(worker_path) in result.stderr
     assert "Python 3.10 union annotation syntax" in result.stderr
     assert "from __future__ import annotations" in result.stderr
 

@@ -12,7 +12,6 @@ Designed to be run within isolated environments for sandboxed execution of Pytho
 
 from __future__ import annotations
 
-import ast
 import sys
 import logging
 import threading
@@ -40,74 +39,12 @@ def import_from_path(name: str, file_path: str | Path):
     return module
 
 
-def _annotation_contains_pep604_union(annotation: ast.AST | None) -> bool:
-    if annotation is None:
-        return False
-    return any(isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr) for node in ast.walk(annotation))
-
-
-def _node_contains_line(node: ast.AST, line_number: int) -> bool:
-    node_line = getattr(node, "lineno", None)
-    if node_line is None:
-        return False
-    return node_line <= line_number <= getattr(node, "end_lineno", node_line)
-
-
-def _module_uses_future_annotations(tree: ast.Module) -> bool:
-    return any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == "__future__"
-        and any(alias.name == "annotations" for alias in node.names)
-        for node in tree.body
-    )
-
-
-def _type_error_is_from_pep604_annotation(e: TypeError, path: str | Path) -> bool:
-    if sys.version_info >= (3, 10) or "unsupported operand type(s) for |" not in str(e):
-        return False
-
-    module_path = Path(path)
-    try:
-        source = module_path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(module_path))
-        target_path = module_path.resolve()
-    except (OSError, SyntaxError, UnicodeDecodeError):
-        return False
-    if _module_uses_future_annotations(tree):
-        return False
-
-    failing_lines = set()
-    for frame in traceback.extract_tb(e.__traceback__):
-        try:
-            frame_path = Path(frame.filename).resolve()
-        except OSError:
-            continue
-        if frame_path == target_path:
-            failing_lines.add(frame.lineno)
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AnnAssign) and any(_node_contains_line(node, line) for line in failing_lines):
-            return _annotation_contains_pep604_union(node.annotation)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
-            _node_contains_line(node, line) for line in failing_lines
-        ):
-            annotations = [node.returns]
-            args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
-            if node.args.vararg is not None:
-                args.append(node.args.vararg)
-            if node.args.kwarg is not None:
-                args.append(node.args.kwarg)
-            annotations.extend(arg.annotation for arg in args)
-            return any(_annotation_contains_pep604_union(annotation) for annotation in annotations)
-    return False
-
-
 def _raise_modern_annotation_error_if_needed(e: TypeError, path: str | Path) -> None:
-    if not _type_error_is_from_pep604_annotation(e, path):
+    if sys.version_info >= (3, 10) or "unsupported operand type(s) for |" not in str(e):
         return
     raise RuntimeError(
-        f"{path} could not run with Python {sys.version_info.major}.{sys.version_info.minor}. "
-        "It appears to use Python 3.10 union annotation syntax such as `A | B`. "
+        f"{path} failed under Python {sys.version_info.major}.{sys.version_info.minor} with a `|` type error. "
+        "This is often caused by Python 3.10 union annotation syntax such as `A | B`. "
         "Add `from __future__ import annotations`, use `typing.Optional`/`typing.Union`, "
         "or run this code in a Python 3.10+ environment."
     ) from e
