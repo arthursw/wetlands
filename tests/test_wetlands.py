@@ -5,10 +5,11 @@ import pytest
 import shutil
 
 from wetlands._internal.dependency_manager import Dependencies
+from wetlands._internal.exceptions import ExecutionException
 from wetlands.internal_environment import InternalEnvironment
 from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
-from wetlands.task import Task, TaskStatus, TaskEventType
+from wetlands.task import Task, TaskFailureCategory, TaskStatus, TaskEventType
 
 
 # Config file contents for parameterized test_create_from_config
@@ -494,6 +495,17 @@ def identity(x):
 def boom():
     raise ValueError("test error")
 
+def chained_boom():
+    try:
+        raise KeyError("root cause")
+    except KeyError as e:
+        raise RuntimeError("outer failure") from e
+
+def maybe_boom(x):
+    if x == 2:
+        raise TypeError("bad item")
+    return x
+
 def square(x):
     return x ** 2
 
@@ -543,7 +555,41 @@ def slow_work(*, task=None):
         failed = task_env.submit(str(module_path), "boom")
         failed.wait_for(timeout=30)
         assert failed.status == TaskStatus.FAILED
-        assert "test error" in failed.error
+        assert failed.error is not None
+        assert "test error" in failed.error.message
+        assert failed.error.category == TaskFailureCategory.REMOTE_EXCEPTION
+        assert failed.error.remote_exception is not None
+        assert failed.error.remote_exception.type_name == "ValueError"
+        assert failed.traceback is not None
+        assert "ValueError: test error" in failed.traceback
+
+        chained = task_env.submit(str(module_path), "chained_boom")
+        chained.wait_for(timeout=30)
+        assert chained.error is not None
+        assert chained.error.remote_exception is not None
+        assert chained.error.remote_exception.type_name == "RuntimeError"
+        assert chained.error.remote_exception.cause is not None
+        assert chained.error.remote_exception.cause.type_name == "KeyError"
+
+        mapped = task_env.map_tasks(str(module_path), "maybe_boom", [1, 2])
+        for task in mapped:
+            task.wait_for(timeout=30)
+        assert mapped[0].status == TaskStatus.COMPLETED
+        assert mapped[1].status == TaskStatus.FAILED
+        assert mapped[1].error is not None
+        assert mapped[1].error.remote_exception is not None
+        assert mapped[1].error.remote_exception.type_name == "TypeError"
+
+        with pytest.raises(ExecutionException) as execute_error:
+            task_env.execute(str(module_path), "boom")
+        assert execute_error.value.failure.remote_exception is not None
+        assert execute_error.value.failure.remote_exception.type_name == "ValueError"
+
+        imported = task_env.import_module(str(module_path))
+        with pytest.raises(ExecutionException) as imported_error:
+            imported.boom()
+        assert imported_error.value.failure.remote_exception is not None
+        assert imported_error.value.failure.remote_exception.type_name == "ValueError"
 
         future_task = task_env.submit(str(module_path), "square", args=(9,))
         assert future_task.future.result(timeout=30) == 81

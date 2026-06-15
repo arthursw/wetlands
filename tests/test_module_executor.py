@@ -5,6 +5,7 @@ import pytest
 from multiprocessing.context import AuthenticationError
 
 from wetlands import module_executor
+from wetlands.task import RemoteTaskSerializationError
 
 
 class TestConfigureLogging:
@@ -68,6 +69,8 @@ class TestHandleExecutionError:
             assert call_args[0][0] == mock_lock
             assert call_args[0][1] == mock_connection
             assert call_args[0][2]["action"] == "error"
+            assert call_args[0][2]["failure"]["category"] == "remote_exception"
+            assert call_args[0][2]["failure"]["remote_exception"]["type_name"] == "Exception"
             assert "Test error" in call_args[0][2]["exception"]
             assert "task_id" not in call_args[0][2]
 
@@ -81,6 +84,7 @@ class TestHandleExecutionError:
             module_executor.handle_execution_error(mock_lock, mock_connection, exception, task_id="task-123")
             call_args = mock_send.call_args
             assert call_args[0][2]["task_id"] == "task-123"
+            assert call_args[0][2]["failure"]["task_id"] == "task-123"
 
     def test_handle_execution_error_without_task_id(self):
         """Test backward compat: no task_id field when not provided"""
@@ -92,6 +96,54 @@ class TestHandleExecutionError:
             module_executor.handle_execution_error(mock_lock, mock_connection, exception)
             msg = mock_send.call_args[0][2]
             assert "task_id" not in msg
+
+    def test_handle_execution_error_preserves_chained_exception(self):
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        try:
+            try:
+                raise RuntimeError("root")
+            except RuntimeError as e:
+                raise ValueError("outer") from e
+        except ValueError as exception:
+            with patch("wetlands.module_executor.send_message") as mock_send:
+                module_executor.handle_execution_error(mock_lock, mock_connection, exception, task_id="task-chain")
+
+        failure = mock_send.call_args[0][2]["failure"]
+        assert failure["remote_exception"]["type_name"] == "ValueError"
+        assert failure["remote_exception"]["cause"]["type_name"] == "RuntimeError"
+        assert "The above exception was the direct cause" in failure["traceback"]
+
+    def test_handle_execution_error_can_report_serialization_context(self):
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        exception = TypeError("cannot pickle result")
+
+        with patch("wetlands.module_executor.send_message") as mock_send:
+            module_executor.handle_execution_error(
+                mock_lock,
+                mock_connection,
+                exception,
+                task_id="task-result",
+                category="serialization",
+                serialization_context="result",
+            )
+
+        failure = mock_send.call_args[0][2]["failure"]
+        assert failure["category"] == "serialization"
+        assert failure["serialization_context"] == "result"
+
+    def test_remote_task_handle_serialization_error_is_serialization_failure(self):
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        exception = RemoteTaskSerializationError("output", TypeError("cannot pickle output"))
+
+        with patch("wetlands.module_executor.send_message") as mock_send:
+            module_executor.handle_execution_error(mock_lock, mock_connection, exception, task_id="task-output")
+
+        failure = mock_send.call_args[0][2]["failure"]
+        assert failure["category"] == "serialization"
+        assert failure["serialization_context"] == "output"
 
 
 class TestExecuteFunction:

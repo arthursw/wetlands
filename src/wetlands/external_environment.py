@@ -21,6 +21,7 @@ from wetlands._internal.command_generator import Commands
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands.environment import Environment
 from wetlands._internal.exceptions import ExecutionException
+from wetlands._internal.diagnostics import TaskFailure, WorkerInfo
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands._internal.shell import shell_quote
@@ -79,6 +80,7 @@ class _Worker:
         "persistent",
         "_current_task",
         "_last_activity",
+        "_finished_task_ids",
     )
 
     def __init__(
@@ -102,6 +104,7 @@ class _Worker:
         self.reader_thread: threading.Thread | None = None
         self._current_task: Task[Any] | None = None
         self._last_activity: float = 0.0
+        self._finished_task_ids: set[str] = set()
 
     def alive(self) -> bool:
         if self.process is not None:
@@ -314,6 +317,35 @@ class ExternalEnvironment(Environment):
             return ""
         return "\n" + "\n".join(details)
 
+    def _task_call_target(self, task: Task[Any] | None) -> str | None:
+        if task is None:
+            return None
+        payload = getattr(task, "_payload", {})
+        return payload.get("_call_target") if isinstance(payload, dict) else None
+
+    def _worker_info(self, worker: _Worker) -> WorkerInfo:
+        return WorkerInfo(
+            environment=self.name,
+            index=worker.index,
+            pid=worker.pid,
+            port=worker.port,
+            persistent=worker.persistent,
+        )
+
+    def _worker_returncode(self, worker: _Worker) -> int | None:
+        if worker.process is None:
+            return None
+        worker.process.poll()
+        return worker.process.returncode if isinstance(worker.process.returncode, int) else None
+
+    def _worker_connection_failure(self, worker: _Worker, task: Task[Any], message: str) -> TaskFailure:
+        return TaskFailure.worker_connection(
+            message,
+            task_id=task.id,
+            call_target=self._task_call_target(task),
+            worker=self._worker_info(worker),
+        )
+
     def _start_reader_thread(self, worker: _Worker) -> None:
         """Start the IPC reader thread for one worker."""
         reader = threading.Thread(
@@ -335,9 +367,21 @@ class ExternalEnvironment(Environment):
             except (EOFError, OSError):
                 task = worker._current_task
                 if task is not None and not task.status.is_finished():
-                    task._set_failed("Worker connection closed unexpectedly")
+                    returncode = self._worker_returncode(worker)
+                    if returncode is not None:
+                        task._set_failed(
+                            TaskFailure.worker_died(
+                                task_id=task.id,
+                                call_target=self._task_call_target(task),
+                                worker=self._worker_info(worker),
+                                returncode=returncode,
+                            )
+                        )
+                    else:
+                        task._set_failed(self._worker_connection_failure(worker, task, "Worker connection closed unexpectedly"))
                     worker._current_task = None
                     self._remove_dead_worker(worker)
+                    self._try_replace_worker(worker.index)
                     break
                 if worker.persistent and worker.alive():
                     with self._lock:
@@ -354,14 +398,28 @@ class ExternalEnvironment(Environment):
                 break
 
             task = worker._current_task
+            message_task_id = message.get("task_id")
             if task is None:
+                if message_task_id is not None and message_task_id in worker._finished_task_ids:
+                    logger.debug(f"Worker {worker.index}: ignoring late message for finished task {message_task_id}: {message}")
+                    continue
                 # No active task — this is a legacy message or unexpected
                 logger.warning(f"Worker {worker.index}: received message with no active task: {message}")
+                continue
+            if message_task_id is not None and message_task_id != task.id:
+                if message_task_id in worker._finished_task_ids:
+                    logger.debug(f"Worker {worker.index}: ignoring stale message for finished task {message_task_id}: {message}")
+                    continue
+                logger.warning(
+                    f"Worker {worker.index}: ignoring stale message for task {message_task_id}; "
+                    f"current task is {task.id}: {message}"
+                )
                 continue
 
             action = message.get("action")
             if action in ("execution finished", "error", "canceled"):
                 task._on_message(message)
+                worker._finished_task_ids.add(task.id)
                 worker._current_task = None
                 # Return worker to idle pool and dispatch next queued task
                 self._dispatch_or_idle(worker)
@@ -388,9 +446,16 @@ class ExternalEnvironment(Environment):
 
                 # Check 1: Is the process dead?
                 if not worker.alive():
-                    rc = worker.process.returncode if worker.process is not None else None
+                    rc = self._worker_returncode(worker)
                     logger.error(f"Worker {worker.index} died (exit code {rc}) while running task {task.id}")
-                    task._set_failed(f"Worker process died (exit code {rc})")
+                    task._set_failed(
+                        TaskFailure.worker_died(
+                            task_id=task.id,
+                            call_target=self._task_call_target(task),
+                            worker=self._worker_info(worker),
+                            returncode=rc,
+                        )
+                    )
                     worker._current_task = None
                     self._remove_dead_worker(worker)
                     self._try_replace_worker(worker.index)
@@ -404,7 +469,15 @@ class ExternalEnvironment(Environment):
                             f"Worker {worker.index} timed out (no response for {elapsed:.0f}s) "
                             f"while running task {task.id}"
                         )
-                        task._set_failed(f"Worker process timed out (no response for {elapsed:.0f}s)")
+                        task._set_failed(
+                            TaskFailure.timeout_failure(
+                                task_id=task.id,
+                                call_target=self._task_call_target(task),
+                                worker=self._worker_info(worker),
+                                timeout=self._worker_timeout,
+                                elapsed=elapsed,
+                            )
+                        )
                         worker._current_task = None
                         self._remove_dead_worker(worker)
                         self._try_replace_worker(worker.index)
@@ -473,9 +546,24 @@ class ExternalEnvironment(Environment):
         try:
             worker.connection.send(payload)
         except (OSError, BrokenPipeError) as e:
-            task._set_failed(f"Failed to send to worker {worker.index}: {e}")
+            task._set_failed(
+                self._worker_connection_failure(worker, task, f"Failed to send to worker {worker.index}: {e}")
+            )
             worker._current_task = None
             self._remove_dead_worker(worker)
+            self._try_replace_worker(worker.index)
+        except Exception as e:
+            task._set_failed(
+                TaskFailure.serialization(
+                    f"Failed to serialize task payload for worker {worker.index}: {e}",
+                    task_id=task.id,
+                    call_target=self._task_call_target(task),
+                    context="payload",
+                    worker=self._worker_info(worker),
+                )
+            )
+            worker._current_task = None
+            self._dispatch_or_idle(worker)
 
     def _submit_task(self, task: Task[Any], start: bool) -> Task[Any]:
         """Wire up a task's start/cancel functions and optionally start it."""
@@ -819,31 +907,78 @@ class ExternalEnvironment(Environment):
         """
         connection = self.connection
         if connection is None or connection.closed:
-            raise ExecutionException("Connection not ready.")
+            raise ExecutionException(TaskFailure.environment("Connection not ready.", call_target=payload.get("_call_target")))
 
         try:
             connection.send(payload)
+        except BrokenPipeError as e:
+            logger.error(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
+            raise ExecutionException(
+                TaskFailure.worker_connection(
+                    f"Broken pipe. The peer process might have terminated. Exception: {e}.",
+                    call_target=payload.get("_call_target"),
+                )
+            ) from e
+        except OSError as e:
+            if e.errno == 9:
+                logger.error("Connection closed abruptly by the peer.")
+                raise ExecutionException(
+                    TaskFailure.worker_connection(
+                        "Connection closed abruptly by the peer.",
+                        call_target=payload.get("_call_target"),
+                    )
+                ) from e
+            raise
+        except Exception as e:
+            raise ExecutionException(
+                TaskFailure.serialization(
+                    f"Failed to serialize task payload: {e}",
+                    call_target=payload.get("_call_target"),
+                    context="payload",
+                )
+            ) from e
+
+        try:
             while message := connection.recv():
                 action = message.get("action")
                 if action == "execution finished":
                     logger.info(f"{payload.get('action')} finished")
                     return message.get("result")
                 elif action == "error":
-                    logger.error(message["exception"])
+                    failure = TaskFailure.from_payload(message, call_target=payload.get("_call_target"))
+                    logger.error(failure.message)
                     logger.error("Traceback:")
-                    for line in message["traceback"]:
+                    for line in failure.traceback_frames:
                         logger.error(line)
-                    raise ExecutionException(message)
+                    raise ExecutionException(failure)
                 else:
                     logger.warning(f"Got an unexpected message: {message}")
 
         except EOFError:
             logger.info("Connection closed gracefully by the peer.")
+            raise ExecutionException(
+                TaskFailure.worker_connection(
+                    "Connection closed gracefully by the peer.",
+                    call_target=payload.get("_call_target"),
+                )
+            )
         except BrokenPipeError as e:
             logger.error(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
+            raise ExecutionException(
+                TaskFailure.worker_connection(
+                    f"Broken pipe. The peer process might have terminated. Exception: {e}.",
+                    call_target=payload.get("_call_target"),
+                )
+            ) from e
         except OSError as e:
             if e.errno == 9:  # Bad file descriptor
                 logger.error("Connection closed abruptly by the peer.")
+                raise ExecutionException(
+                    TaskFailure.worker_connection(
+                        "Connection closed abruptly by the peer.",
+                        call_target=payload.get("_call_target"),
+                    )
+                ) from e
             else:
                 logger.error(f"Unexpected OSError: {e}")
                 raise e
@@ -889,6 +1024,7 @@ class ExternalEnvironment(Environment):
                 function=function,
                 args=args,
                 kwargs=kwargs,
+                _call_target=call_target,
             )
             return self._send_and_wait(payload)
         finally:
@@ -924,6 +1060,7 @@ class ExternalEnvironment(Environment):
                 script_path=str(script_path),
                 args=args,
                 run_name=run_name,
+                _call_target=script_name,
             )
             return self._send_and_wait(payload)
         finally:
@@ -960,6 +1097,15 @@ class ExternalEnvironment(Environment):
 
         if self._workers:
             for worker in self._workers:
+                if worker._current_task is not None and not worker._current_task.status.is_finished():
+                    worker._current_task._set_failed(
+                        TaskFailure.environment(
+                            "Environment is shutting down",
+                            task_id=worker._current_task.id,
+                            call_target=self._task_call_target(worker._current_task),
+                        )
+                    )
+                    worker._current_task = None
                 try:
                     worker.connection.send(dict(action="exit"))
                 except OSError:
@@ -984,7 +1130,7 @@ class ExternalEnvironment(Environment):
             while True:
                 try:
                     task = self._task_queue.get_nowait()
-                    task._set_failed("Environment is shutting down")
+                    task._set_failed(TaskFailure.environment("Environment is shutting down", task_id=task.id))
                 except queue.Empty:
                     break
 
@@ -1019,7 +1165,13 @@ class ExternalEnvironment(Environment):
             except OSError:
                 pass
             if worker._current_task is not None and not worker._current_task.status.is_finished():
-                worker._current_task._set_failed("Environment is detaching")
+                worker._current_task._set_failed(
+                    TaskFailure.environment(
+                        "Environment is detaching",
+                        task_id=worker._current_task.id,
+                        call_target=self._task_call_target(worker._current_task),
+                    )
+                )
             worker._current_task = None
         self._workers.clear()
         while not self._idle_workers.empty():
@@ -1030,7 +1182,7 @@ class ExternalEnvironment(Environment):
         while True:
             try:
                 task = self._task_queue.get_nowait()
-                task._set_failed("Environment is detaching")
+                task._set_failed(TaskFailure.environment("Environment is detaching", task_id=task.id))
             except queue.Empty:
                 break
         self.connection = None

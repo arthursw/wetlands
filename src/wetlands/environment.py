@@ -55,7 +55,7 @@ class Environment:
         that contains the same methods of the module which will be executed within the environment."""
         try:
             functions = self._list_functions(self._import_module(module_path))
-        except ModuleNotFoundError:
+        except Exception:
             module_path_obj = Path(module_path)
             if not module_path_obj.exists():
                 raise

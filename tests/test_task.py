@@ -13,7 +13,10 @@ from wetlands.task import (
     Task,
     TaskEvent,
     TaskEventType,
+    TaskFailure,
+    TaskFailureCategory,
     TaskStatus,
+    WorkerInfo,
 )
 
 
@@ -82,11 +85,29 @@ class TestTaskLifecycle:
         task._set_running()
         task._set_failed("boom", ["line1", "line2"])
         assert task.status == TaskStatus.FAILED
-        assert task.error == "boom"
-        assert task.traceback == ["line1", "line2"]
+        assert task.error is not None
+        assert task.error.message == "boom"
+        assert task.traceback == "line1line2"
         assert task.exception is not None
+        assert task.exception.failure is task.error
+        assert task.future.exception() is task.exception
         with pytest.raises(Exception):
             task.future.result()
+
+    def test_set_failed_with_structured_failure(self):
+        task = Task("task-1")
+        task._set_running()
+        failure = TaskFailure.worker_died(worker=WorkerInfo(environment="env", index=2, pid=123), returncode=-9)
+
+        task._set_failed(failure)
+
+        assert task.status == TaskStatus.FAILED
+        assert task.error is not None
+        assert task.error.category == TaskFailureCategory.WORKER_DIED
+        assert task.error.signal == 9
+        assert task.error.worker is not None
+        assert task.error.worker.index == 2
+        assert str(task.exception) == "Worker 2 pid 123 died with signal 9"
 
     def test_set_canceled(self):
         task = Task()
@@ -282,8 +303,40 @@ class TestTaskOnMessage:
         task._set_running()
         task._on_message({"action": "error", "exception": "fail", "traceback": ["tb1"]})
         assert task.status == TaskStatus.FAILED
-        assert task.error == "fail"
-        assert task.traceback == ["tb1"]
+        assert task.error is not None
+        assert task.error.message == "fail"
+        assert task.traceback == "tb1"
+
+    def test_on_message_structured_error(self):
+        task = Task("task-structured")
+        task._set_running()
+        task._on_message(
+            {
+                "action": "error",
+                "task_id": "task-structured",
+                "failure": {
+                    "category": "remote_exception",
+                    "message": "bad input",
+                    "traceback": "Traceback...\nValueError: bad input\n",
+                    "remote_exception": {
+                        "module": "sample_module",
+                        "type_name": "ValueError",
+                        "qualified_name": "ValueError",
+                        "message": "bad input",
+                        "traceback": "ValueError: bad input\n",
+                        "cause": None,
+                        "context": None,
+                        "suppress_context": False,
+                    },
+                },
+            }
+        )
+        assert task.error is not None
+        assert task.error.remote_exception is not None
+        assert task.error.remote_exception.module == "sample_module"
+        assert task.error.remote_exception.type_name == "ValueError"
+        assert task.traceback == "Traceback...\nValueError: bad input\n"
+        assert str(task.exception) == "Remote ValueError from sample_module: bad input"
 
     def test_on_message_update(self):
         task = Task()
@@ -378,7 +431,8 @@ class TestTerminalStateGuards:
         task._set_failed("first error")
         task._set_failed("second error")  # should be a no-op
         assert task.status == TaskStatus.FAILED
-        assert task.error == "first error"
+        assert task.error is not None
+        assert task.error.message == "first error"
 
     def test_set_completed_then_set_failed_no_exception(self):
         task = Task()
@@ -394,7 +448,8 @@ class TestTerminalStateGuards:
         task._set_failed("error")
         task._set_completed(42)  # should be a no-op
         assert task.status == TaskStatus.FAILED
-        assert task.error == "error"
+        assert task.error is not None
+        assert task.error.message == "error"
 
     def test_set_canceled_then_set_failed_no_exception(self):
         task = Task()
@@ -424,7 +479,39 @@ class TestTerminalStateGuards:
         t2.join(timeout=5)
         assert errors == []
         assert task.status == TaskStatus.FAILED
-        assert task.error in ("error1", "error2")
+        assert task.error is not None
+        assert task.error.message in ("error1", "error2")
+
+
+class TestTaskFailureDiagnostics:
+    def test_exception_from_chained_exception_preserves_cause(self):
+        try:
+            try:
+                raise KeyError("root")
+            except KeyError as e:
+                raise ValueError("outer") from e
+        except ValueError as e:
+            failure = TaskFailure.from_exception(e)
+
+        assert failure.remote_exception is not None
+        assert failure.remote_exception.type_name == "ValueError"
+        assert failure.remote_exception.cause is not None
+        assert failure.remote_exception.cause.type_name == "KeyError"
+        assert "The above exception was the direct cause" in (failure.traceback or "")
+
+    def test_failure_payload_round_trips_worker_metadata(self):
+        failure = TaskFailure.worker_died(
+            worker=WorkerInfo(environment="env", index=1, pid=111, port=5000, persistent=True),
+            returncode=-15,
+        )
+
+        round_tripped = TaskFailure.from_payload({"failure": failure.to_payload()})
+
+        assert round_tripped.category == TaskFailureCategory.WORKER_DIED
+        assert round_tripped.signal == 15
+        assert round_tripped.worker is not None
+        assert round_tripped.worker.port == 5000
+        assert round_tripped.worker.persistent is True
 
 
 class TestRemoteTaskHandle:

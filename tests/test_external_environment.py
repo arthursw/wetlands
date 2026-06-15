@@ -7,6 +7,7 @@ from multiprocessing.connection import Client, Listener
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
+from wetlands._internal.diagnostics import TaskFailureCategory
 from wetlands._internal.shell import shell_quote
 from wetlands._internal import runtime_state
 from wetlands.external_environment import ExternalEnvironment, _AttachTimeout, _Worker
@@ -256,7 +257,14 @@ def test_execute_legacy(mock_client):
 
     assert result == "success"
     env.connection.send.assert_called_once_with(
-        {"action": "execute", "module_path": "module.py", "function": "func", "args": (1, 2, 3), "kwargs": {}}
+        {
+            "action": "execute",
+            "module_path": "module.py",
+            "function": "func",
+            "args": (1, 2, 3),
+            "kwargs": {},
+            "_call_target": "module:func",
+        }
     )
 
 
@@ -278,6 +286,7 @@ def test_execute_with_kwargs(mock_client):
             "function": "func",
             "args": ("a",),
             "kwargs": {"one": 1, "two": 2},
+            "_call_target": "module:func",
         }
     )
 
@@ -300,6 +309,21 @@ def test_execute_error(mock_client, caplog):
     assert "Traceback:" in caplog.text
     assert "line 1" in caplog.text
     assert "line 2" in caplog.text
+
+
+def test_execute_legacy_payload_serialization_failure_is_structured():
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
+    env.connection = MagicMock()
+    env.connection.closed = False
+    env.connection.send.side_effect = TypeError("cannot pickle payload")
+    env._workers = []
+
+    with pytest.raises(ExecutionException) as exc_info:
+        env.execute("module.py", "func", (object(),))
+
+    assert exc_info.value.failure.category == TaskFailureCategory.SERIALIZATION
+    assert exc_info.value.failure.serialization_context == "payload"
+    assert exc_info.value.failure.call_target == "module:func"
 
 
 @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
@@ -456,7 +480,9 @@ class TestWorkerReaderLoop:
         env._worker_reader_loop(worker)
 
         assert task.status == TaskStatus.FAILED
-        assert task.error == "boom"
+        assert task.error is not None
+        assert task.error.message == "boom"
+        assert task.error.category == TaskFailureCategory.REMOTE_EXCEPTION
 
     @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
     def test_update_passes_to_task(self, mock_kill):
@@ -517,6 +543,41 @@ class TestWorkerReaderLoop:
         assert task1.status == TaskStatus.COMPLETED
         assert task2.status == TaskStatus.COMPLETED
         assert task2.result == "r2"
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_stale_task_id_message_does_not_complete_current_task(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        current = Task("current-task")
+        current._set_running()
+        worker._current_task = current
+
+        worker.connection.recv.side_effect = [
+            {"action": "execution finished", "result": "old", "task_id": "old-task"},
+            {"action": "execution finished", "result": "new", "task_id": "current-task"},
+            EOFError(),
+        ]
+        env._worker_reader_loop(worker)
+
+        assert current.status == TaskStatus.COMPLETED
+        assert current.result == "new"
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_late_message_for_finished_task_is_ignored(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        worker._finished_task_ids.add("finished-task")
+        worker._current_task = None
+
+        worker.connection.recv.side_effect = [
+            {"action": "execution finished", "result": "late", "task_id": "finished-task"},
+            EOFError(),
+        ]
+        env._worker_reader_loop(worker)
+
+        assert worker._current_task is None
 
 
 class TestExecuteWithWorkers:
@@ -642,7 +703,8 @@ class TestExitWithWorkers:
         env.detach()
 
         assert task.status == TaskStatus.FAILED
-        assert task.error == "Environment is detaching"
+        assert task.error is not None
+        assert task.error.message == "Environment is detaching"
 
 
 class TestLaunchedWithWorkers:
@@ -816,8 +878,66 @@ class TestDeadWorkerCleanup:
 
         assert task.status == TaskStatus.FAILED
         assert task.error is not None
-        assert "Failed to send" in task.error
+        assert "Failed to send" in task.error.message
+        assert task.error.category == TaskFailureCategory.WORKER_CONNECTION
         assert worker not in env._workers
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_dispatch_serialization_failure_keeps_worker_available(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+
+        task = Task()
+        task._payload = dict(action="execute", module_path="m.py", function="f", args=(), kwargs={})
+        worker.connection.send.side_effect = TypeError("cannot pickle payload")
+
+        env._dispatch_to_worker(worker, task)
+
+        assert task.status == TaskStatus.FAILED
+        assert task.error is not None
+        assert task.error.category == TaskFailureCategory.SERIALIZATION
+        assert task.error.serialization_context == "payload"
+        assert worker in env._workers
+        assert worker._current_task is None
+        mock_kill.assert_not_called()
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_reader_structured_error_preserves_remote_exception(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        task = Task()
+        task._set_running()
+        worker._current_task = task
+
+        worker.connection.recv.side_effect = [
+            {
+                "action": "error",
+                "failure": {
+                    "category": "remote_exception",
+                    "message": "bad",
+                    "traceback": "Traceback...\nValueError: bad\n",
+                    "remote_exception": {
+                        "module": "worker_mod",
+                        "type_name": "ValueError",
+                        "qualified_name": "ValueError",
+                        "message": "bad",
+                        "traceback": "ValueError: bad\n",
+                        "cause": None,
+                        "context": None,
+                        "suppress_context": False,
+                    },
+                },
+            },
+            EOFError(),
+        ]
+        env._worker_reader_loop(worker)
+
+        assert task.error is not None
+        assert task.error.remote_exception is not None
+        assert task.error.remote_exception.module == "worker_mod"
+        assert str(task.exception) == "Remote ValueError from worker_mod: bad"
 
     @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
     def test_start_skips_dead_workers_in_idle_queue(self, mock_kill):
@@ -931,7 +1051,7 @@ class TestHealthMonitor:
 
         assert task.status == TaskStatus.FAILED
         assert task.error is not None
-        assert "exit code" in task.error
+        assert "exit code" in task.error.message
         assert worker not in env._workers
         env._try_replace_worker.assert_called_once_with(0)
 
@@ -973,7 +1093,7 @@ class TestHealthMonitor:
 
         assert task.status == TaskStatus.FAILED
         assert task.error is not None
-        assert "timed out" in task.error
+        assert "timed out" in task.error.message
         assert worker not in env._workers
 
     def test_no_timeout_when_activity_recent(self):
@@ -1023,10 +1143,10 @@ class TestExitFailsQueuedTasks:
 
         assert task1.status == TaskStatus.FAILED
         assert task1.error is not None
-        assert "shutting down" in task1.error
+        assert "shutting down" in task1.error.message
         assert task2.status == TaskStatus.FAILED
         assert task2.error is not None
-        assert "shutting down" in task2.error
+        assert "shutting down" in task2.error.message
         assert env._task_queue.empty()
 
 
