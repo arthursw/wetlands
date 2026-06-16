@@ -29,6 +29,7 @@ else:
 
 if TYPE_CHECKING:
     from wetlands._internal.exceptions import ExecutionException
+    from wetlands._internal.diagnostics import TaskFailure
 else:
     try:
         from wetlands._internal.exceptions import ExecutionException
@@ -36,6 +37,17 @@ else:
         # When loaded in isolated environments via import_from_path,
         # wetlands package is not available. RemoteTaskHandle doesn't need it.
         ExecutionException = Exception
+    try:
+        from wetlands._internal.diagnostics import TaskFailure
+    except ImportError:
+        TaskFailure = None  # type: ignore[assignment]
+
+try:
+    from wetlands._internal.diagnostics import RemoteExceptionInfo, TaskFailureCategory, WorkerInfo
+except ImportError:
+    RemoteExceptionInfo = Any  # type: ignore[misc,assignment]
+    TaskFailureCategory = Any  # type: ignore[misc,assignment]
+    WorkerInfo = Any  # type: ignore[misc,assignment]
 
 T = TypeVar("T")
 
@@ -82,8 +94,8 @@ class Task(Generic[T]):
         self._id = task_id or str(uuid.uuid4())
         self._status = TaskStatus.PENDING
         self._result: T | None = None
-        self._error: str | None = None
-        self._traceback: list[str] | None = None
+        self._error: TaskFailure | None = None
+        self._traceback: str | None = None
         self._exception: ExecutionException | None = None
         self._message: str | None = None
         self._current: int | None = None
@@ -116,11 +128,11 @@ class Task(Generic[T]):
         return self._result  # type: ignore[return-value]
 
     @property
-    def error(self) -> str | None:
+    def error(self) -> TaskFailure | None:
         return self._error
 
     @property
-    def traceback(self) -> list[str] | None:
+    def traceback(self) -> str | None:
         return self._traceback
 
     @property
@@ -287,14 +299,21 @@ class Task(Generic[T]):
         self._emit(TaskEventType.COMPLETION)
         self._done_event.set()
 
-    def _set_failed(self, error: str, traceback: list[str] | None = None) -> None:
+    def _set_failed(self, error: Any, traceback: list[str] | str | None = None) -> None:
+        call_target = self._payload.get("_call_target") if isinstance(self._payload, dict) else None
+        if TaskFailure is not None:
+            failure = TaskFailure.normalize(error, traceback=traceback, task_id=self._id, call_target=call_target)
+            exception = ExecutionException(failure)
+        else:
+            failure = error
+            exception = ExecutionException({"exception": str(error), "traceback": traceback or []})
         with self._lock:
             if self._status.is_finished():
                 return
             self._status = TaskStatus.FAILED
-            self._error = error
-            self._traceback = traceback
-            self._exception = ExecutionException({"exception": error, "traceback": traceback or []})
+            self._error = failure
+            self._traceback = failure.traceback if TaskFailure is not None else traceback  # type: ignore[union-attr,assignment]
+            self._exception = exception
         self._future.set_exception(self._exception)
         self._emit(TaskEventType.FAILURE)
         self._done_event.set()
@@ -342,7 +361,7 @@ class Task(Generic[T]):
         if action == "execution finished":
             self._set_completed(cast(T, message.get("result")))
         elif action == "error":
-            self._set_failed(message.get("exception", "Unknown error"), message.get("traceback"))
+            self._set_failed(message)
         elif action == "update":
             self._set_update(
                 message=message.get("message"),
@@ -386,8 +405,7 @@ class RemoteTaskHandle:
             payload["current"] = current
         if maximum is not None:
             payload["maximum"] = maximum
-        with self._lock:
-            self._connection.send(payload)
+        self._send(payload, "update")
 
     def set_output(self, key: str, value: Any) -> None:
         """Publish a named intermediate output (must be picklable)."""
@@ -396,14 +414,12 @@ class RemoteTaskHandle:
             "task_id": self._task_id,
             "outputs": {key: value},
         }
-        with self._lock:
-            self._connection.send(payload)
+        self._send(payload, "output")
 
     def cancel(self) -> None:
         """Acknowledge cancellation. Transitions the task to CANCELED."""
         payload = {"action": "canceled", "task_id": self._task_id}
-        with self._lock:
-            self._connection.send(payload)
+        self._send(payload, "cancel")
 
     def log(self, message: str, level: int = logging.INFO) -> None:
         """Send a log message to the caller's logging system."""
@@ -413,12 +429,27 @@ class RemoteTaskHandle:
             "message": message,
             "level": level,
         }
-        with self._lock:
-            self._connection.send(payload)
+        self._send(payload, "log")
 
     def _set_cancel_requested(self) -> None:
         """Called by the module_executor when a cancel message is received."""
         self._cancel_requested = True
+
+    def _send(self, payload: dict[str, Any], context: str) -> None:
+        try:
+            with self._lock:
+                self._connection.send(payload)
+        except Exception as e:
+            raise RemoteTaskSerializationError(context, e) from e
+
+
+class RemoteTaskSerializationError(RuntimeError):
+    """Raised in remote code when progress/output/log IPC payloads cannot be serialized."""
+
+    def __init__(self, context: str, original: BaseException) -> None:
+        self.category = "serialization"
+        self.serialization_context = context
+        super().__init__(f"Failed to serialize task {context}: {original}")
 
 
 class InvalidStateError(Exception):

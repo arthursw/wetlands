@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from collections.abc import Callable
 
@@ -37,6 +38,60 @@ class WetlandsAdapter(logging.LoggerAdapter):
 # create a base logger and wrap it
 _base = logging.getLogger("wetlands")
 logger = WetlandsAdapter(_base, {})
+
+
+class _MaxLevelFilter(logging.Filter):
+    def __init__(self, max_level: int) -> None:
+        super().__init__()
+        self.max_level = max_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno <= self.max_level
+
+
+def create_split_stream_handlers(
+    fmt: str = "%(levelname)s: %(message)s",
+    stdout_level: int = logging.DEBUG,
+    stderr_level: int = logging.WARNING,
+) -> tuple[logging.StreamHandler, logging.StreamHandler]:
+    """Create console handlers that route DEBUG/INFO to stdout and WARNING+ to stderr."""
+    formatter = logging.Formatter(fmt)
+
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(stdout_level)
+    stdout_handler.addFilter(_MaxLevelFilter(logging.INFO))
+    stdout_handler.setFormatter(formatter)
+    stdout_handler._wetlands_split_stream_handler = True  # type: ignore[attr-defined]
+
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(stderr_level)
+    stderr_handler.setFormatter(formatter)
+    stderr_handler._wetlands_split_stream_handler = True  # type: ignore[attr-defined]
+
+    return stdout_handler, stderr_handler
+
+
+def enable_console_logging(
+    level: int = logging.INFO,
+    fmt: str = "%(levelname)s: %(message)s",
+) -> tuple[logging.StreamHandler, logging.StreamHandler]:
+    """Enable Wetlands console logging with DEBUG/INFO on stdout and WARNING+ on stderr."""
+    existing_handlers: list[logging.StreamHandler] = []
+    for handler in _base.handlers:
+        if isinstance(handler, logging.StreamHandler) and getattr(handler, "_wetlands_split_stream_handler", False):
+            existing_handlers.append(handler)
+
+    if len(existing_handlers) >= 2:
+        _base.setLevel(level)
+        _base.propagate = False
+        return existing_handlers[0], existing_handlers[1]
+
+    handlers = create_split_stream_handlers(fmt=fmt)
+    for handler in handlers:
+        _base.addHandler(handler)
+    _base.setLevel(level)
+    _base.propagate = False
+    return handlers
 
 
 def enable_file_logging(

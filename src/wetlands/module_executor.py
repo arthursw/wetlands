@@ -90,20 +90,51 @@ _detached_stdio = False
 args: argparse.Namespace | None = None
 
 
+class _MaxLevelFilter(logging.Filter):
+    def __init__(self, max_level: int) -> None:
+        super().__init__()
+        self.max_level = max_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno <= self.max_level
+
+
+def _create_split_stream_handlers(fmt: str) -> tuple[logging.StreamHandler, logging.StreamHandler]:
+    formatter = logging.Formatter(fmt)
+
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.addFilter(_MaxLevelFilter(logging.INFO))
+    stdout_handler.setFormatter(formatter)
+
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(formatter)
+
+    return stdout_handler, stderr_handler
+
+
 def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -> Path:
     """Configure module executor logging under the Wetlands instance directory."""
     log_path = Path(wetlands_instance_path).resolve() / "environments.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s",
-        handlers=[
-            logging.FileHandler(log_path, encoding="utf-8"),
-            logging.StreamHandler(),
-        ],
-        force=True,
-    )
+    fmt = "%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s"
+    formatter = logging.Formatter(fmt)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(formatter)
+    stdout_handler, stderr_handler = _create_split_stream_handlers(fmt)
+
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        handler.close()
+    root_logger.setLevel(level)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
     return log_path
 
 
@@ -177,18 +208,76 @@ def send_message(lock: threading.Lock, connection: Connection, message: dict):
         connection.send(message)
 
 
-def handle_execution_error(lock: threading.Lock, connection: Connection, e: Exception, task_id: str | None = None):
+def _remote_exception_payload(e: BaseException) -> dict:
+    exc_type = type(e)
+    return {
+        "module": exc_type.__module__,
+        "type_name": exc_type.__name__,
+        "qualified_name": getattr(exc_type, "__qualname__", exc_type.__name__),
+        "message": str(e),
+        "traceback": "".join(traceback.format_exception(exc_type, e, e.__traceback__, chain=False)),
+        "cause": _remote_exception_payload(e.__cause__) if e.__cause__ is not None else None,
+        "context": _remote_exception_payload(e.__context__) if e.__context__ is not None else None,
+        "suppress_context": bool(getattr(e, "__suppress_context__", False)),
+    }
+
+
+def _failure_payload(
+    e: BaseException,
+    *,
+    task_id: str | None = None,
+    call_target: str | None = None,
+    category: str | None = None,
+    serialization_context: str | None = None,
+) -> dict:
+    resolved_category = category or getattr(e, "category", None) or "remote_exception"
+    resolved_context = serialization_context or getattr(e, "serialization_context", None)
+    return {
+        "category": resolved_category,
+        "message": str(e),
+        "task_id": task_id,
+        "call_target": call_target,
+        "traceback": "".join(traceback.format_exception(type(e), e, e.__traceback__, chain=True)),
+        "traceback_frames": traceback.format_tb(e.__traceback__),
+        "remote_exception": _remote_exception_payload(e),
+        "worker": None,
+        "exit_code": None,
+        "signal": None,
+        "timeout": None,
+        "elapsed": None,
+        "serialization_context": resolved_context,
+    }
+
+
+def handle_execution_error(
+    lock: threading.Lock,
+    connection: Connection,
+    e: Exception,
+    task_id: str | None = None,
+    *,
+    call_target: str | None = None,
+    category: str | None = None,
+    serialization_context: str | None = None,
+):
     """Common error handling for any execution type."""
     logger.error(str(e))
     logger.error("Traceback:")
-    tbftb = traceback.format_tb(e.__traceback__)
-    for line in tbftb:
+    traceback_frames = traceback.format_tb(e.__traceback__)
+    for line in traceback_frames:
         logger.error(line)
     sys.stderr.flush()
+    failure = _failure_payload(
+        e,
+        task_id=task_id,
+        call_target=call_target,
+        category=category,
+        serialization_context=serialization_context,
+    )
     msg = dict(
         action="error",
+        failure=failure,
         exception=str(e),
-        traceback=tbftb,
+        traceback=failure["traceback"],
     )
     if task_id is not None:
         msg["task_id"] = task_id
@@ -257,6 +346,7 @@ def execution_worker(lock: threading.Lock, connection: Connection, message: dict
     Worker function handling both 'execute' and 'run' actions.
     """
     task_id = message.get("task_id")
+    call_target = message.get("_call_target")
     try:
         action = message["action"]
         if action == "execute":
@@ -273,9 +363,20 @@ def execution_worker(lock: threading.Lock, connection: Connection, message: dict
         )
         if task_id is not None:
             response["task_id"] = task_id
-        send_message(lock, connection, response)
+        try:
+            send_message(lock, connection, response)
+        except Exception as e:
+            handle_execution_error(
+                lock,
+                connection,
+                e,
+                task_id=task_id,
+                call_target=call_target,
+                category="serialization",
+                serialization_context="result",
+            )
     except Exception as e:
-        handle_execution_error(lock, connection, e, task_id=task_id)
+        handle_execution_error(lock, connection, e, task_id=task_id, call_target=call_target)
 
 
 def get_message(connection: Connection) -> dict:

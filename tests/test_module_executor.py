@@ -5,6 +5,7 @@ import pytest
 from multiprocessing.context import AuthenticationError
 
 from wetlands import module_executor
+from wetlands.task import RemoteTaskSerializationError
 
 
 class TestConfigureLogging:
@@ -30,6 +31,45 @@ class TestConfigureLogging:
             assert log_path.exists()
             assert "hello from worker" in log_path.read_text()
             assert not (cwd / "environments.log").exists()
+        finally:
+            for handler in list(root_logger.handlers):
+                root_logger.removeHandler(handler)
+                handler.close()
+            for handler in previous_handlers:
+                root_logger.addHandler(handler)
+            root_logger.setLevel(previous_level)
+
+    def test_configure_logging_splits_console_streams_and_preserves_file_logging(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        wetlands_instance_path = tmp_path / "wetlands"
+        monkeypatch.chdir(cwd)
+        root_logger = logging.getLogger()
+        previous_handlers = list(root_logger.handlers)
+        previous_level = root_logger.level
+        for handler in previous_handlers:
+            root_logger.removeHandler(handler)
+
+        log_path = module_executor.configure_logging(wetlands_instance_path)
+
+        try:
+            worker_logger = logging.getLogger("test_env")
+            worker_logger.info("worker progress")
+            worker_logger.error("worker failure")
+            for handler in root_logger.handlers:
+                handler.flush()
+
+            captured = capsys.readouterr()
+            assert "worker progress" in captured.out
+            assert "worker progress" not in captured.err
+            assert "worker failure" in captured.err
+            assert "worker failure" not in captured.out
+
+            log_content = log_path.read_text()
+            assert "worker progress" in log_content
+            assert "worker failure" in log_content
         finally:
             for handler in list(root_logger.handlers):
                 root_logger.removeHandler(handler)
@@ -68,6 +108,8 @@ class TestHandleExecutionError:
             assert call_args[0][0] == mock_lock
             assert call_args[0][1] == mock_connection
             assert call_args[0][2]["action"] == "error"
+            assert call_args[0][2]["failure"]["category"] == "remote_exception"
+            assert call_args[0][2]["failure"]["remote_exception"]["type_name"] == "Exception"
             assert "Test error" in call_args[0][2]["exception"]
             assert "task_id" not in call_args[0][2]
 
@@ -81,6 +123,7 @@ class TestHandleExecutionError:
             module_executor.handle_execution_error(mock_lock, mock_connection, exception, task_id="task-123")
             call_args = mock_send.call_args
             assert call_args[0][2]["task_id"] == "task-123"
+            assert call_args[0][2]["failure"]["task_id"] == "task-123"
 
     def test_handle_execution_error_without_task_id(self):
         """Test backward compat: no task_id field when not provided"""
@@ -92,6 +135,54 @@ class TestHandleExecutionError:
             module_executor.handle_execution_error(mock_lock, mock_connection, exception)
             msg = mock_send.call_args[0][2]
             assert "task_id" not in msg
+
+    def test_handle_execution_error_preserves_chained_exception(self):
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        try:
+            try:
+                raise RuntimeError("root")
+            except RuntimeError as e:
+                raise ValueError("outer") from e
+        except ValueError as exception:
+            with patch("wetlands.module_executor.send_message") as mock_send:
+                module_executor.handle_execution_error(mock_lock, mock_connection, exception, task_id="task-chain")
+
+        failure = mock_send.call_args[0][2]["failure"]
+        assert failure["remote_exception"]["type_name"] == "ValueError"
+        assert failure["remote_exception"]["cause"]["type_name"] == "RuntimeError"
+        assert "The above exception was the direct cause" in failure["traceback"]
+
+    def test_handle_execution_error_can_report_serialization_context(self):
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        exception = TypeError("cannot pickle result")
+
+        with patch("wetlands.module_executor.send_message") as mock_send:
+            module_executor.handle_execution_error(
+                mock_lock,
+                mock_connection,
+                exception,
+                task_id="task-result",
+                category="serialization",
+                serialization_context="result",
+            )
+
+        failure = mock_send.call_args[0][2]["failure"]
+        assert failure["category"] == "serialization"
+        assert failure["serialization_context"] == "result"
+
+    def test_remote_task_handle_serialization_error_is_serialization_failure(self):
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+        exception = RemoteTaskSerializationError("output", TypeError("cannot pickle output"))
+
+        with patch("wetlands.module_executor.send_message") as mock_send:
+            module_executor.handle_execution_error(mock_lock, mock_connection, exception, task_id="task-output")
+
+        failure = mock_send.call_args[0][2]["failure"]
+        assert failure["category"] == "serialization"
+        assert failure["serialization_context"] == "output"
 
 
 class TestExecuteFunction:

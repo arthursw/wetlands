@@ -52,9 +52,9 @@ Once a task is created, you can inspect its state through these read-only proper
 | `id` | `str` | Unique identifier (UUID4) |
 | `status` | [`TaskStatus`][wetlands.task.TaskStatus] | Current lifecycle state (`PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELED`) |
 | `result` | `T` | Return value of the remote function. Raises `InvalidStateError` if the task is not `COMPLETED`. |
-| `error` | `str \| None` | Error message string when `FAILED`, otherwise `None` |
-| `exception` | [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] `\| None` | Exception wrapping the error message and traceback. `None` unless the task has failed. |
-| `traceback` | `list[str] \| None` | Traceback lines when `FAILED`, otherwise `None` |
+| `error` | `TaskFailure \| None` | Structured failure diagnostics when `FAILED`, otherwise `None` |
+| `exception` | [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] `\| None` | Exception wrapping `error`. `None` unless the task has failed. |
+| `traceback` | `str \| None` | Full formatted traceback text when available, otherwise `None` |
 | `message` | `str \| None` | Latest progress message from `update()` |
 | `current` | `int \| None` | Current progress counter from `update()` |
 | `maximum` | `int \| None` | Maximum progress counter from `update()` |
@@ -115,7 +115,7 @@ def on_event(event):
         case TaskEventType.COMPLETION:
             print(f"Done: {event.task.result}")
         case TaskEventType.FAILURE:
-            print(f"Failed: {event.task.error}")
+            print(f"Failed: {event.task.error.message}")
 
 # start=False to register listener before dispatch
 task = env.submit("remote_module.py", "long_computation",
@@ -187,15 +187,23 @@ When a task fails, you can inspect the error in several ways:
 task.wait_for()
 
 if task.status == TaskStatus.FAILED:
-    print(task.error)               # error message string
-    print(task.traceback)           # list of traceback lines
-    print(task.exception)           # ExecutionException wrapping both
+    print(task.error.message)       # short failure message
+    print(task.error.category)      # remote_exception, serialization, worker_died, ...
+    print(task.traceback)           # full formatted traceback string
+    print(task.exception)           # concise human-readable ExecutionException
 
     # Or via the underlying Future:
     print(task.future.exception())  # same ExecutionException
 ```
 
-The `exception` property returns an [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] that carries both the error message (`.exception`) and the traceback lines (`.traceback`).
+The `exception` property returns an [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] whose canonical structured payload is `task.exception.failure`.
+For failed tasks, `task.error is task.exception.failure`, and `task.future.exception() is task.exception`.
+
+`TaskFailure` preserves programmatic diagnostics where available, including the original remote exception module and type, message, full traceback, cause/context chain, worker index/pid/port, process exit code or signal, timeout details, and serialization context.
+`str(task.exception)` is designed for humans, for example `Remote ValueError from my_module: bad input` or `Worker 0 pid 123 died with signal 9`.
+
+Cancellation is a lifecycle state, not a failure.
+When remote code acknowledges cancellation with `task.cancel()`, the task becomes `TaskStatus.CANCELED`, and `task.error`, `task.exception`, and `task.traceback` remain `None`.
 
 ---
 
@@ -447,7 +455,7 @@ def on_event(event):
         case TaskEventType.COMPLETION:
             bridge.completed.emit(event.task.result)
         case TaskEventType.FAILURE:
-            bridge.failed.emit(event.task.error or "Unknown error")
+            bridge.failed.emit(event.task.error.message if event.task.error else "Unknown error")
 
 task = env.submit("segment.py", "segment_image", args=(image,), start=False)
 task.listen(on_event).start()

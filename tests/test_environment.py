@@ -6,6 +6,8 @@ from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 from types import ModuleType
 from wetlands.environment import Environment
+from wetlands._internal.diagnostics import TaskFailure
+from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.command_generator import Commands
 
 
@@ -85,6 +87,31 @@ def clean():
     assert hasattr(fake_module, "create_array")
     assert hasattr(fake_module, "clean")
     assert fake_module.clean() == f"Executed clean in {module_path} with args () and kwargs {{}}"
+
+
+def test_importModule_fake_method_preserves_execute_diagnostics(mock_environment_manager, tmp_path):
+    module_path = tmp_path / "remote_failure.py"
+    module_path.write_text(
+        """
+raise RuntimeError("local import should not block proxy creation")
+
+def boom():
+    pass
+"""
+    )
+
+    class FailingEnvironment(DummyEnvironment):
+        def execute(self, module_path, function, args=(), kwargs={}):
+            raise ExecutionException(TaskFailure.environment("remote failure", call_target=f"{Path(module_path).stem}:{function}"))
+
+    env = FailingEnvironment("test_env", Path("/tmp/test_env"), mock_environment_manager)
+    fake_module = env.import_module(module_path)
+
+    with pytest.raises(ExecutionException) as exc_info:
+        fake_module.boom()
+
+    assert exc_info.value.failure.call_target == "remote_failure:boom"
+    assert exc_info.value.failure.message == "remote failure"
 
 
 def test_exit(dummy_env, mock_environment_manager):

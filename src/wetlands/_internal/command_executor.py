@@ -157,6 +157,8 @@ class CommandExecutor:
         # Wait for reader thread to finish processing all output
         if process_logger._reader_thread is not None and process_logger._reader_thread.is_alive():
             process_logger._reader_thread.join(timeout=5.0)
+        if process_logger._stderr_reader_thread is not None and process_logger._stderr_reader_thread.is_alive():
+            process_logger._stderr_reader_thread.join(timeout=5.0)
 
         return process_logger
 
@@ -177,7 +179,7 @@ class CommandExecutor:
         Args:
                 commands: List of shell commands to execute.
                 exit_if_command_error: Whether to insert error checking after each command to make sure the whole command chain stops if an error occurs (otherwise the script will be executed entirely even when one command fails at the beginning).
-                popen_kwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+                popen_kwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1) when logging is enabled. With log=False, stderr defaults to subprocess.STDOUT so callers can keep manually reading one stream.
                 wait: Whether to wait for the process to complete before returning.
                 remove_python_env_vars: Whether to remove PYTHONEXECUTABLE, PYTHONHOME and PYTHONPATH from the environment variables to avoid interference with conda/pixi environment activation.
                 log_context: Optional context dict to attach to logs. If provided, ProcessLogger will emit logs with this context.
@@ -236,7 +238,7 @@ class CommandExecutor:
 
             default_popen_kwargs = {
                 "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,  # Merge stderr and stdout to handle all them with a single loop
+                "stderr": subprocess.PIPE if log else subprocess.STDOUT,
                 "stdin": subprocess.DEVNULL,  # Prevent the command to wait for input: instead we want to stop if this happens
                 "encoding": "utf-8",
                 "errors": "replace",  # Determines how encoding and decoding errors should be handled: replaces invalid characters with a placeholder (e.g., ? in ASCII).

@@ -3,6 +3,8 @@ import pytest
 import sys
 from unittest.mock import MagicMock, patch
 from wetlands.environment_manager import EnvironmentManager
+from wetlands._internal.exceptions import ExecutionException
+from wetlands._internal.diagnostics import TaskFailureCategory
 from wetlands.internal_environment import InternalEnvironment
 from wetlands.task import Task, TaskStatus
 
@@ -40,8 +42,10 @@ def test_execute_raises_exception_for_missing_function():
         patch.object(internal_env, "_import_module", return_value=mock_module),
         patch.object(internal_env, "_is_mod_function", return_value=False),
     ):
-        with pytest.raises(Exception, match=f"Module {module_path} has no function {function_name}."):
+        with pytest.raises(ExecutionException) as exc_info:
             internal_env.execute(module_path, function_name, ())
+        assert f"Module {module_path} has no function {function_name}." in str(exc_info.value)
+        assert exc_info.value.failure.category == TaskFailureCategory.INTERNAL_EXCEPTION
 
 
 def test_run_script_success():
@@ -175,3 +179,44 @@ def test_map_tasks_returns_task_list(internal_env):
             assert t.status == TaskStatus.COMPLETED
 
         assert [t.result for t in tasks] == [4, 9, 25]
+
+
+def test_submit_failure_has_structured_diagnostics(internal_env):
+    module_path = "fake_module.py"
+    mock_module = MagicMock()
+
+    def boom():
+        raise ValueError("local boom")
+
+    mock_module.boom = boom
+
+    with patch.object(internal_env, "_import_module", return_value=mock_module):
+        task = internal_env.submit(module_path, "boom")
+        task.wait_for(timeout=5)
+
+    assert task.status == TaskStatus.FAILED
+    assert task.error is not None
+    assert task.error.category == TaskFailureCategory.INTERNAL_EXCEPTION
+    assert task.error.remote_exception is not None
+    assert task.error.remote_exception.type_name == "ValueError"
+    assert "local boom" in str(task.exception)
+
+
+def test_map_raises_structured_task_exception(internal_env):
+    module_path = "fake_module.py"
+    mock_module = MagicMock()
+
+    def maybe_boom(x):
+        if x == 2:
+            raise RuntimeError("bad item")
+        return x
+
+    mock_module.maybe_boom = maybe_boom
+
+    with patch.object(internal_env, "_import_module", return_value=mock_module):
+        with pytest.raises(ExecutionException) as exc_info:
+            list(internal_env.map(module_path, "maybe_boom", [1, 2, 3]))
+
+    assert exc_info.value.failure.category == TaskFailureCategory.INTERNAL_EXCEPTION
+    assert exc_info.value.failure.remote_exception is not None
+    assert exc_info.value.failure.remote_exception.type_name == "RuntimeError"

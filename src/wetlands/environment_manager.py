@@ -780,7 +780,7 @@ class EnvironmentManager:
                 environment: The environment in which to execute commands.
                 commands: The commands to execute in the environment.
                 additional_activate_commands: Platform-specific activation commands.
-                popen_kwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1).
+                popen_kwargs: Keyword arguments for subprocess.Popen() (see [Popen documentation](https://docs.python.org/3/library/subprocess.html#popen-constructor)). Defaults are: dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace", bufsize=1) when logging is enabled. With log=False, stderr defaults to subprocess.STDOUT so callers can keep manually reading one stream.
                 log_context: Optional context dict to attach to logs via ProcessLogger.
                 log: Whether to log the process output.
 

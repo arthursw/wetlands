@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import runpy
 import sys
-import traceback
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
@@ -10,7 +9,9 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from wetlands.environment import Environment
-from wetlands.task import Task
+from wetlands._internal.diagnostics import TaskFailure, TaskFailureCategory
+from wetlands._internal.exceptions import ExecutionException
+from wetlands.task import Task, TaskStatus
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
@@ -41,10 +42,22 @@ class InternalEnvironment(Environment):
         Returns:
                 The result of the function
         """
-        module = self._import_module(module_path)
-        if not self._is_mod_function(module, function):
-            raise Exception(f"Module {module_path} has no function {function}.")
-        return getattr(module, function)(*args)
+        call_target = f"{Path(module_path).stem}:{function}"
+        try:
+            module = self._import_module(module_path)
+            if not self._is_mod_function(module, function):
+                raise Exception(f"Module {module_path} has no function {function}.")
+            return getattr(module, function)(*args)
+        except ExecutionException:
+            raise
+        except Exception as e:
+            raise ExecutionException(
+                TaskFailure.from_exception(
+                    e,
+                    category=TaskFailureCategory.INTERNAL_EXCEPTION,
+                    call_target=call_target,
+                )
+            ) from e
 
     def run_script(self, script_path: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
         """
@@ -60,9 +73,20 @@ class InternalEnvironment(Environment):
             The resulting globals dict from the executed script, or None on failure.
         """
         script_path = str(script_path)
-        sys.argv = [script_path] + list(args)
-        runpy.run_path(script_path, run_name=run_name)
-        return None
+        try:
+            sys.argv = [script_path] + list(args)
+            runpy.run_path(script_path, run_name=run_name)
+            return None
+        except ExecutionException:
+            raise
+        except Exception as e:
+            raise ExecutionException(
+                TaskFailure.from_exception(
+                    e,
+                    category=TaskFailureCategory.INTERNAL_EXCEPTION,
+                    call_target=Path(script_path).name,
+                )
+            ) from e
 
     def submit(
         self,
@@ -83,8 +107,16 @@ class InternalEnvironment(Environment):
                 module = self._import_module(module_path)
                 result = getattr(module, function)(*args, **kwargs)
                 task._set_completed(result)
+            except ExecutionException as e:
+                task._set_failed(e.failure)
             except Exception as e:
-                task._set_failed(str(e), traceback.format_tb(e.__traceback__))
+                task._set_failed(
+                    TaskFailure.from_exception(
+                        e,
+                        category=TaskFailureCategory.INTERNAL_EXCEPTION,
+                        call_target=f"{Path(module_path).stem}:{function}",
+                    )
+                )
 
         def _start() -> None:
             self._pool.submit(_dispatch)
@@ -110,8 +142,16 @@ class InternalEnvironment(Environment):
             try:
                 self.run_script(script_path, args=args, run_name=run_name)
                 task._set_completed(None)
+            except ExecutionException as e:
+                task._set_failed(e.failure)
             except Exception as e:
-                task._set_failed(str(e), traceback.format_tb(e.__traceback__))
+                task._set_failed(
+                    TaskFailure.from_exception(
+                        e,
+                        category=TaskFailureCategory.INTERNAL_EXCEPTION,
+                        call_target=Path(script_path).name,
+                    )
+                )
 
         def _start() -> None:
             self._pool.submit(_dispatch)
@@ -134,6 +174,8 @@ class InternalEnvironment(Environment):
         tasks = self.map_tasks(module_path, function, iterable)
         for task in tasks:
             task.wait_for(timeout=timeout)
+            if task.status == TaskStatus.FAILED:
+                raise task.exception  # type: ignore[misc]
             yield task.result
 
     def map_tasks(
