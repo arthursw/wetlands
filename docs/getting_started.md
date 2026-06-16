@@ -193,7 +193,7 @@ print(f"Segmentation complete. Found diameters of {diameters} pixels.")
 
 !!! tip "Tracking progress with blocking calls"
 
-    Even when using the blocking API, you can track what happens inside the environment through Wetlands' [logging system](logging.md). The environment's stdout is captured in real time and routed through Python's `logging` module, so `print()` statements in remote code appear as log messages that you can filter, redirect, or display in a GUI. See [Logging](logging.md) for details.
+    Even when using the blocking API, you can track what happens inside the environment through Wetlands' [logging system](logging.md). Environment output is captured in real time and routed through Python's `logging` module as progress logs, so `print()` statements in remote code appear as log messages that you can filter, redirect, or display in a GUI. When split console logging is enabled, routine progress appears on stdout and warnings/errors appear on stderr. See [Logging](logging.md) for details.
 
 !!! note "Function arguments must be serializable"
 

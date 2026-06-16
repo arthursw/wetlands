@@ -1,4 +1,4 @@
-"""ProcessLogger handles non-blocking stdout reading from subprocesses with log context tracking."""
+"""ProcessLogger handles non-blocking stdout/stderr reading from subprocesses with log context tracking."""
 
 import subprocess
 import threading
@@ -8,13 +8,13 @@ from collections.abc import Callable as CallableType
 
 
 class ProcessLogger:
-    """Reads subprocess stdout in a background thread and emits logs with context metadata.
+    """Reads subprocess stdout/stderr in background threads and emits logs with context metadata.
 
-    This solves the problem of multiple threads competing for process.stdout and enables
-    real-time log emission with attached context (log_source, env_name, etc.).
+    This solves the problem of multiple threads competing for process pipes and enables
+    real-time log emission with attached context (log_source, env_name, stream, etc.).
 
     Usage:
-        process = subprocess.Popen([...], stdout=subprocess.PIPE, text=True)
+        process = subprocess.Popen([...], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         logger = ProcessLogger(process, log_context={"log_source": "environment", "env_name": "cellpose"})
         logger.subscribe(my_callback)
         logger.start_reading()
@@ -33,8 +33,11 @@ class ProcessLogger:
         self.base_logger = base_logger
         self._subscribers: list[CallableType[[str, dict], None]] = []
         self._reader_thread: Optional[threading.Thread] = None
+        self._stderr_reader_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._output: list[str] = []  # Accumulate all output lines
+        self._stdout_output: list[str] = []
+        self._stderr_output: list[str] = []
 
     def subscribe(self, callback: CallableType[[str, dict], None], include_history: bool = True) -> None:
         """Register a callback to be notified of each log line.
@@ -61,20 +64,30 @@ class ProcessLogger:
             self.log_context.update(context_update)
 
     def start_reading(self) -> None:
-        """Start reading process stdout in a background daemon thread."""
-        if self._reader_thread is not None:
+        """Start reading process stdout/stderr in background daemon threads."""
+        if self._reader_thread is not None or self._stderr_reader_thread is not None:
             return
 
-        self._reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
-        self._reader_thread.start()
+        if self.process.stdout is not None:
+            self._reader_thread = threading.Thread(
+                target=self._read_stream,
+                args=(self.process.stdout, "stdout", logging.INFO),
+                daemon=True,
+            )
+            self._reader_thread.start()
 
-    def _read_stdout(self) -> None:
-        """Read stdout line-by-line and emit logs with context."""
-        if self.process.stdout is None:
-            return
+        if self.process.stderr is not None:
+            self._stderr_reader_thread = threading.Thread(
+                target=self._read_stream,
+                args=(self.process.stderr, "stderr", logging.ERROR),
+                daemon=True,
+            )
+            self._stderr_reader_thread.start()
 
+    def _read_stream(self, stream, stream_name: str, level: int) -> None:
+        """Read a process stream line-by-line and emit logs with context."""
         try:
-            for line in iter(self.process.stdout.readline, ""):
+            for line in iter(stream.readline, ""):
                 line = line.strip()
                 if not line:
                     continue
@@ -82,9 +95,15 @@ class ProcessLogger:
                 # Accumulate output
                 with self._lock:
                     self._output.append(line)
+                    if stream_name == "stderr":
+                        self._stderr_output.append(line)
+                    else:
+                        self._stdout_output.append(line)
 
                 # Emit to logger with context attached via extra
-                self.base_logger.info(line, extra=self.log_context)
+                extra = self.log_context.copy()
+                extra["stream"] = stream_name
+                self.base_logger.log(level, line, extra=extra)
 
                 # Notify subscribers
                 with self._lock:
@@ -109,6 +128,16 @@ class ProcessLogger:
         """
         with self._lock:
             return self._output.copy()
+
+    def get_stdout_output(self) -> list[str]:
+        """Get accumulated stdout lines read so far."""
+        with self._lock:
+            return self._stdout_output.copy()
+
+    def get_stderr_output(self) -> list[str]:
+        """Get accumulated stderr lines read so far."""
+        with self._lock:
+            return self._stderr_output.copy()
 
     def wait_for_line(
         self, predicate: Callable[[str], bool], timeout: Optional[float] = None, include_history: bool = True

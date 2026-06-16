@@ -21,12 +21,12 @@ Wetlands automatically logs all operations (environment creation, installation, 
 - By default, manager logs are written to `"wetlands/wetlands.log"` when using `EnvironmentManager`
 - Worker process logs are written to `"wetlands/environments.log"`
 - Relative log paths are resolved inside the `wetlands_instance_path`; absolute log paths are used as provided
-- Use `logging.basicConfig()` or add handlers to enable console output
+- Use `wetlands.logger.enable_console_logging()` to enable console output with `DEBUG`/`INFO` on stdout and `WARNING`/`ERROR`/`CRITICAL` on stderr
 - Most logs include context fields (environment name, operation type, etc.)
-- ProcessLogger reads subprocess output in background threads for real-time logging
+- ProcessLogger reads subprocess stdout and stderr in background threads. Stdout lines are emitted as `INFO` progress logs and follow the stdout path; stderr lines are emitted as `ERROR` logs and follow the stderr path.
 
 !!! note
-    By default, `execute_commands()` functions read process stdout in a background thread via ProcessLogger. If you need to read stdout manually, pass `log=False` to disable automatic logging.
+    By default, `execute_commands()` functions read process stdout and stderr in background threads via ProcessLogger. If you need to read stdout manually, pass `log=False` to disable automatic logging; in that mode the default subprocess stderr stream remains merged into stdout unless you pass custom `popen_kwargs`.
 
 ## Log Context
 
@@ -54,7 +54,8 @@ Every log record in Wetlands includes metadata that helps track operations. This
    {
        "log_source": "execution",
        "env_name": "cellpose",
-       "call_target": "segment:detect"   # Format: "module:function" or "script.py"
+       "call_target": "segment:detect",  # Format: "module:function" or "script.py"
+       "stream": "stdout"                # Present on ProcessLogger records; "stdout" or "stderr"
    }
    ```
 
@@ -66,14 +67,11 @@ By default, when you create an `EnvironmentManager`, it automatically enables lo
 
 ```python
 from wetlands.environment_manager import EnvironmentManager
+from wetlands.logger import enable_console_logging
 
 
-# To enable console logging: use basicConfig (simplest)
-logging.basicConfig(level=logging.INFO)
-
-# You can also add a console handler manually
-logging.getLogger("wetlands").addHandler(logging.StreamHandler())
-logging.getLogger("wetlands").setLevel(logging.INFO)
+# To enable console logging: routine progress goes to stdout, warnings/errors go to stderr
+enable_console_logging()
 
 
 # Logs are automatically written to "wetlands/wetlands.log"
@@ -86,7 +84,7 @@ env = env_manager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
 env.launch()
 
 # Manager logs are written to wetlands/wetlands.log
-# Worker logs are written to wetlands/environments.log
+# Worker logs are written to wetlands/environments.log, including both stdout and stderr paths
 ```
 
 ## Advanced Examples

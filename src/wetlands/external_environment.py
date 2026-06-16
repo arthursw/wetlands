@@ -515,6 +515,11 @@ class ExternalEnvironment(Environment):
                 worker.process.stdout.close()
             except OSError:
                 pass
+        if worker.process and worker.process.stderr:
+            try:
+                worker.process.stderr.close()
+            except OSError:
+                pass
 
         if worker.persistent:
             runtime_state.remove_worker(self.environment_manager.wetlands_instance_path, self.name, worker.index)
@@ -1113,6 +1118,8 @@ class ExternalEnvironment(Environment):
                 worker.connection.close()
                 if worker.process and worker.process.stdout:
                     worker.process.stdout.close()
+                if worker.process and worker.process.stderr:
+                    worker.process.stderr.close()
                 if worker.process is not None:
                     CommandExecutor.kill_process(worker.process)
                 elif worker.pid is not None:
@@ -1148,6 +1155,8 @@ class ExternalEnvironment(Environment):
 
         if self.process and self.process.stdout:
             self.process.stdout.close()
+        if self.process and self.process.stderr:
+            self.process.stderr.close()
 
         self._process_logger = None
         CommandExecutor.kill_process(self.process)

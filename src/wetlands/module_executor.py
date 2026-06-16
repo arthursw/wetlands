@@ -90,20 +90,51 @@ _detached_stdio = False
 args: argparse.Namespace | None = None
 
 
+class _MaxLevelFilter(logging.Filter):
+    def __init__(self, max_level: int) -> None:
+        super().__init__()
+        self.max_level = max_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno <= self.max_level
+
+
+def _create_split_stream_handlers(fmt: str) -> tuple[logging.StreamHandler, logging.StreamHandler]:
+    formatter = logging.Formatter(fmt)
+
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.addFilter(_MaxLevelFilter(logging.INFO))
+    stdout_handler.setFormatter(formatter)
+
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(formatter)
+
+    return stdout_handler, stderr_handler
+
+
 def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -> Path:
     """Configure module executor logging under the Wetlands instance directory."""
     log_path = Path(wetlands_instance_path).resolve() / "environments.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s",
-        handlers=[
-            logging.FileHandler(log_path, encoding="utf-8"),
-            logging.StreamHandler(),
-        ],
-        force=True,
-    )
+    fmt = "%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s"
+    formatter = logging.Formatter(fmt)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(formatter)
+    stdout_handler, stderr_handler = _create_split_stream_handlers(fmt)
+
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        handler.close()
+    root_logger.setLevel(level)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
     return log_path
 
 

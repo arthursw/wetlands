@@ -39,6 +39,45 @@ class TestConfigureLogging:
                 root_logger.addHandler(handler)
             root_logger.setLevel(previous_level)
 
+    def test_configure_logging_splits_console_streams_and_preserves_file_logging(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        wetlands_instance_path = tmp_path / "wetlands"
+        monkeypatch.chdir(cwd)
+        root_logger = logging.getLogger()
+        previous_handlers = list(root_logger.handlers)
+        previous_level = root_logger.level
+        for handler in previous_handlers:
+            root_logger.removeHandler(handler)
+
+        log_path = module_executor.configure_logging(wetlands_instance_path)
+
+        try:
+            worker_logger = logging.getLogger("test_env")
+            worker_logger.info("worker progress")
+            worker_logger.error("worker failure")
+            for handler in root_logger.handlers:
+                handler.flush()
+
+            captured = capsys.readouterr()
+            assert "worker progress" in captured.out
+            assert "worker progress" not in captured.err
+            assert "worker failure" in captured.err
+            assert "worker failure" not in captured.out
+
+            log_content = log_path.read_text()
+            assert "worker progress" in log_content
+            assert "worker failure" in log_content
+        finally:
+            for handler in list(root_logger.handlers):
+                root_logger.removeHandler(handler)
+                handler.close()
+            for handler in previous_handlers:
+                root_logger.addHandler(handler)
+            root_logger.setLevel(previous_level)
+
 
 class TestSendMessage:
     def test_send_message_with_lock(self):

@@ -14,6 +14,7 @@ def mock_process():
     process = MagicMock(spec=subprocess.Popen)
     process.pid = 12345
     process.stdout = None
+    process.stderr = None
     return process
 
 

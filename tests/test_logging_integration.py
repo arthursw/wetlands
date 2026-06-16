@@ -4,7 +4,14 @@ import logging
 import subprocess
 import time
 
-from wetlands.logger import logger, enable_file_logging, LOG_SOURCE_ENVIRONMENT, LOG_SOURCE_EXECUTION, LOG_SOURCE_GLOBAL
+from wetlands.logger import (
+    logger,
+    enable_file_logging,
+    enable_console_logging,
+    LOG_SOURCE_ENVIRONMENT,
+    LOG_SOURCE_EXECUTION,
+    LOG_SOURCE_GLOBAL,
+)
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands._internal.command_executor import CommandExecutor
 
@@ -73,6 +80,47 @@ class TestLoggerConvenienceMethods:
             assert getattr(records[0], "call_target", None) == "module:func"
         finally:
             logger.logger.removeHandler(handler)
+
+    def test_enable_console_logging_splits_info_and_error_streams(self, capsys):
+        """Test Wetlands console logging sends routine logs to stdout and errors to stderr."""
+        base_logger = logger.logger
+        root_logger = logging.getLogger()
+        previous_handlers = list(base_logger.handlers)
+        previous_level = base_logger.level
+        previous_propagate = base_logger.propagate
+        root_previous_handlers = list(root_logger.handlers)
+        root_previous_level = root_logger.level
+        for handler in previous_handlers:
+            base_logger.removeHandler(handler)
+
+        try:
+            root_logger.addHandler(logging.StreamHandler())
+            root_logger.setLevel(logging.INFO)
+            enable_console_logging(level=logging.DEBUG)
+
+            logger.info("routine progress")
+            logger.error("action failed")
+            for handler in base_logger.handlers:
+                handler.flush()
+
+            captured = capsys.readouterr()
+            assert "routine progress" in captured.out
+            assert "routine progress" not in captured.err
+            assert "action failed" in captured.err
+            assert "action failed" not in captured.out
+        finally:
+            for handler in list(base_logger.handlers):
+                base_logger.removeHandler(handler)
+                handler.close()
+            for handler in list(root_logger.handlers):
+                if handler not in root_previous_handlers:
+                    root_logger.removeHandler(handler)
+                    handler.close()
+            for handler in previous_handlers:
+                base_logger.addHandler(handler)
+            root_logger.setLevel(root_previous_level)
+            base_logger.setLevel(previous_level)
+            base_logger.propagate = previous_propagate
 
 
 class TestProcessLogger:
@@ -206,6 +254,89 @@ class TestProcessLogger:
         if process_logger._reader_thread:
             process_logger._reader_thread.join(timeout=2)
 
+    def test_process_logger_progress_uses_info_stdout_path(self, capsys):
+        """Test subprocess progress emitted by ProcessLogger follows the INFO/stdout route."""
+        base_logger = logger.logger
+        previous_handlers = list(base_logger.handlers)
+        previous_level = base_logger.level
+        previous_propagate = base_logger.propagate
+        for handler in previous_handlers:
+            base_logger.removeHandler(handler)
+
+        process = subprocess.Popen(
+            ["python", "-c", "print('subprocess progress')"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            base_logger.propagate = False
+            enable_console_logging(level=logging.INFO)
+            process_logger = ProcessLogger(process, {"log_source": LOG_SOURCE_EXECUTION}, logger)
+            process_logger.start_reading()
+            process.wait(timeout=5)
+            if process_logger._reader_thread:
+                process_logger._reader_thread.join(timeout=2)
+
+            captured = capsys.readouterr()
+            assert "subprocess progress" in captured.out
+            assert "subprocess progress" not in captured.err
+        finally:
+            process.wait(timeout=5)
+            for handler in list(base_logger.handlers):
+                base_logger.removeHandler(handler)
+                handler.close()
+            for handler in previous_handlers:
+                base_logger.addHandler(handler)
+            base_logger.setLevel(previous_level)
+            base_logger.propagate = previous_propagate
+
+    def test_process_logger_stderr_uses_error_stderr_path(self, capsys):
+        """Test subprocess stderr emitted by ProcessLogger follows the ERROR/stderr route."""
+        base_logger = logger.logger
+        previous_handlers = list(base_logger.handlers)
+        previous_level = base_logger.level
+        previous_propagate = base_logger.propagate
+        for handler in previous_handlers:
+            base_logger.removeHandler(handler)
+
+        process = subprocess.Popen(
+            [
+                "python",
+                "-c",
+                "import sys; print('subprocess progress'); print('subprocess failure', file=sys.stderr)",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            enable_console_logging(level=logging.INFO)
+            process_logger = ProcessLogger(process, {"log_source": LOG_SOURCE_EXECUTION}, logger)
+            process_logger.start_reading()
+            process.wait(timeout=5)
+            if process_logger._reader_thread:
+                process_logger._reader_thread.join(timeout=2)
+            if process_logger._stderr_reader_thread:
+                process_logger._stderr_reader_thread.join(timeout=2)
+
+            captured = capsys.readouterr()
+            assert "subprocess progress" in captured.out
+            assert "subprocess progress" not in captured.err
+            assert "subprocess failure" in captured.err
+            assert "subprocess failure" not in captured.out
+        finally:
+            process.wait(timeout=5)
+            for handler in list(base_logger.handlers):
+                base_logger.removeHandler(handler)
+                handler.close()
+            for handler in previous_handlers:
+                base_logger.addHandler(handler)
+            base_logger.setLevel(previous_level)
+            base_logger.propagate = previous_propagate
+
 
 class TestCommandExecutor:
     """Test CommandExecutor with logging integration."""
@@ -246,6 +377,44 @@ class TestCommandExecutor:
                 assert len(records) > 0
         finally:
             logger.logger.removeHandler(handler)
+
+    def test_command_executor_process_logger_splits_subprocess_stdout_and_stderr(self, capsys):
+        """Test command subprocess stdout logs as INFO/stdout and stderr logs as ERROR/stderr."""
+        executor = CommandExecutor()
+        base_logger = logger.logger
+        previous_handlers = list(base_logger.handlers)
+        previous_level = base_logger.level
+        previous_propagate = base_logger.propagate
+        for handler in previous_handlers:
+            base_logger.removeHandler(handler)
+
+        try:
+            enable_console_logging(level=logging.INFO)
+            process = executor.execute_commands(
+                [
+                    "echo command progress",
+                    "python -c \"import sys; print('command failure', file=sys.stderr)\"",
+                ],
+                wait=True,
+            )
+            process_logger = executor._get_complete_process_logger(process)
+            assert process_logger is not None
+
+            captured = capsys.readouterr()
+            assert "command progress" in captured.out
+            assert "command progress" not in captured.err
+            assert "command failure" in captured.err
+            assert "command failure" not in captured.out
+            assert "command progress" in process_logger.get_stdout_output()
+            assert "command failure" in process_logger.get_stderr_output()
+        finally:
+            for handler in list(base_logger.handlers):
+                base_logger.removeHandler(handler)
+                handler.close()
+            for handler in previous_handlers:
+                base_logger.addHandler(handler)
+            base_logger.setLevel(previous_level)
+            base_logger.propagate = previous_propagate
 
     def test_command_executor_get_output(self):
         """Test CommandExecutor.execute_commands_and_get_output() captures output correctly."""
