@@ -39,7 +39,7 @@ def test_execute_commands_failure(executor):
 
 def test_execute_commands_wait_failure_raises(executor):
     with pytest.raises(Exception, match="failed"):
-        executor.execute_commands(["echo dependency solve failed", "exit 1"], wait=True)
+        executor.execute_commands(["echo 'dependency solve failed'", "exit 1"], wait=True)
 
 
 def test_get_output_success(executor):

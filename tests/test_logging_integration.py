@@ -392,7 +392,7 @@ class TestCommandExecutor:
             enable_console_logging(level=logging.INFO)
             process = executor.execute_commands(
                 [
-                    "echo command progress",
+                    "echo 'command progress'",
                     "python -c \"import sys; print('command failure', file=sys.stderr)\"",
                 ],
                 wait=True,

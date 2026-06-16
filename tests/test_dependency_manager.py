@@ -163,6 +163,31 @@ def test_get_install_dependencies_commands_local_dependency_echo_does_not_interp
     assert not any(cmd.startswith('echo "Installing local dependency $(') for cmd in commands)
 
 
+@pytest.mark.parametrize("manager_fixture_name", ["mock_command_generator_micromamba", "mock_command_generator_pixi"])
+def test_get_install_dependencies_commands_progress_echoes_quote_multi_word_messages(
+    manager_fixture_name, request, tmp_path
+):
+    dependency_manager = DependencyManager(request.getfixturevalue(manager_fixture_name))
+    local_path = tmp_path / "local-package"
+    local_path.mkdir()
+    dependencies: Dependencies = {
+        "conda": ["numpy"],
+        "pip": ["requests", {"name": "cellpose==3.1.0", "dependencies": False}],
+        "local": [{"name": "local-package", "path": local_path}],
+    }
+    dependency_manager._platform_conda_format = MagicMock(return_value="linux-64")
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+
+    progress_echoes = [command for command in commands if command.startswith("echo ")]
+    assert progress_echoes
+    assert all(command.startswith('echo "') and command.endswith('"') for command in progress_echoes)
+
+
 def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
     dependency_manager = DependencyManager(mock_command_generator_pixi)
     dependencies: Dependencies = {
