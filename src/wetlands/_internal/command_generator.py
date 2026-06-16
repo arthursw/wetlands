@@ -143,7 +143,7 @@ class CommandGenerator:
 
         Args:
                 environment: Environment name.
-                condaChannels: The channels to add.
+                channels: The channels to add.
                 conda_dependencies: The conda dependecies to install (e.g. ["bioimageit::atlas", "openjdk"]).
                 activate_conda: Whether to activate conda or not.
 

@@ -56,8 +56,8 @@ class EnvironmentManager:
         conda_path: str | Path | None = None,
         main_conda_environment_path: Path | None = None,
         debug: bool = False,
-        manager="auto",
-        log_file_path=Path("wetlands.log"),
+        manager: Literal["auto", "pixi", "micromamba"] = "auto",
+        log_file_path: str | Path | None = Path("wetlands.log"),
     ) -> None:
         """Initializes the EnvironmentManager.
 
@@ -461,9 +461,7 @@ class EnvironmentManager:
 
         Args:
                 name: Name for the new environment.
-                dependencies: Dependencies to install. Can be one of:
-                    - A Dependencies dict: dict(python="3.12.7", conda=["numpy"], pip=["requests"])
-                    - None (no dependencies to install)
+                dependencies: Dependencies to install. Pass a Dependencies dict, such as dict(python="3.12.7", conda=["numpy"], pip=["requests"]), or None for no dependencies.
                 additional_install_commands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
                 use_existing: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
 
@@ -743,7 +741,7 @@ class EnvironmentManager:
         See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additional_install_commands`` parameters.
 
         Args:
-                environment_name: The environment to install dependencies.
+                environment: The environment to install dependencies.
                 dependencies: Dependencies to install.
                 additional_install_commands: Platform-specific commands during installation.
 

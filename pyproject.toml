@@ -46,6 +46,7 @@ docs = [
     "mkdocs-literate-nav>=0.6.2",
     "mkdocs-material>=9.6.11",
     "mkdocstrings[python]>=0.29.1",
+    "pygments<2.20",
 ]
 
 shared-memory = [
