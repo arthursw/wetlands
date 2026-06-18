@@ -86,9 +86,8 @@ class EnvironmentManager:
 
         # Initialize logger to use the wetlands_instance_path for logs
         if log_file_path is not None:
-            enable_file_logging(
-                log_file_path if log_file_path.is_absolute() else self.wetlands_instance_path / log_file_path
-            )
+            log_file = Path(log_file_path)
+            enable_file_logging(log_file if log_file.is_absolute() else self.wetlands_instance_path / log_file)
 
         use_pixi = self._init_manager(manager, conda_path)
 
