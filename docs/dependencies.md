@@ -119,3 +119,13 @@ With Pixi, local dependencies are added to the Pixi manifest using `pixi add --p
 - Use `optional` for optional feature packages.
 - Use `dependencies=False` to only install the package without its dependencies.
 - Use `local` for local project packages that should be installed automatically when the environment is created or updated.
+
+## 🔁 Environment Recipe Hashes
+
+Wetlands records a hash of the canonical creation recipe when it creates an environment.
+The recipe includes the backend, effective platform, effective Python version, dependency fields, channels, local dependency names and absolute paths, editable flags, and selected platform-specific install commands.
+
+Calling `EnvironmentManager.create()` again with the same environment name reuses the existing environment only when the stored recipe hash matches the requested recipe.
+Use `replace_existing=True` to recreate a same-name environment with a different recipe.
+If you call `env.install()` or `EnvironmentManager.install()` after creation, Wetlands marks the environment unmanaged because the original recipe no longer fully describes the environment contents.
+Use `EnvironmentManager.load("env_name")` when you intentionally want to reuse the existing default-path environment without dependency or metadata validation.

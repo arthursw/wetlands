@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import platform
+import copy
 from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
@@ -23,6 +24,16 @@ from wetlands.internal_environment import InternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies, DependencyManager
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.command_generator import Commands, CommandGenerator
+from wetlands._internal.environment_metadata import (
+    MANAGED_STATUS,
+    build_environment_recipe,
+    build_managed_environment_metadata,
+    hash_environment_recipe,
+    mark_environment_metadata_unmanaged,
+    read_environment_metadata,
+    write_environment_metadata,
+)
+from wetlands._internal.exceptions import EnvironmentReuseError
 from wetlands._internal.settings_manager import SettingsManager
 from wetlands._internal.config_parser import ConfigParser
 from wetlands._internal import runtime_state
@@ -449,28 +460,165 @@ class EnvironmentManager:
         )
         dependencies["local"] = local_dependencies
 
+    def _manager_name(self) -> Literal["pixi", "micromamba"]:
+        return "pixi" if self.settings_manager.use_pixi else "micromamba"
+
+    def _prepare_dependencies_for_create(self, dependencies: Union[Dependencies, None]) -> Dependencies:
+        if dependencies is None:
+            prepared_dependencies = Dependencies()
+        elif not isinstance(dependencies, dict):
+            raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
+        else:
+            prepared_dependencies = copy.deepcopy(dependencies)
+        self._add_debugpy_in_dependencies(prepared_dependencies)
+        return prepared_dependencies
+
+    def _effective_python_version(self, dependencies: Dependencies) -> str:
+        python_version = dependencies.get("python", "").replace("=", "")
+        return python_version if len(python_version) > 0 else platform.python_version()
+
+    def _build_requested_recipe(
+        self,
+        dependencies: Dependencies,
+        additional_install_commands: Commands | None,
+    ) -> tuple[dict[str, Any], str]:
+        recipe = build_environment_recipe(
+            manager=self._manager_name(),
+            platform=self.command_generator.get_platform_common_name(),
+            conda_platform=self.dependency_manager._platform_conda_format(),
+            python_version=self._effective_python_version(dependencies),
+            dependencies=dependencies,
+            additional_install_commands=self.command_generator.get_commands_for_current_platform(
+                additional_install_commands or {}
+            ),
+        )
+        return recipe, hash_environment_recipe(recipe)
+
+    def _paths_match(self, left: Path | None, right: Path) -> bool:
+        return left is not None and left.resolve() == right.resolve()
+
+    def _format_environment_reuse_error(
+        self,
+        *,
+        name: str,
+        path: Path | None,
+        reason: str,
+        requested_hash: str,
+        existing_hash: str | None = None,
+    ) -> EnvironmentReuseError:
+        path_text = str(path) if path is not None else "<no path>"
+        existing_text = f"\nExisting hash: {existing_hash}" if existing_hash else ""
+        return EnvironmentReuseError(
+            f"Environment '{name}' already exists at {path_text} but cannot be reused: {reason}."
+            f"{existing_text}\nRequested hash: {requested_hash}\n"
+            "Use replace_existing=True to recreate the default managed environment, "
+            "load(name) to load the existing environment without recipe validation, or choose a different name."
+        )
+
+    def _validate_existing_environment_for_create(
+        self,
+        *,
+        environment: Environment,
+        default_path: Path,
+        requested_hash: str,
+        replace_existing: bool,
+    ) -> Environment | None:
+        if not isinstance(environment, ExternalEnvironment):
+            raise self._format_environment_reuse_error(
+                name=environment.name,
+                path=environment.path,
+                reason="the same name is already registered for an internal environment",
+                requested_hash=requested_hash,
+            )
+
+        if not self._paths_match(environment.path, default_path):
+            raise self._format_environment_reuse_error(
+                name=environment.name,
+                path=environment.path,
+                reason="it is loaded from a non-default path",
+                requested_hash=requested_hash,
+            )
+
+        metadata, metadata_reason = read_environment_metadata(
+            default_path, use_pixi=self.settings_manager.use_pixi
+        )
+        if metadata is not None and metadata.get("status") == MANAGED_STATUS:
+            existing_hash = metadata.get("recipe_hash")
+            if existing_hash == requested_hash:
+                logger.debug(f"Environment '{environment.name}' already exists with matching recipe, returning it.")
+                return environment
+            if replace_existing:
+                environment.delete()
+                return None
+            raise self._format_environment_reuse_error(
+                name=environment.name,
+                path=environment.path,
+                reason="it was created with a different recipe",
+                requested_hash=requested_hash,
+                existing_hash=existing_hash if isinstance(existing_hash, str) else None,
+            )
+
+        if replace_existing:
+            environment.delete()
+            return None
+
+        reason = "metadata is missing" if metadata_reason == "missing" else f"metadata is {metadata_reason}"
+        if metadata is not None:
+            reason = "it is marked unmanaged"
+        raise self._format_environment_reuse_error(
+            name=environment.name,
+            path=environment.path,
+            reason=reason,
+            requested_hash=requested_hash,
+        )
+
+    def _write_managed_environment_metadata(
+        self,
+        environment: Environment,
+        *,
+        recipe: dict[str, Any],
+        recipe_hash: str,
+    ) -> None:
+        if not isinstance(environment, ExternalEnvironment) or environment.path is None:
+            return
+        metadata = build_managed_environment_metadata(
+            name=environment.name,
+            manager=self._manager_name(),
+            recipe=recipe,
+            recipe_hash=recipe_hash,
+        )
+        write_environment_metadata(environment.path, use_pixi=self.settings_manager.use_pixi, metadata=metadata)
+
     def create(
         self,
         name: str,
         dependencies: Union[Dependencies, None] = None,
-        additional_install_commands: Commands = {},
-        use_existing: bool = False,
+        additional_install_commands: Commands | None = None,
+        *,
+        replace_existing: bool = False,
     ) -> Environment:
         """Creates a new Conda environment with specified dependencies or returns an existing one.
+
+        Same-name existing environments are reused only when their stored recipe hash matches the requested recipe.
+        Use ``load(name)`` to intentionally load the existing default-path environment without validating its recipe.
 
         Args:
                 name: Name for the new environment.
                 dependencies: Dependencies to install. Pass a Dependencies dict, such as dict(python="3.12.7", conda=["numpy"], pip=["requests"]), or None for no dependencies.
                 additional_install_commands: Platform-specific commands during installation (e.g. {"mac": ["cd ...", "wget https://...", "unzip ..."], "all"=[], ...}).
-                use_existing: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
+                replace_existing: if True, replace a same-name default Wetlands-managed environment when its stored recipe does not match.
 
         Returns:
-                The created or existing environment (ExternalEnvironment if created, or an existing environment if use_existing=True and match found).
+                The created or existing same-name environment.
         """
         if isinstance(name, Path):
             raise Exception(
                 "Environment name cannot be a Path, use EnvironmentManager.load() to load an existing environment."
             )
+
+        dependencies = self._prepare_dependencies_for_create(dependencies)
+        additional_install_commands = additional_install_commands or {}
+        recipe, recipe_hash = self._build_requested_recipe(dependencies, additional_install_commands)
 
         # Check if environment already exists on disk
         path = self.settings_manager.get_environment_path_from_name(name)
@@ -479,38 +627,21 @@ class EnvironmentManager:
             self.environments[name] = ExternalEnvironment(name, path, self)
 
         if name in self.environments:
-            logger.debug(f"Environment '{name}' already exists, returning existing instance.")
-            return self.environments[name]
-
-        if dependencies is None:
-            dependencies = Dependencies()
-        elif not isinstance(dependencies, dict):
-            raise ValueError(f"Unsupported dependencies type: {type(dependencies)}")
-
-        self._add_debugpy_in_dependencies(dependencies)
-
-        # Try to find existing environment if use_existing=True
-        if use_existing:
-            envs = [self.main_environment] + [env for env in self.environments.values() if env != self.main_environment]
-            for env in envs:
-                try:
-                    if self._environment_validates_requirements(env, dependencies):
-                        logger.log_environment(
-                            f"Environment '{env.name}' satisfies dependencies for '{name}', returning it.",
-                            name,
-                            stage="create",
-                        )
-                        return env
-                except Exception as e:
-                    logger.debug(f"Error checking environment '{env.name}': {e}")
-                    continue
+            existing_environment = self._validate_existing_environment_for_create(
+                environment=self.environments[name],
+                default_path=path,
+                requested_hash=recipe_hash,
+                replace_existing=replace_existing,
+            )
+            if existing_environment is not None:
+                return existing_environment
 
         # Create new environment
-        python_version = dependencies.get("python", "").replace("=", "")
+        python_version = self._effective_python_version(dependencies)
         match = re.search(r"(\d+)\.(\d+)", python_version)
         if match and (int(match.group(1)) < 3 or int(match.group(2)) < 9):
             raise Exception("Python version must be greater than 3.8")
-        python_requirement = " python=" + (python_version if len(python_version) > 0 else platform.python_version())
+        python_requirement = " python=" + python_version
         create_env_commands = self.command_generator.get_activate_conda_commands()
 
         if self.settings_manager.use_pixi:
@@ -540,6 +671,7 @@ class EnvironmentManager:
             if self.environments.get(name) is environment:
                 del self.environments[name]
             raise
+        self._write_managed_environment_metadata(environment, recipe=recipe, recipe_hash=recipe_hash)
         logger.log_environment(f"Environment '{name}' created successfully", name, stage="create")
         return self.environments[name]
 
@@ -548,26 +680,30 @@ class EnvironmentManager:
         name: str,
         config_path: str | Path,
         optional_dependencies: list[str] | None = None,
-        additional_install_commands: Commands = {},
-        use_existing: bool = False,
+        additional_install_commands: Commands | None = None,
+        *,
+        replace_existing: bool = False,
         install_project: bool = False,
         project_path: str | Path | None = None,
         project_editable: bool = False,
     ) -> Environment:
         """Creates a new Conda environment from a config file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt) or returns an existing one.
 
+        Same-name existing environments are reused only when their stored recipe hash matches the parsed recipe.
+        Use ``load(name)`` to intentionally load the existing default-path environment without validating its recipe.
+
         Args:
                 name: Name for the new environment.
                 config_path: Path to configuration file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt).
                 optional_dependencies: List of optional dependency groups to extract from pyproject.toml.
                 additional_install_commands: Platform-specific commands during installation.
-                use_existing: if True, search through existing environments and return the first one that satisfies the dependencies instead of creating a new one.
+                replace_existing: if True, replace a same-name default Wetlands-managed environment when its stored recipe does not match.
                 install_project: If True, install the project itself using normal pixi/pip local package semantics.
                 project_path: Path to the project to install. Defaults to the config file parent only for pyproject.toml configs.
                 project_editable: If True, install the project in editable mode.
 
         Returns:
-                The created or existing environment (ExternalEnvironment if created, or an existing environment if use_existing=True and match found).
+                The created environment, or an existing same-name environment when its stored recipe matches.
         """
         if not install_project:
             if project_path is not None:
@@ -588,18 +724,23 @@ class EnvironmentManager:
         )
 
         # Use create() with parsed dependencies
-        return self.create(name, dependencies, additional_install_commands, use_existing)
+        return self.create(
+            name,
+            dependencies,
+            additional_install_commands,
+            replace_existing=replace_existing,
+        )
 
     def load(
         self,
         name: str,
-        environment_path: Path,
+        environment_path: Path | None = None,
     ) -> Environment:
         """Load an existing Conda environment from disk.
 
         Args:
                 name: Name for the environment instance.
-                environment_path: Path to an existing Conda environment, or the folder containing the pixi.toml/pyproject.toml when using Pixi.
+                environment_path: Path to an existing Conda environment, or the pixi.toml/pyproject.toml manifest path when using Pixi. If omitted, Wetlands loads the default environment path for ``name``.
 
         Returns:
                 The loaded environment (ExternalEnvironment if using Pixi or micromamba with a path, InternalEnvironment otherwise).
@@ -607,13 +748,21 @@ class EnvironmentManager:
         Raises:
                 Exception: If the environment does not exist.
         """
-        environment_path = environment_path.resolve()
+        if environment_path is None:
+            environment_path = self.settings_manager.get_environment_path_from_name(name)
+        environment_path = Path(environment_path).resolve()
 
         if not self.environment_exists(environment_path):
             raise Exception(f"The environment {environment_path} was not found.")
 
-        if name not in self.environments:
-            self.environments[name] = ExternalEnvironment(name, environment_path, self)
+        if name in self.environments:
+            environment = self.environments[name]
+            if self._paths_match(environment.path, environment_path):
+                return environment
+            raise Exception(
+                f"Environment '{name}' is already loaded from {environment.path}, not from {environment_path}."
+            )
+        self.environments[name] = ExternalEnvironment(name, environment_path, self)
         return self.environments[name]
 
     def attach(self, name: str, *, attach_timeout: float = ATTACH_CONNECT_TIMEOUT) -> Environment:
@@ -734,7 +883,12 @@ class EnvironmentManager:
         return launch_environment
 
     def install(
-        self, environment: Environment, dependencies: Dependencies, additional_install_commands: Commands = {}
+        self,
+        environment: Environment,
+        dependencies: Dependencies,
+        additional_install_commands: Commands | None = None,
+        *,
+        _mark_unmanaged: bool = True,
     ) -> list[str]:
         """Installs dependencies.
         See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additional_install_commands`` parameters.
@@ -753,13 +907,20 @@ class EnvironmentManager:
             raise Exception("Cannot install packages in an InternalEnvironment with no conda path.")
 
         install_commands = self.dependency_manager.get_install_dependencies_commands(environment, dependencies)
-        install_commands += self.command_generator.get_commands_for_current_platform(additional_install_commands)
+        install_commands += self.command_generator.get_commands_for_current_platform(additional_install_commands or {})
 
         logger.log_environment(
             f"Installing dependencies in environment '{environment.name}'", environment.name, stage="install"
         )
         log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": environment.name, "stage": "install"}
-        return self.command_executor.execute_commands_and_get_output(install_commands, log_context=log_context)
+        output = self.command_executor.execute_commands_and_get_output(install_commands, log_context=log_context)
+        if _mark_unmanaged and isinstance(environment, ExternalEnvironment) and environment.path is not None:
+            mark_environment_metadata_unmanaged(
+                environment.path,
+                use_pixi=self.settings_manager.use_pixi,
+                reason="manual install",
+            )
+        return output
 
     def execute_commands(
         self,

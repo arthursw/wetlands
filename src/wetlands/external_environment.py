@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 import socket
 import os
+import secrets
 from pathlib import Path
 from multiprocessing import connection as mp_connection
 from multiprocessing.context import AuthenticationError
@@ -41,6 +43,12 @@ if TYPE_CHECKING:
 
 MODULE_EXECUTOR_FILE = "module_executor.py"
 ATTACH_CONNECT_TIMEOUT = 5.0
+STARTUP_EVENT = "wetlands.worker.ready"
+STARTUP_SCHEMA_VERSION = 1
+STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
+STARTUP_CALLBACK_TIMEOUT = 30.0
+STARTUP_CONNECTION_READ_TIMEOUT = 0.5
+STARTUP_MAX_PAYLOAD_BYTES = 64 * 1024
 
 
 class _AttachTimeout(TimeoutError):
@@ -53,6 +61,94 @@ def _mp_connection_attr(*names: str) -> Any:
         if hasattr(mp_connection, name):
             return getattr(mp_connection, name)
     raise AttributeError(f"multiprocessing.connection has none of: {', '.join(names)}")
+
+
+def _open_startup_socket() -> socket.socket:
+    startup_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        startup_socket.bind(("127.0.0.1", 0))
+        startup_socket.listen(1)
+        startup_socket.settimeout(0.1)
+    except Exception:
+        startup_socket.close()
+        raise
+    return startup_socket
+
+
+def _read_startup_payload(connection: socket.socket, timeout: float) -> dict[str, Any]:
+    connection.settimeout(timeout)
+    chunks: list[bytes] = []
+    received = 0
+    while True:
+        chunk = connection.recv(4096)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        received += len(chunk)
+        if received > STARTUP_MAX_PAYLOAD_BYTES:
+            raise ValueError("startup payload exceeded size limit")
+        if b"\n" in chunk:
+            break
+
+    raw_payload = b"".join(chunks).split(b"\n", 1)[0]
+    if not raw_payload:
+        raise ValueError("startup payload was empty")
+    payload = json.loads(raw_payload.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("startup payload was not an object")
+    return payload
+
+
+def _validate_startup_payload(payload: dict[str, Any], token: str) -> dict[str, Any]:
+    if payload.get("event") != STARTUP_EVENT:
+        raise ValueError("startup payload had an unexpected event")
+    if payload.get("schema_version") != STARTUP_SCHEMA_VERSION:
+        raise ValueError("startup payload had an unexpected schema version")
+    if not hmac.compare_digest(str(payload.get("token", "")), token):
+        raise ValueError("startup payload token did not match")
+
+    port = payload.get("port")
+    if not isinstance(port, int) or not (0 < port <= 65535):
+        raise ValueError("startup payload had an invalid worker port")
+
+    debug_port = payload.get("debug_port")
+    if debug_port is not None and (not isinstance(debug_port, int) or not (0 < debug_port <= 65535)):
+        raise ValueError("startup payload had an invalid debug port")
+
+    return payload
+
+
+def _wait_for_startup_payload(
+    startup_socket: socket.socket,
+    token: str,
+    process: subprocess.Popen,
+    *,
+    timeout: float = STARTUP_CALLBACK_TIMEOUT,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+
+    while True:
+        if process.poll() is not None:
+            raise RuntimeError(f"worker exited with return code {process.returncode} before startup callback")
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            detail = f": {last_error}" if last_error is not None else ""
+            raise TimeoutError(f"timed out waiting for worker startup callback{detail}")
+
+        startup_socket.settimeout(min(0.1, remaining))
+        try:
+            connection, _address = startup_socket.accept()
+        except socket.timeout:
+            continue
+
+        with connection:
+            try:
+                payload = _read_startup_payload(connection, min(STARTUP_CONNECTION_READ_TIMEOUT, remaining))
+                return _validate_startup_payload(payload, token)
+            except Exception as exc:
+                last_error = exc
 
 
 def synchronized(method):
@@ -211,6 +307,17 @@ class ExternalEnvironment(Environment):
 
         debug_args = " --debug_port 0" if self.environment_manager.debug else ""
         persistent_args = " --persistent" if self._persistent else ""
+        startup_socket = _open_startup_socket()
+        startup_host, startup_port = startup_socket.getsockname()
+        startup_token = secrets.token_urlsafe(32)
+        startup_args = " ".join(
+            [
+                " --startup_host",
+                shell_quote(str(startup_host)),
+                "--startup_port",
+                str(startup_port),
+            ]
+        )
         wetlands_instance_path = self.environment_manager.wetlands_instance_path.resolve()
         commands = [
             " ".join(
@@ -225,6 +332,7 @@ class ExternalEnvironment(Environment):
             )
             + debug_args
             + persistent_args
+            + startup_args
         ]
 
         log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}
@@ -233,71 +341,92 @@ class ExternalEnvironment(Environment):
 
         # Build popen_kwargs with worker-specific env vars
         popen_kwargs: dict[str, Any] = {}
+        env = os.environ.copy()
         if worker_env is not None:
-            import os
-
-            env = os.environ.copy()
             env.update(worker_env(index))
-            popen_kwargs["env"] = env
+        env[STARTUP_TOKEN_ENV] = startup_token
+        popen_kwargs["env"] = env
 
-        process = self.execute_commands(
-            commands, additional_activate_commands, log_context=log_context, popen_kwargs=popen_kwargs
-        )
+        try:
+            process = self.execute_commands(
+                commands, additional_activate_commands, log_context=log_context, popen_kwargs=popen_kwargs
+            )
 
-        process_logger = self.environment_manager.get_process_logger(process)
-        if process_logger is None:
-            raise Exception(f"Failed to retrieve ProcessLogger for worker {index}")
+            process_logger = self.environment_manager.get_process_logger(process)
+            if process_logger is None:
+                raise Exception(f"Failed to retrieve ProcessLogger for worker {index}")
 
-        # Handle debug port
-        if self.environment_manager.debug:
-
-            def debug_predicate(line: str) -> bool:
-                return line.startswith("Listening debug port ")
-
-            debug_line = process_logger.wait_for_line(debug_predicate, timeout=5)
-            if debug_line:
-                debug_port = int(debug_line.replace("Listening debug port ", ""))
-                module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
-                self.environment_manager.register_environment(self, debug_port, module_executor_path)
-
-        # Wait for port
-        def port_predicate(line: str) -> bool:
-            return line.startswith("Listening port ")
-
-        port_line = process_logger.wait_for_line(port_predicate, timeout=30)
-        if port_line:
-            port = int(port_line.replace("Listening port ", ""))
-        else:
-            port = 0
+            try:
+                startup_payload = _wait_for_startup_payload(startup_socket, startup_token, process)
+            except Exception as e:
+                raise Exception(
+                    f"Could not receive startup information for worker {index}: {e}."
+                    f"{self._worker_startup_failure_details(process, process_logger)}"
+                ) from e
+        finally:
+            startup_socket.close()
 
         if process.poll() is not None:
             raise Exception(
-                f"Worker {index} exited with return code {process.returncode} before reporting a port."
+                f"Worker {index} exited with return code {process.returncode} before accepting connections."
                 f"{self._worker_startup_failure_details(process, process_logger)}"
             )
+        port = int(startup_payload["port"])
         if port == 0:
             raise Exception(
                 f"Could not find the server port for worker {index}."
                 f"{self._worker_startup_failure_details(process, process_logger)}"
             )
+        debug_port = startup_payload.get("debug_port")
+        if self.environment_manager.debug and debug_port is not None:
+            previous_process = self.process
+            self.process = process
+            try:
+                self.environment_manager.register_environment(self, int(debug_port), module_executor_path)
+            finally:
+                self.process = previous_process
 
         authkey = self._authkey or runtime_state.load_or_create_root_authkey(self.environment_manager.wetlands_instance_path)
-        connection = self._connect_worker(port, authkey)
-        worker = _Worker(index, process, port, connection, process_logger, persistent=self._persistent)
+        connection: Connection | None = None
+        try:
+            connection = self._connect_worker(port, authkey)
+            worker = _Worker(index, process, port, connection, process_logger, persistent=self._persistent)
 
-        if self._persistent:
-            runtime_state.record_worker(
-                self.environment_manager.wetlands_instance_path,
-                env_name=self.name,
-                env_path=self.path,
-                worker_index=index,
-                pid=process.pid,
-                port=port,
-                persistent=True,
-            )
+            if self._persistent:
+                runtime_state.record_worker(
+                    self.environment_manager.wetlands_instance_path,
+                    env_name=self.name,
+                    env_path=self.path,
+                    worker_index=index,
+                    pid=process.pid,
+                    port=port,
+                    persistent=True,
+                )
 
-        self._start_reader_thread(worker)
-        return worker
+            self._start_reader_thread(worker)
+            return worker
+        except Exception:
+            self._cleanup_failed_worker_launch(process, connection)
+            raise
+
+    def _cleanup_failed_worker_launch(
+        self, process: subprocess.Popen, connection: Connection | None = None
+    ) -> None:
+        if connection is not None:
+            try:
+                connection.send(dict(action="exit"))
+            except Exception:
+                pass
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+        if process.poll() is None:
+            try:
+                process.kill()
+            except Exception:
+                pass
 
     def _worker_startup_failure_details(self, process: subprocess.Popen, process_logger: ProcessLogger) -> str:
         details: list[str] = []
@@ -904,7 +1033,7 @@ class ExternalEnvironment(Environment):
         if any(pkg["name"] == "debugpy" for pkg in installed_packages):
             return
         logger.info(f"Installing debugpy in environment '{self.name}' for debug mode.")
-        self.environment_manager.install(self, {"conda": ["debugpy"]})
+        self.environment_manager.install(self, {"conda": ["debugpy"]}, _mark_unmanaged=False)
 
     def _send_and_wait(self, payload: dict) -> Any:
         """Send a payload to the remote environment and wait for its response.
@@ -1223,8 +1352,7 @@ class ExternalEnvironment(Environment):
     def update(
         self,
         dependencies: Union[Dependencies, None] = None,
-        additional_install_commands: Commands = {},
-        use_existing: bool = False,
+        additional_install_commands: Commands | None = None,
     ) -> "Environment":
         """Updates this external environment by deleting it and recreating it."""
         if not self.path:
@@ -1239,5 +1367,4 @@ class ExternalEnvironment(Environment):
             str(self.name),
             dependencies=dependencies,
             additional_install_commands=additional_install_commands,
-            use_existing=use_existing,
         )

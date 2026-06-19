@@ -406,7 +406,7 @@ This sets `just_my_code: true` in the VS Code launch configuration, which speeds
 ## How It Works Under the Hood
 
 1. **Process Detection**: Wetlands uses `psutil` to find running processes matching your environment
-2. **Port Assignment**: Each environment gets a unique debug port from `debug_ports.json`
+2. **Port Assignment**: Each module executor reports its debug port during the Wetlands startup callback, and Wetlands stores that port in `debug_ports.json`
 3. **Debugpy Integration**: The environment's module executor runs `debugpy` in socket mode
 4. **IDE Configuration**: Wetlands generates IDE-specific configuration files for remote attach
 5. **Network Connection**: Your IDE connects via localhost to the debug port in the isolated environment

@@ -602,8 +602,8 @@ class TestUpdateEnvironment:
         # Should return the created environment
         assert result == new_env
 
-    def test_update_with_force_external(self, environment_manager_fixture, monkeypatch):
-        """Test that update works with use_existing flag to False."""
+    def test_update_recreates_same_name_environment(self, environment_manager_fixture, monkeypatch):
+        """Test that update deletes and recreates the same named environment."""
         manager = environment_manager_fixture
         env_name = "test-env"
         dependencies: Dependencies = {"pip": ["numpy>=1.20"]}
@@ -624,16 +624,15 @@ class TestUpdateEnvironment:
         create_mock = MagicMock(return_value=new_env)
         monkeypatch.setattr(manager, "create", create_mock)
 
-        result = env.update(dependencies, use_existing=False)
+        result = env.update(dependencies)
 
         # Should call delete
         delete_mock.assert_called_once()
-        # Should call create with use_existing flag
+        # Should call create with new dependencies
         create_mock.assert_called_once()
         call_args, call_kwargs = create_mock.call_args
         assert call_args[0] == env_name
         assert call_kwargs.get("dependencies") == dependencies
-        assert call_kwargs.get("use_existing") is False
         # Should return the created environment
         assert result == new_env
 
@@ -695,3 +694,32 @@ class TestExistingEnvironmentAccess:
         # Should raise because the environment doesn't exist
         with pytest.raises(Exception, match="was not found"):
             manager.load(name="test_env", environment_path=nonexistent)
+
+    def test_load_nonexistent_default_path_raises_error(self, tmp_path_factory):
+        """Test that load() raises an error when the default path for the name does not exist."""
+        tmp = tmp_path_factory.mktemp("conda_root")
+        wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance_test")
+
+        manager = EnvironmentManager(
+            wetlands_instance_path=wetlands_instance_path, conda_path=tmp, manager="micromamba"
+        )
+
+        with pytest.raises(Exception, match="was not found"):
+            manager.load(name="test_env")
+
+    def test_load_default_path_refuses_same_name_loaded_from_other_path(self, tmp_path_factory):
+        """Test that load(name) does not return a same-name environment loaded from another path."""
+        tmp = tmp_path_factory.mktemp("conda_root")
+        wetlands_instance_path = tmp_path_factory.mktemp("wetlands_instance_test")
+        default_path = tmp / "envs" / "test_env"
+        other_path = tmp / "envs" / "other_test_env"
+        (default_path / "conda-meta").mkdir(parents=True)
+        (other_path / "conda-meta").mkdir(parents=True)
+
+        manager = EnvironmentManager(
+            wetlands_instance_path=wetlands_instance_path, conda_path=tmp, manager="micromamba"
+        )
+        manager.load(name="test_env", environment_path=other_path)
+
+        with pytest.raises(Exception, match="already loaded"):
+            manager.load(name="test_env")

@@ -98,6 +98,9 @@ docs = ["sphinx>=4.0", "sphinx-rtd-theme>=1.0"]
 python = "3.10"
 numpy = ">=1.20"
 
+[tool.pixi.workspace]
+channels = ["conda-forge", "bioconda"]
+
 [tool.pixi.pypi-dependencies]
 requests = ">=2.25"
 
@@ -220,6 +223,7 @@ class TestConfigParserPixiToml:
         assert has_package(deps["conda"], "numpy")
         assert "pip" in deps
         assert has_package(deps["pip"], "requests")
+        assert deps.get("channels") == ["conda-forge"]
 
     def test_parse_pixi_toml_with_features(self, sample_pixi_toml):
         """Test parsing pixi.toml with features."""
@@ -271,6 +275,7 @@ class TestConfigParserPyprojectToml:
         assert "conda" in deps
         assert has_package(deps["conda"], "numpy")
         assert has_package(deps.get("pip", []), "requests")
+        assert deps.get("channels") == ["conda-forge", "bioconda"]
 
     def test_parse_pyproject_with_pixi_features(self, sample_pyproject_toml_with_pixi):
         """Test parsing pyproject.toml with pixi features."""
@@ -339,6 +344,7 @@ class TestConfigParserEnvironmentYml:
         assert "conda" in deps
         assert "python=3.11" in deps["conda"]
         assert "numpy>=1.20" in deps["conda"]
+        assert deps.get("channels") == ["conda-forge", "defaults"]
         assert "pip" in deps
         assert "requests>=2.25" in deps["pip"]
 
@@ -360,6 +366,7 @@ dependencies:
         assert "conda" in deps
         assert "python=3.10" in deps["conda"]
         assert "numpy" in deps["conda"]
+        assert deps.get("channels") == ["conda-forge"]
         assert "pip" not in deps or len(deps.get("pip", [])) == 0
 
     def test_parse_environment_yml_pip_only(self, temp_config_dir):

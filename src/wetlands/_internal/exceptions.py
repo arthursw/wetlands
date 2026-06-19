@@ -31,3 +31,7 @@ class ExecutionException(Exception):
 
 class IncompatibilityException(Exception):
     pass
+
+
+class EnvironmentReuseError(Exception):
+    """Raised when an existing same-name environment cannot be safely reused."""

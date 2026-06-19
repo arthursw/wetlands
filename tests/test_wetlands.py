@@ -66,26 +66,21 @@ def test_environment_creation_and_types(env_manager):
     """Test environment creation and internal/external type selection."""
     logger.info("Testing environment creation and types")
 
-    # Test 1: No dependencies -> InternalEnvironment
-    env_internal = env_manager.create("test_env_internal", {}, use_existing=True)
-    assert isinstance(env_internal, InternalEnvironment)
-    assert env_internal == env_manager.main_environment
+    assert isinstance(env_manager.main_environment, InternalEnvironment)
 
-    # Test 2: Forced creation -> ExternalEnvironment without installing extra packages
-    env_external = env_manager.create("test_env_external", {}, use_existing=False)
+    # Test 1: Named creation -> ExternalEnvironment without installing extra packages
+    env_external = env_manager.create("test_env_external", {})
     assert isinstance(env_external, ExternalEnvironment)
 
-    # Test 3: Recreating same env returns same instance
+    # Test 2: Recreating same env returns same instance when the recipe matches
     same_env = env_manager.create("test_env_external", {})
     assert env_external == same_env
 
-    # Test 4: After exit, recreating gives different instance
+    # Test 3: After exit, recreating loads the same named environment from disk
     env_external.exit()
-    other_env = env_manager.create("test_env_external", {}, use_existing=False)
+    other_env = env_manager.create("test_env_external", {})
     assert other_env != same_env
     other_env.exit()
-
-    env_internal.exit()
 
 
 @pytest.mark.integration
@@ -94,7 +89,7 @@ def test_environment_creation_and_types(env_manager):
 def test_dependency_installation(env_manager):
     """Test that Environment.install() correctly installs dependencies in existing env."""
     logger.info("Testing dependency installation in existing env")
-    env = env_manager.create("test_env_deps", use_existing=False)
+    env = env_manager.create("test_env_deps")
     dependencies = Dependencies({"pip": ["munch==4.0.0"]})
 
     env.install(dependencies)
@@ -117,7 +112,7 @@ class TestCodeExecution:
     def launched_env(self, env_manager):
         """Shared external environment for code execution tests."""
         logger.info("Creating shared external environment for TestCodeExecution")
-        env = env_manager.create("shared_execution_env", {}, use_existing=False)
+        env = env_manager.create("shared_execution_env", {})
         env.launch()
         yield env
         env.exit()
@@ -471,7 +466,7 @@ class TestTaskAPI:
     def task_env(self, env_manager):
         """Shared environment for task API tests."""
         logger.info("Creating shared environment for TestTaskAPI")
-        env = env_manager.create("task_api_env", {}, use_existing=False)
+        env = env_manager.create("task_api_env", {})
         env.launch()
         yield env
         env.exit()
@@ -624,7 +619,7 @@ class TestTaskAPIConcurrency:
     def parallel_env(self, env_manager):
         """Environment with 3 workers for concurrency tests."""
         logger.info("Creating parallel environment for TestTaskAPIConcurrency")
-        env = env_manager.create("parallel_env", {}, use_existing=False)
+        env = env_manager.create("parallel_env", {})
         env.launch(max_workers=3)
         yield env
         env.exit()

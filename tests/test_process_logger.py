@@ -77,8 +77,8 @@ def test_process_logger_wait_for_line(mock_process, log_context):
     process_logger = ProcessLogger(mock_process, log_context, logger)
 
     # Define predicate
-    def port_predicate(line: str) -> bool:
-        return line.startswith("Listening port ")
+    def ready_predicate(line: str) -> bool:
+        return line.startswith("READY ")
 
     # Start waiting (in background)
     import threading
@@ -86,7 +86,7 @@ def test_process_logger_wait_for_line(mock_process, log_context):
     result_holder = []
 
     def wait():
-        result = process_logger.wait_for_line(port_predicate, timeout=2.0)
+        result = process_logger.wait_for_line(ready_predicate, timeout=2.0)
         result_holder.append(result)
 
     wait_thread = threading.Thread(target=wait, daemon=True)
@@ -97,11 +97,11 @@ def test_process_logger_wait_for_line(mock_process, log_context):
 
     time.sleep(0.1)
     callback = process_logger._subscribers[0]  # The callback added by wait_for_line
-    callback("Listening port 12345", {})
+    callback("READY 12345", {})
 
     wait_thread.join(timeout=1)
 
-    assert result_holder[0] == "Listening port 12345"
+    assert result_holder[0] == "READY 12345"
 
 
 def test_process_logger_wait_for_line_timeout(mock_process, log_context):

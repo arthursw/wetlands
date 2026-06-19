@@ -73,6 +73,10 @@ result = env.execute("minimal_module.py", "sum", args=([1, 2, 3],))
 env.exit()
 ```
 
+Wetlands records a hash of each environment's creation recipe.
+Calling `create()` again with the same name reuses the existing environment only when the stored recipe hash matches the requested dependencies, backend, platform, and creation commands.
+Use `replace_existing=True` to recreate a same-name environment with a different recipe, or `load(name)` to intentionally load the existing default-path environment without recipe validation.
+
 with `minimal_module.py`:
 
 ```python

@@ -1,16 +1,19 @@
+import json
 import logging
+import socket
 import time
 import threading
 import pytest
 from pathlib import Path
 from multiprocessing.connection import Client, Listener
-from typing import Any, cast
+from typing import Any, Optional, cast
 from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import ExecutionException
 from wetlands._internal.diagnostics import TaskFailureCategory
 from wetlands._internal.shell import shell_quote
 from wetlands._internal import runtime_state
-from wetlands.external_environment import ExternalEnvironment, _AttachTimeout, _Worker
+from wetlands.external_environment import ExternalEnvironment, _AttachTimeout, _Worker, _wait_for_startup_payload
+from wetlands.environment_manager import EnvironmentManager
 from wetlands.task import Task, TaskStatus
 
 # --- Helper to create a basic ExternalEnvironment with mocked manager ---
@@ -23,19 +26,24 @@ def _make_env(**kwargs) -> Any:
     return env
 
 
-# --- Legacy tests (backward compat, no worker pool) ---
+def _startup_payload(port: int = 5000, debug_port: Optional[int] = None) -> dict[str, Any]:
+    return {
+        "event": "wetlands.worker.ready",
+        "schema_version": 1,
+        "token": "test-token",
+        "pid": 12345,
+        "port": port,
+        "debug_port": debug_port,
+    }
+
+
+# --- Launch tests ---
 
 
 @patch("subprocess.Popen")
 def test_launch(mock_popen, tmp_path):
     mock_process = MagicMock()
     mock_process.pid = 12345
-
-    mock_stdout = MagicMock()
-    mock_stdout.__iter__.return_value = iter(["Listening port 5000\n"])
-    mock_stdout.readline = MagicMock(side_effect=["Listening port 5000\n", ""])
-
-    mock_process.stdout = mock_stdout
     mock_process.poll.return_value = None
     mock_popen.return_value = mock_process
 
@@ -47,7 +55,6 @@ def test_launch(mock_popen, tmp_path):
         mock_client.return_value = mock_conn
 
         mock_process_logger = MagicMock()
-        mock_process_logger.wait_for_line.side_effect = ["Listening port 5000", None]
         mock_process_logger.update_log_context = MagicMock()
 
         mock_env_manager = MagicMock()
@@ -58,10 +65,12 @@ def test_launch(mock_popen, tmp_path):
 
         env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
         env.execute_commands = MagicMock(return_value=mock_process)
-        env.launch()
+        with patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload()):
+            env.launch()
 
         assert env.port == 5000
         assert env.connection == mock_conn
+        mock_process_logger.wait_for_line.assert_not_called()
 
 
 def test_launch_worker_quotes_command_arguments_with_spaces(tmp_path):
@@ -70,7 +79,6 @@ def test_launch_worker_quotes_command_arguments_with_spaces(tmp_path):
     mock_process.poll.return_value = None
 
     mock_process_logger = MagicMock()
-    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
 
     mock_env_manager = MagicMock()
     mock_env_manager.debug = False
@@ -85,13 +93,20 @@ def test_launch_worker_quotes_command_arguments_with_spaces(tmp_path):
     mock_conn.recv.side_effect = EOFError()
     mock_conn.closed = False
 
-    with patch("wetlands.external_environment.Client", return_value=mock_conn):
+    with (
+        patch("wetlands.external_environment.Client", return_value=mock_conn),
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload()),
+    ):
         env._launch_worker(0, {}, None)
 
     commands = env.execute_commands.call_args.args[0]
     command = commands[0]
     assert shell_quote("cellpose env") in command
     assert shell_quote(wetlands_instance_path) in command
+    assert "--startup_host" in command
+    assert "--startup_port" in command
+    popen_kwargs = env.execute_commands.call_args.kwargs["popen_kwargs"]
+    assert "WETLANDS_STARTUP_TOKEN" in popen_kwargs["env"]
 
 
 def test_launch_worker_uses_authenticated_client(tmp_path):
@@ -100,7 +115,6 @@ def test_launch_worker_uses_authenticated_client(tmp_path):
     mock_process.poll.return_value = None
 
     mock_process_logger = MagicMock()
-    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
 
     mock_env_manager = MagicMock()
     mock_env_manager.debug = False
@@ -115,13 +129,112 @@ def test_launch_worker_uses_authenticated_client(tmp_path):
     mock_conn.recv.side_effect = EOFError()
     mock_conn.closed = False
 
-    with patch("wetlands.external_environment.Client", return_value=mock_conn) as mock_client:
+    with (
+        patch("wetlands.external_environment.Client", return_value=mock_conn) as mock_client,
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload()),
+    ):
         env._launch_worker(0, {}, None)
 
     mock_client.assert_called_once_with(("localhost", 5000), authkey=b"root-auth-key")
 
 
-def test_launch_worker_port_failure_includes_output_tail_and_script_path(tmp_path):
+def test_launch_worker_registers_debug_port_from_startup_payload(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = True
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+    mock_env_manager.register_environment = MagicMock()
+
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+    env._authkey = b"root-auth-key"
+
+    mock_conn = MagicMock()
+    mock_conn.recv.side_effect = EOFError()
+    mock_conn.closed = False
+
+    with (
+        patch("wetlands.external_environment.Client", return_value=mock_conn),
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload(debug_port=5678)),
+    ):
+        env._launch_worker(0, {}, None)
+
+    module_executor_path = Path(__file__).resolve().parents[1] / "src" / "wetlands" / "module_executor.py"
+    mock_env_manager.register_environment.assert_called_once_with(env, 5678, module_executor_path)
+    mock_process_logger.wait_for_line.assert_not_called()
+
+
+def test_launch_worker_registers_debug_port_with_real_manager_method(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = True
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+    mock_env_manager.register_environment = EnvironmentManager.register_environment.__get__(
+        mock_env_manager, type(mock_env_manager)
+    )
+
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+    env._authkey = b"root-auth-key"
+
+    mock_conn = MagicMock()
+    mock_conn.recv.side_effect = EOFError()
+    mock_conn.closed = False
+
+    with (
+        patch("wetlands.external_environment.Client", return_value=mock_conn),
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload(debug_port=5678)),
+    ):
+        env._launch_worker(0, {}, None)
+
+    debug_ports_path = tmp_path / "wetlands" / "debug_ports.json"
+    assert debug_ports_path.exists()
+    assert '"debug_port": 5678' in debug_ports_path.read_text()
+
+
+def test_wait_for_startup_payload_ignores_invalid_preconnection():
+    startup_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    startup_socket.bind(("127.0.0.1", 0))
+    startup_socket.listen(1)
+    host, port = startup_socket.getsockname()
+    process = MagicMock()
+    process.poll.return_value = None
+
+    def send_payload(payload: dict[str, Any]) -> None:
+        with socket.create_connection((host, port), timeout=1.0) as connection:
+            connection.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+
+    bad_payload = _startup_payload()
+    bad_payload["token"] = "wrong-token"
+    good_payload = _startup_payload(port=5678)
+    good_payload["token"] = "expected-token"
+
+    try:
+        send_payload(bad_payload)
+        good_sender = threading.Thread(target=send_payload, args=(good_payload,), daemon=True)
+        good_sender.start()
+
+        payload = _wait_for_startup_payload(startup_socket, "expected-token", process, timeout=2.0)
+        good_sender.join(timeout=1.0)
+    finally:
+        startup_socket.close()
+
+    assert payload["port"] == 5678
+
+
+def test_launch_worker_startup_failure_includes_output_tail_and_script_path(tmp_path):
     mock_process = MagicMock()
     mock_process.pid = 12345
     mock_process.poll.return_value = None
@@ -129,7 +242,6 @@ def test_launch_worker_port_failure_includes_output_tail_and_script_path(tmp_pat
     mock_process._wetlands_script_path = "/tmp/wetlands-worker-start.sh"
 
     mock_process_logger = MagicMock()
-    mock_process_logger.wait_for_line.return_value = None
     mock_process_logger.get_output.return_value = [
         "Traceback (most recent call last):",
         "ModuleNotFoundError: No module named 'wetlands'",
@@ -143,13 +255,76 @@ def test_launch_worker_port_failure_includes_output_tail_and_script_path(tmp_pat
     env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
     env.execute_commands = MagicMock(return_value=mock_process)
 
-    with pytest.raises(Exception) as exc_info:
+    with (
+        patch("wetlands.external_environment._wait_for_startup_payload", side_effect=TimeoutError("timed out")),
+        pytest.raises(Exception) as exc_info,
+    ):
         env._launch_worker(0, {}, None)
 
     message = str(exc_info.value)
-    assert "Could not find the server port for worker 0" in message
+    assert "Could not receive startup information for worker 0" in message
     assert "ModuleNotFoundError: No module named 'wetlands'" in message
     assert "/tmp/wetlands-worker-start.sh" in message
+
+
+def test_launch_worker_cleans_up_process_when_connect_fails_after_startup(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+    env._authkey = b"root-auth-key"
+
+    with (
+        patch("wetlands.external_environment.Client", side_effect=ConnectionRefusedError("not ready")),
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload()),
+        pytest.raises(ConnectionRefusedError),
+    ):
+        env._launch_worker(0, {}, None)
+
+    mock_process.kill.assert_called_once()
+
+
+def test_launch_worker_closes_connection_and_kills_process_when_recording_persistent_worker_fails(tmp_path):
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_process.poll.return_value = None
+
+    mock_process_logger = MagicMock()
+
+    mock_env_manager = MagicMock()
+    mock_env_manager.debug = False
+    mock_env_manager.get_process_logger = MagicMock(return_value=mock_process_logger)
+    mock_env_manager.wetlands_instance_path = tmp_path / "wetlands"
+
+    env = ExternalEnvironment("test_env", Path("/tmp/test_env"), mock_env_manager)
+    env.execute_commands = MagicMock(return_value=mock_process)
+    env._authkey = b"root-auth-key"
+    env._persistent = True
+
+    mock_conn = MagicMock()
+    mock_conn.recv.side_effect = EOFError()
+    mock_conn.closed = False
+
+    with (
+        patch("wetlands.external_environment.Client", return_value=mock_conn),
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload()),
+        patch("wetlands.external_environment.runtime_state.record_worker", side_effect=OSError("registry failed")),
+        pytest.raises(OSError, match="registry failed"),
+    ):
+        env._launch_worker(0, {}, None)
+
+    mock_conn.send.assert_called_once_with({"action": "exit"})
+    mock_conn.close.assert_called_once()
+    mock_process.kill.assert_called_once()
 
 
 def test_persistent_launch_records_worker_metadata(tmp_path):
@@ -158,7 +333,6 @@ def test_persistent_launch_records_worker_metadata(tmp_path):
     mock_process.poll.return_value = None
 
     mock_process_logger = MagicMock()
-    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
 
     mock_env_manager = MagicMock()
     mock_env_manager.debug = False
@@ -175,6 +349,7 @@ def test_persistent_launch_records_worker_metadata(tmp_path):
     with (
         patch("wetlands.external_environment.Client", return_value=mock_conn),
         patch("wetlands.external_environment.runtime_state.load_or_create_root_authkey", return_value=b"root-auth-key"),
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload()),
     ):
         env.launch(persistent=True)
 
@@ -192,7 +367,6 @@ def test_non_persistent_launch_does_not_record_worker_metadata(tmp_path):
     mock_process.poll.return_value = None
 
     mock_process_logger = MagicMock()
-    mock_process_logger.wait_for_line.return_value = "Listening port 5000"
 
     mock_env_manager = MagicMock()
     mock_env_manager.debug = False
@@ -209,6 +383,7 @@ def test_non_persistent_launch_does_not_record_worker_metadata(tmp_path):
     with (
         patch("wetlands.external_environment.Client", return_value=mock_conn),
         patch("wetlands.external_environment.runtime_state.load_or_create_root_authkey", return_value=b"root-auth-key"),
+        patch("wetlands.external_environment._wait_for_startup_payload", return_value=_startup_payload()),
     ):
         env.launch()
 

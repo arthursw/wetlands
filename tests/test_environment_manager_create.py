@@ -7,10 +7,17 @@ import subprocess
 import pytest
 
 from wetlands.environment_manager import EnvironmentManager
-from wetlands.internal_environment import InternalEnvironment
 from wetlands.external_environment import ExternalEnvironment
+from wetlands.exceptions import EnvironmentReuseError
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands._internal.command_generator import Commands
+from wetlands._internal.environment_metadata import (
+    ENVIRONMENT_METADATA_SCHEMA_VERSION,
+    MANAGED_STATUS,
+    environment_metadata_path,
+    read_environment_metadata,
+    write_environment_metadata,
+)
 from wetlands._internal.shell import shell_quote
 
 
@@ -89,35 +96,19 @@ def environment_manager_pixi_fixture(tmp_path_factory, mock_command_executor, mo
 # ---- create Tests (micromamba) ----
 
 
-def test_create_dependencies_met_use_main_environment(environment_manager_fixture, monkeypatch):
-    manager, mock_execute_output, _ = environment_manager_fixture
-    env_name = "new-env-dont-create"
-    dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
-
-    # Mock _environment_validates_requirements to return True for main env
-    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=True))
-
-    env = manager.create(env_name, dependencies=dependencies, use_existing=True)
-
-    assert env is manager.main_environment
-    assert isinstance(env, InternalEnvironment)
-    mock_execute_output.assert_not_called()
-
-
-def test_create_always_creates_new_when_use_existing_false(environment_manager_fixture, monkeypatch):
+def test_create_does_not_scan_other_environments_for_matching_dependencies(environment_manager_fixture, monkeypatch):
     manager, mock_execute, _ = environment_manager_fixture
     env_name = "always-new-env"
     dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
 
-    # Mock _environment_validates_requirements to return True (but should be ignored when use_existing=False)
     monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=True))
 
-    env = manager.create(env_name, dependencies=dependencies, use_existing=False)
+    env = manager.create(env_name, dependencies=dependencies)
 
-    # Should create new environment, not return existing one
     assert isinstance(env, ExternalEnvironment)
     assert env.name == env_name
-    mock_execute.assert_called()  # execute_commands is called for creation
+    manager._environment_validates_requirements.assert_not_called()
+    mock_execute.assert_called()
 
 
 def test_create_dependencies_not_met_create_external(environment_manager_fixture, monkeypatch):
@@ -181,6 +172,160 @@ def test_create_raises_and_does_not_report_success_when_install_commands_fail(
 
     assert env_name not in manager.environments
     assert f"Environment '{env_name}' created successfully" not in caplog.text
+
+
+def test_create_writes_metadata_after_success(environment_manager_fixture):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "metadata-env"
+    dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
+
+    env = manager.create(env_name, dependencies=dependencies)
+
+    assert isinstance(env, ExternalEnvironment)
+    assert env.path is not None
+    mock_execute.assert_called_once()
+    metadata, reason = read_environment_metadata(env.path, use_pixi=False)
+    assert reason is None
+    assert metadata is not None
+    assert metadata["status"] == MANAGED_STATUS
+    assert metadata["name"] == env_name
+    assert metadata["recipe_hash"].startswith("sha256:")
+    assert metadata["recipe"]["dependencies"]["pip"] == ["numpy==1.2.3"]
+
+
+def test_create_same_name_same_recipe_reuses_existing_environment(environment_manager_fixture):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "reuse-same-recipe"
+    dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
+
+    env = manager.create(env_name, dependencies=dependencies)
+    mock_execute.reset_mock()
+
+    reused = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+    assert reused is env
+    mock_execute.assert_not_called()
+
+
+def test_create_same_name_same_recipe_reuses_disk_environment_after_manager_forgets_it(environment_manager_fixture):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "reuse-disk-recipe"
+    dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
+
+    env = manager.create(env_name, dependencies=dependencies)
+    manager.environments.pop(env_name)
+    manager.environment_exists.return_value = True
+    mock_execute.reset_mock()
+
+    reused = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+    assert isinstance(reused, ExternalEnvironment)
+    assert reused is manager.environments[env_name]
+    assert reused is not env
+    assert reused.path == env.path
+    mock_execute.assert_not_called()
+
+
+def test_create_same_name_different_recipe_raises(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    env_name = "reuse-different-recipe"
+
+    manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+    with pytest.raises(EnvironmentReuseError, match="already exists"):
+        manager.create(env_name, dependencies={"pip": ["numpy==2.0.0"]})
+
+
+def test_create_same_name_missing_metadata_raises(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    env_name = "missing-metadata"
+    env = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+    environment_metadata_path(env.path, use_pixi=False).unlink()
+
+    with pytest.raises(EnvironmentReuseError, match="metadata"):
+        manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+
+def test_create_same_name_unmanaged_metadata_raises(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    env_name = "unmanaged-env"
+    env = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+    metadata, reason = read_environment_metadata(env.path, use_pixi=False)
+    assert reason is None
+    assert metadata is not None
+    metadata["status"] = "unmanaged"
+    write_environment_metadata(env.path, use_pixi=False, metadata=metadata)
+
+    with pytest.raises(EnvironmentReuseError, match="unmanaged"):
+        manager.create(env_name, dependencies={"pip": ["numpy==2.0.0"]})
+
+
+def test_create_same_name_invalid_metadata_raises(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    env_name = "invalid-metadata-env"
+    env = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+    write_environment_metadata(
+        env.path,
+        use_pixi=False,
+        metadata={"schema_version": ENVIRONMENT_METADATA_SCHEMA_VERSION},
+    )
+
+    with pytest.raises(EnvironmentReuseError, match="invalid_metadata"):
+        manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+
+def test_load_default_path_reuses_environment_without_recipe_validation(environment_manager_fixture):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "load-unmanaged-env"
+    env = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+    write_environment_metadata(
+        env.path,
+        use_pixi=False,
+        metadata={"schema_version": ENVIRONMENT_METADATA_SCHEMA_VERSION},
+    )
+    manager.environments.pop(env_name)
+    manager.environment_exists.return_value = True
+    mock_execute.reset_mock()
+
+    loaded = manager.load(env_name)
+
+    assert isinstance(loaded, ExternalEnvironment)
+    assert loaded.path == env.path
+    assert loaded is manager.environments[env_name]
+    mock_execute.assert_not_called()
+
+
+def test_create_replace_existing_recreates_default_environment(environment_manager_fixture, monkeypatch):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "replace-env"
+    env = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+    def delete_existing():
+        del manager.environments[env_name]
+
+    delete_mock = MagicMock(side_effect=delete_existing)
+    monkeypatch.setattr(env, "delete", delete_mock)
+    mock_execute.reset_mock()
+
+    replacement = manager.create(env_name, dependencies={"pip": ["numpy==2.0.0"]}, replace_existing=True)
+
+    assert replacement is manager.environments[env_name]
+    assert replacement is not env
+    delete_mock.assert_called_once()
+    mock_execute.assert_called_once()
+    metadata, reason = read_environment_metadata(replacement.path, use_pixi=False)
+    assert reason is None
+    assert metadata is not None
+    assert metadata["recipe"]["dependencies"]["pip"] == ["numpy==2.0.0"]
+
+
+def test_create_replace_existing_refuses_loaded_non_default_path(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    env_name = "loaded-env"
+    manager.environments[env_name] = ExternalEnvironment(env_name, Path("/other/location/env"), manager)
+
+    with pytest.raises(EnvironmentReuseError, match="non-default path"):
+        manager.create(env_name, dependencies={}, replace_existing=True)
 
 
 def test_create_with_python_version(environment_manager_fixture, monkeypatch):
@@ -264,124 +409,3 @@ def test_create_with_python_version_pixi(environment_manager_pixi_fixture, monke
     assert any(re.match(rf"{pixi_bin} add .* python={py_version}", cmd) is not None for cmd in command_list)
     # Check install command for dependencies
     assert any("toolz" in cmd and "--pypi" in cmd for cmd in command_list if f"{pixi_bin} add" in cmd)
-
-
-# ---- create Tests (use_existing parameter) ----
-
-
-def test_create_with_use_existing_returns_main_env(environment_manager_fixture, monkeypatch):
-    """Test that use_existing=True returns main environment if it satisfies dependencies."""
-    manager, mock_execute_output, _ = environment_manager_fixture
-    dependencies: Dependencies = {"pip": ["numpy>=1.20"]}
-
-    # Mock _environment_validates_requirements to return True for main environment
-    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=True))
-
-    env = manager.create("new_env", dependencies=dependencies, use_existing=True)
-
-    # Should return main environment instead of creating new one
-    assert env is manager.main_environment
-    # Should not execute any creation commands
-    mock_execute_output.assert_not_called()
-
-
-def test_create_with_use_existing_creates_new_for_local_dependencies(environment_manager_fixture, tmp_path):
-    manager, mock_execute, _ = environment_manager_fixture
-    local_path = tmp_path / "local package"
-    local_path.mkdir()
-    dependencies: Dependencies = {"local": [{"name": "local-package", "path": local_path}]}
-
-    env = manager.create("new_env", dependencies=dependencies, use_existing=True)
-
-    assert isinstance(env, ExternalEnvironment)
-    assert env.name == "new_env"
-    mock_execute.assert_called_once()
-
-
-def test_create_with_use_existing_returns_existing_env(environment_manager_fixture, monkeypatch):
-    """Test that use_existing=True returns an existing environment if it satisfies dependencies."""
-    manager, mock_execute_output, _ = environment_manager_fixture
-    dependencies: Dependencies = {"pip": ["numpy>=1.20"]}
-
-    # Create an existing environment
-    existing_env = ExternalEnvironment("existing_env", Path("some/path"), manager)
-    manager.environments["existing_env"] = existing_env
-
-    # Mock _environment_validates_requirements: return False for main, True for existing
-    def mock_validates(env, deps):
-        return env is existing_env
-
-    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(side_effect=mock_validates))
-
-    env = manager.create("new_env", dependencies=dependencies, use_existing=True)
-
-    # Should return the existing environment
-    assert env is existing_env
-    # Should not execute any creation commands
-    mock_execute_output.assert_not_called()
-
-
-def test_create_with_use_existing_creates_new_if_none_satisfy(environment_manager_fixture, monkeypatch):
-    """Test that use_existing=True creates new env if no existing env satisfies dependencies."""
-    manager, mock_execute_output, _ = environment_manager_fixture
-    dependencies: Dependencies = {"pip": ["numpy>=2.0"]}
-
-    # Create an existing environment that doesn't satisfy
-    existing_env = ExternalEnvironment("existing_env", Path("some/path"), manager)
-    manager.environments["existing_env"] = existing_env
-
-    # Mock _environment_validates_requirements to always return False
-    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=False))
-    monkeypatch.setattr(manager, "environment_exists", MagicMock(return_value=False))
-
-    env = manager.create("new_env", dependencies=dependencies, use_existing=True)
-
-    # Should create a new environment
-    assert isinstance(env, ExternalEnvironment)
-    assert env.name == "new_env"
-    # Should execute creation commands
-    mock_execute_output.assert_called()
-
-
-def test_create_with_use_existing_false_skips_environment_checks(environment_manager_fixture, monkeypatch):
-    """Test that use_existing=False always creates a new environment."""
-    manager, mock_execute_output, _ = environment_manager_fixture
-    dependencies: Dependencies = {"pip": ["numpy"]}
-
-    # Create existing environments
-    env1 = ExternalEnvironment("env1", Path("path1"), manager)
-    manager.environments["env1"] = env1
-
-    # Mock _environment_validates_requirements to return True (would match if checked)
-    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(return_value=True))
-
-    env = manager.create("new_env", dependencies=dependencies, use_existing=False)
-
-    # Should create a new environment, not return existing ones
-    assert isinstance(env, ExternalEnvironment)
-    assert env.name == "new_env"
-    mock_execute_output.assert_called()
-
-
-def test_create_with_use_existing_returns_first_match(environment_manager_fixture, monkeypatch):
-    """Test that use_existing=True returns the first environment that satisfies deps."""
-    manager, mock_execute_output, _ = environment_manager_fixture
-    dependencies: Dependencies = {"pip": ["numpy"]}
-
-    # Create multiple environments, the second one satisfies deps
-    env1 = ExternalEnvironment("env1", Path("path1"), manager)
-    env2 = ExternalEnvironment("env2", Path("path2"), manager)
-    manager.environments["env1"] = env1
-    manager.environments["env2"] = env2
-
-    # Mock to return True only for env2
-    def mock_validates(env, deps):
-        return env is env2
-
-    monkeypatch.setattr(manager, "_environment_validates_requirements", MagicMock(side_effect=mock_validates))
-
-    env = manager.create("new_env", dependencies=dependencies, use_existing=True)
-
-    # Should return the first (or one of the) matching environment
-    assert env is env2
-    mock_execute_output.assert_not_called()
