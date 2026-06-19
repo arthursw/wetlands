@@ -67,7 +67,7 @@ def test_mixed_dependencies_with_and_without_channels(command_generator_pixi):
         environment, ["bioconda"], dependencies, activate_conda=True
     )
     assert re.search(expected_command, commands[-1])
-    assert all(ec in commands[-1] for ec in expected_channels)
+    assert all(channel in commands[-1] for channel in expected_channels)
 
 
 def test_mixed_dependencies_with_and_without_channels_micromamba(command_generator_micromamba):
@@ -78,12 +78,32 @@ def test_mixed_dependencies_with_and_without_channels_micromamba(command_generat
     dependencies = ["conda-forge::requests", "python", "nvidia::cuda-toolkit", "conda-forge::scipy"]
     # Only bioconda will be added since the others are handled by conda for each package
     expected_channels = "bioconda"
-    expected_command = rf"micromamba --rc-file ~/.mambarc config --add channels"
+    conda_path, _ = command_generator_micromamba.settings_manager.get_conda_paths()
+    expected_command = (
+        rf"micromamba config prepend --file {re.escape(shell_quote(conda_path / '.mambarc'))} channels"
+    )
     commands = command_generator_micromamba.get_add_channels_commands(
         environment, ["bioconda"], dependencies, activate_conda=True
     )
     assert re.search(expected_command, commands[-1])
-    assert all(ec in commands[-1] for ec in expected_channels)
+    assert expected_channels in commands[-1]
+
+
+def test_add_multiple_channels_micromamba_preserves_channel_order(command_generator_micromamba):
+    """Test that micromamba config commands preserve final channel order when using prepend."""
+    environment = MagicMock()
+    environment.name = "base"
+    environment.path = Path("/tmp/base")
+    conda_path, _ = command_generator_micromamba.settings_manager.get_conda_paths()
+
+    commands = command_generator_micromamba.get_add_channels_commands(
+        environment, ["conda-forge", "bioconda"], [], activate_conda=True
+    )
+
+    assert commands == [
+        f"micromamba config prepend --file {shell_quote(conda_path / '.mambarc')} channels bioconda",
+        f"micromamba config prepend --file {shell_quote(conda_path / '.mambarc')} channels conda-forge",
+    ]
 
 
 @patch("platform.system", return_value="Linux")

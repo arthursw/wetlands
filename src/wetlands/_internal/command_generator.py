@@ -152,9 +152,11 @@ class CommandGenerator:
         """
         if not self.settings_manager.use_pixi:
             if len(channels) > 0:
+                conda_path, _ = self.settings_manager.get_conda_paths()
+                conda_config_path = conda_path / ".mambarc"
                 return [
-                    f"{self.settings_manager.conda_bin_config} config --add channels "
-                    + " ".join(shell_quote(channel) for channel in channels)
+                    f"{self.settings_manager.conda_bin} config prepend --file {shell_quote(conda_config_path)} channels {shell_quote(channel)}"
+                    for channel in reversed(channels)
                 ]
             else:
                 return []
