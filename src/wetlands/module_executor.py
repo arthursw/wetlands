@@ -286,12 +286,6 @@ def handle_execution_error(
     serialization_context: str | None = None,
 ):
     """Common error handling for any execution type."""
-    logger.error(str(e))
-    logger.error("Traceback:")
-    traceback_frames = traceback.format_tb(e.__traceback__)
-    for line in traceback_frames:
-        logger.error(line)
-    sys.stderr.flush()
     failure = _failure_payload(
         e,
         task_id=task_id,
@@ -299,6 +293,8 @@ def handle_execution_error(
         category=category,
         serialization_context=serialization_context,
     )
+    _log_execution_failure(failure)
+    sys.stderr.flush()
     msg = dict(
         action="error",
         failure=failure,
@@ -309,6 +305,22 @@ def handle_execution_error(
         msg["task_id"] = task_id
     send_message(lock, connection, msg)
     logger.debug("Error sent")
+
+
+def _log_execution_failure(failure: dict) -> None:
+    category = failure.get("category")
+    level = logging.ERROR if category == "serialization" else logging.WARNING
+    task_id = failure.get("task_id")
+    call_target = failure.get("call_target")
+    message = failure.get("message") or "Unknown task failure"
+
+    if task_id is not None:
+        prefix = f"Task {task_id} failed"
+    else:
+        prefix = "Remote execution failed"
+    if call_target is not None:
+        prefix += f" in {call_target}"
+    logger.log(level, f"{prefix}: {message}")
 
 
 def execute_function(message: dict, lock: threading.Lock | None = None, connection: Connection | None = None):

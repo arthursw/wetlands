@@ -154,13 +154,32 @@ class CommandExecutor:
             return None
 
         process_logger = self._process_loggers[process.pid]
-        # Wait for reader thread to finish processing all output
-        if process_logger._reader_thread is not None and process_logger._reader_thread.is_alive():
-            process_logger._reader_thread.join(timeout=5.0)
-        if process_logger._stderr_reader_thread is not None and process_logger._stderr_reader_thread.is_alive():
-            process_logger._stderr_reader_thread.join(timeout=5.0)
-
+        process_logger.join(timeout=5.0)
         return process_logger
+
+    def _log_command_failure(
+        self,
+        original_commands: list[str],
+        process: subprocess.Popen,
+        process_logger: ProcessLogger | None,
+    ) -> None:
+        """Promote command failure diagnostics after process exit."""
+        conda_exit_detected = getattr(process, "_conda_exit_detected", False)
+        exit_code = process.returncode
+        commands_excerpt = self._commands_excerpt(original_commands)
+        extra = process_logger.log_context.copy() if process_logger is not None else {}
+        extra["stream"] = "stderr"
+
+        reason = f"CondaSystemExit detected; exit code {exit_code}" if conda_exit_detected else f"exit code {exit_code}"
+        logger.error(
+            f'The execution of the commands "{commands_excerpt}" failed with {reason}.',
+            extra=extra,
+        )
+
+        if process_logger is None:
+            return
+        for line in process_logger.get_stderr_output()[-20:]:
+            logger.error(line, extra=extra)
 
     def execute_commands(
         self,
@@ -262,9 +281,11 @@ class CommandExecutor:
 
             if wait:
                 process.wait()
+                process_logger = None
                 if log:
-                    self._get_complete_process_logger(process)
+                    process_logger = self._get_complete_process_logger(process)
                 if getattr(process, "_conda_exit_detected", False) or process.returncode != 0:
+                    self._log_command_failure(original_commands, process, process_logger)
                     raise Exception(
                         f'The execution of the commands "{self._commands_excerpt(original_commands)}" failed with '
                         f"exit code {process.returncode}."

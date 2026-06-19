@@ -292,8 +292,8 @@ class TestProcessLogger:
             base_logger.setLevel(previous_level)
             base_logger.propagate = previous_propagate
 
-    def test_process_logger_stderr_uses_error_stderr_path(self, capsys):
-        """Test subprocess stderr emitted by ProcessLogger follows the ERROR/stderr route."""
+    def test_process_logger_stderr_uses_info_stdout_path(self, capsys):
+        """Test subprocess stderr emitted by ProcessLogger follows the INFO/stdout route."""
         base_logger = logger.logger
         previous_handlers = list(base_logger.handlers)
         previous_level = base_logger.level
@@ -325,8 +325,8 @@ class TestProcessLogger:
             captured = capsys.readouterr()
             assert "subprocess progress" in captured.out
             assert "subprocess progress" not in captured.err
-            assert "subprocess failure" in captured.err
-            assert "subprocess failure" not in captured.out
+            assert "subprocess failure" in captured.out
+            assert "subprocess failure" not in captured.err
         finally:
             process.wait(timeout=5)
             for handler in list(base_logger.handlers):
@@ -379,7 +379,7 @@ class TestCommandExecutor:
             logger.logger.removeHandler(handler)
 
     def test_command_executor_process_logger_splits_subprocess_stdout_and_stderr(self, capsys):
-        """Test command subprocess stdout logs as INFO/stdout and stderr logs as ERROR/stderr."""
+        """Test command subprocess stdout and successful stderr logs both follow INFO/stdout."""
         executor = CommandExecutor()
         base_logger = logger.logger
         previous_handlers = list(base_logger.handlers)
@@ -403,8 +403,8 @@ class TestCommandExecutor:
             captured = capsys.readouterr()
             assert "command progress" in captured.out
             assert "command progress" not in captured.err
-            assert "command failure" in captured.err
-            assert "command failure" not in captured.out
+            assert "command failure" in captured.out
+            assert "command failure" not in captured.err
             assert "command progress" in process_logger.get_stdout_output()
             assert "command failure" in process_logger.get_stderr_output()
         finally:

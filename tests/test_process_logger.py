@@ -262,3 +262,37 @@ class TestProcessLoggerIntegration:
             assert record_dict.get("call_target") == "segment:detect"
         finally:
             logger.logger.removeHandler(handler)
+
+    def test_process_logger_stderr_logs_info_with_stream_metadata(self, log_context):
+        """Test stderr is captured as stderr but emitted as routine subprocess output."""
+        process = subprocess.Popen(
+            ["python", "-c", "import sys; print('pixi progress', file=sys.stderr)"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        records = []
+
+        class TestHandler(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = TestHandler()
+        logger.logger.addHandler(handler)
+
+        try:
+            process_logger = ProcessLogger(process, log_context, logger)
+            process_logger.start_reading()
+            process.wait(timeout=5)
+            process_logger.join(timeout=2)
+
+            assert process_logger.get_stdout_output() == []
+            assert process_logger.get_stderr_output() == ["pixi progress"]
+            stderr_records = [record for record in records if record.getMessage() == "pixi progress"]
+            assert stderr_records
+            assert all(record.levelno == logging.INFO for record in stderr_records)
+            assert all(getattr(record, "stream", None) == "stderr" for record in stderr_records)
+        finally:
+            logger.logger.removeHandler(handler)

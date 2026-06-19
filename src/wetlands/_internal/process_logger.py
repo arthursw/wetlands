@@ -79,10 +79,17 @@ class ProcessLogger:
         if self.process.stderr is not None:
             self._stderr_reader_thread = threading.Thread(
                 target=self._read_stream,
-                args=(self.process.stderr, "stderr", logging.ERROR),
+                args=(self.process.stderr, "stderr", logging.INFO),
                 daemon=True,
             )
             self._stderr_reader_thread.start()
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        """Wait for stdout/stderr reader threads to finish draining process output."""
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=timeout)
+        if self._stderr_reader_thread is not None and self._stderr_reader_thread.is_alive():
+            self._stderr_reader_thread.join(timeout=timeout)
 
     def _read_stream(self, stream, stream_name: str, level: int) -> None:
         """Read a process stream line-by-line and emit logs with context."""

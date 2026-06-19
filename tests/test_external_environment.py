@@ -1,6 +1,7 @@
 import json
 import logging
 import socket
+import subprocess
 import time
 import threading
 import pytest
@@ -476,14 +477,14 @@ def test_execute_error(mock_client, caplog):
     ]
     env._workers = []
 
-    with pytest.raises(ExecutionException):
-        with caplog.at_level(logging.ERROR):
+    with pytest.raises(ExecutionException) as exc_info:
+        with caplog.at_level(logging.WARNING):
             env.execute("module.py", "func", (1, 2, 3))
 
+    assert exc_info.value.failure.message == "A fake error occurred"
     assert "A fake error occurred" in caplog.text
-    assert "Traceback:" in caplog.text
-    assert "line 1" in caplog.text
-    assert "line 2" in caplog.text
+    assert "Traceback:" not in caplog.text
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
 
 
 def test_execute_legacy_payload_serialization_failure_is_structured():
@@ -506,12 +507,18 @@ def test_exit(mock_kill):
     env = ExternalEnvironment("test_env", Path("/tmp/test_env"), MagicMock())
     env.connection = MagicMock()
     env.process = MagicMock()
+    env.process.poll.return_value = None
+    env.process.wait.return_value = 0
     env._workers = []
+    process_logger = MagicMock()
+    env._process_logger = process_logger
 
     env._exit()
     env.connection.send.assert_called_once_with({"action": "exit"})
     env.connection.close.assert_called_once()
-    mock_kill.assert_called_once_with(env.process)
+    env.process.wait.assert_called_once()
+    process_logger.join.assert_called_once()
+    mock_kill.assert_not_called()
 
 
 # --- Worker pool tests ---
@@ -658,6 +665,79 @@ class TestWorkerReaderLoop:
         assert task.error is not None
         assert task.error.message == "boom"
         assert task.error.category == TaskFailureCategory.REMOTE_EXCEPTION
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_worker_pool_remote_error_logs_warning_without_error_traceback(self, mock_kill, caplog):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        task = Task("remote-task")
+        task._payload = dict(_call_target="module:boom")
+        task._set_running()
+        worker._current_task = task
+
+        worker.connection.recv.side_effect = [
+            {
+                "action": "error",
+                "task_id": "remote-task",
+                "failure": {
+                    "category": "remote_exception",
+                    "message": "user failed",
+                    "traceback": "Traceback...\nValueError: user failed\n",
+                    "traceback_frames": ["frame"],
+                    "remote_exception": {
+                        "module": "builtins",
+                        "type_name": "ValueError",
+                        "qualified_name": "ValueError",
+                        "message": "user failed",
+                        "traceback": "ValueError: user failed\n",
+                        "cause": None,
+                        "context": None,
+                        "suppress_context": False,
+                    },
+                },
+            },
+            EOFError(),
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            env._worker_reader_loop(worker)
+
+        assert task.status == TaskStatus.FAILED
+        assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+        warning_messages = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
+        assert any("Remote ValueError from builtins: user failed" in message for message in warning_messages)
+        assert not any("Traceback:" in message for message in warning_messages)
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_worker_pool_serialization_error_logs_error(self, mock_kill, caplog):
+        env = _make_env()
+        worker = _make_mock_worker()
+        env._workers = [worker]
+        task = Task("serialization-task")
+        task._payload = dict(_call_target="module:return_unpickleable")
+        task._set_running()
+        worker._current_task = task
+
+        worker.connection.recv.side_effect = [
+            {
+                "action": "error",
+                "task_id": "serialization-task",
+                "failure": {
+                    "category": "serialization",
+                    "message": "cannot pickle result",
+                    "serialization_context": "result",
+                },
+            },
+            EOFError(),
+        ]
+
+        with caplog.at_level(logging.ERROR):
+            env._worker_reader_loop(worker)
+
+        assert task.status == TaskStatus.FAILED
+        error_messages = [record.getMessage() for record in caplog.records if record.levelno == logging.ERROR]
+        assert any("Task serialization failure while serializing result: cannot pickle result" in message for message in error_messages)
 
     @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
     def test_update_passes_to_task(self, mock_kill):
@@ -819,6 +899,8 @@ class TestExitWithWorkers:
     def test_exit_kills_all_workers(self, mock_kill):
         env = _make_env()
         workers = [_make_mock_worker(i) for i in range(3)]
+        for worker in workers:
+            worker.process.wait.return_value = 0
         env._workers = list(workers)
         for w in workers:
             env._idle_workers.put(w)
@@ -826,10 +908,23 @@ class TestExitWithWorkers:
         env._exit()
 
         assert len(env._workers) == 0
-        assert mock_kill.call_count == 3
+        mock_kill.assert_not_called()
         for w in workers:
             w.connection.send.assert_called_once_with({"action": "exit"})
             w.connection.close.assert_called_once()
+            w.process_logger.join.assert_called_once()
+
+    @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
+    def test_exit_kills_worker_after_graceful_wait_timeout(self, mock_kill):
+        env = _make_env()
+        worker = _make_mock_worker()
+        worker.process.wait.side_effect = subprocess.TimeoutExpired("worker", 0.1)
+        env._workers = [worker]
+
+        env._exit()
+
+        mock_kill.assert_called_once_with(worker.process)
+        worker.process_logger.join.assert_called_once()
 
     @patch("wetlands._internal.command_executor.CommandExecutor.kill_process")
     def test_detach_closes_connections_without_exit_or_kill(self, mock_kill):

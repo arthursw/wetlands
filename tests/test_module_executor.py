@@ -113,6 +113,28 @@ class TestHandleExecutionError:
             assert "Test error" in call_args[0][2]["exception"]
             assert "task_id" not in call_args[0][2]
 
+    def test_handle_execution_error_logs_concise_non_error_for_user_exception(self, caplog):
+        mock_lock = MagicMock(spec=threading.Lock)
+        mock_connection = MagicMock()
+
+        try:
+            raise ValueError("user boom")
+        except ValueError as exception:
+            with patch("wetlands.module_executor.send_message"):
+                with caplog.at_level(logging.INFO, logger=module_executor.logger.name):
+                    module_executor.handle_execution_error(
+                        mock_lock,
+                        mock_connection,
+                        exception,
+                        task_id="task-123",
+                        call_target="module:function",
+                    )
+
+        assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+        warning_messages = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
+        assert any("Task task-123 failed in module:function: user boom" in message for message in warning_messages)
+        assert not any("Traceback:" in message for message in warning_messages)
+
     def test_handle_execution_error_with_task_id(self):
         """Test that handle_execution_error includes task_id when provided"""
         mock_lock = MagicMock(spec=threading.Lock)

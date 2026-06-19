@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import time
 import socket
@@ -23,7 +24,7 @@ from wetlands._internal.command_generator import Commands
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands.environment import Environment
 from wetlands._internal.exceptions import ExecutionException
-from wetlands._internal.diagnostics import TaskFailure, WorkerInfo
+from wetlands._internal.diagnostics import TaskFailure, TaskFailureCategory, WorkerInfo
 from wetlands._internal.command_executor import CommandExecutor
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands._internal.shell import shell_quote
@@ -49,6 +50,8 @@ STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
 STARTUP_CALLBACK_TIMEOUT = 30.0
 STARTUP_CONNECTION_READ_TIMEOUT = 0.5
 STARTUP_MAX_PAYLOAD_BYTES = 64 * 1024
+WORKER_GRACEFUL_EXIT_TIMEOUT = 2.0
+PROCESS_LOGGER_JOIN_TIMEOUT = 5.0
 
 
 class _AttachTimeout(TimeoutError):
@@ -547,6 +550,9 @@ class ExternalEnvironment(Environment):
 
             action = message.get("action")
             if action in ("execution finished", "error", "canceled"):
+                if action == "error":
+                    failure = TaskFailure.from_payload(message, call_target=self._task_call_target(task))
+                    self._log_task_failure(failure)
                 task._on_message(message)
                 worker._finished_task_ids.add(task.id)
                 worker._current_task = None
@@ -638,6 +644,9 @@ class ExternalEnvironment(Environment):
             CommandExecutor.kill_process(worker.process)
         elif worker.process is None and worker.pid is not None and runtime_state.pid_exists(worker.pid):
             CommandExecutor.kill_pid(worker.pid)
+
+        if worker.process_logger is not None:
+            worker.process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
 
         if worker.process and worker.process.stdout:
             try:
@@ -1080,10 +1089,7 @@ class ExternalEnvironment(Environment):
                     return message.get("result")
                 elif action == "error":
                     failure = TaskFailure.from_payload(message, call_target=payload.get("_call_target"))
-                    logger.error(failure.message)
-                    logger.error("Traceback:")
-                    for line in failure.traceback_frames:
-                        logger.error(line)
+                    self._log_task_failure(failure)
                     raise ExecutionException(failure)
                 else:
                     logger.warning(f"Got an unexpected message: {message}")
@@ -1117,6 +1123,42 @@ class ExternalEnvironment(Environment):
                 logger.error(f"Unexpected OSError: {e}")
                 raise e
         return None
+
+    def _log_task_failure(self, failure: TaskFailure) -> None:
+        level = logging.WARNING if failure.category == TaskFailureCategory.REMOTE_EXCEPTION else logging.ERROR
+        logger.log(level, failure.summary())
+
+    def _gracefully_stop_process(
+        self,
+        process: subprocess.Popen | None,
+        process_logger: ProcessLogger | None,
+    ) -> None:
+        if process is None:
+            return
+
+        timed_out = False
+        try:
+            if process.poll() is None:
+                process.wait(timeout=WORKER_GRACEFUL_EXIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+
+        if timed_out:
+            CommandExecutor.kill_process(process)
+
+        if process_logger is not None:
+            process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
+
+        if process.stdout:
+            try:
+                process.stdout.close()
+            except OSError:
+                pass
+        if process.stderr:
+            try:
+                process.stderr.close()
+            except OSError:
+                pass
 
     @synchronized
     def execute(self, module_path: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
@@ -1245,12 +1287,8 @@ class ExternalEnvironment(Environment):
                 except OSError:
                     pass
                 worker.connection.close()
-                if worker.process and worker.process.stdout:
-                    worker.process.stdout.close()
-                if worker.process and worker.process.stderr:
-                    worker.process.stderr.close()
                 if worker.process is not None:
-                    CommandExecutor.kill_process(worker.process)
+                    self._gracefully_stop_process(worker.process, worker.process_logger)
                 elif worker.pid is not None:
                     CommandExecutor.kill_pid(worker.pid)
                 if worker.persistent:
@@ -1282,13 +1320,9 @@ class ExternalEnvironment(Environment):
                     pass
             self.connection.close()
 
-        if self.process and self.process.stdout:
-            self.process.stdout.close()
-        if self.process and self.process.stderr:
-            self.process.stderr.close()
-
+        process_logger = self._process_logger
+        self._gracefully_stop_process(self.process, process_logger)
         self._process_logger = None
-        CommandExecutor.kill_process(self.process)
 
     @synchronized
     def detach(self) -> None:
