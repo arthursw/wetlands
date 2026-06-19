@@ -1033,7 +1033,7 @@ class ExternalEnvironment(Environment):
         if any(pkg["name"] == "debugpy" for pkg in installed_packages):
             return
         logger.info(f"Installing debugpy in environment '{self.name}' for debug mode.")
-        self.environment_manager.install(self, {"conda": ["debugpy"]})
+        self.environment_manager.install(self, {"conda": ["debugpy"]}, _mark_unmanaged=False)
 
     def _send_and_wait(self, payload: dict) -> Any:
         """Send a payload to the remote environment and wait for its response.
@@ -1352,8 +1352,7 @@ class ExternalEnvironment(Environment):
     def update(
         self,
         dependencies: Union[Dependencies, None] = None,
-        additional_install_commands: Commands = {},
-        use_existing: bool = False,
+        additional_install_commands: Commands | None = None,
     ) -> "Environment":
         """Updates this external environment by deleting it and recreating it."""
         if not self.path:
@@ -1368,5 +1367,4 @@ class ExternalEnvironment(Environment):
             str(self.name),
             dependencies=dependencies,
             additional_install_commands=additional_install_commands,
-            use_existing=use_existing,
         )

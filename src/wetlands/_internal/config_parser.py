@@ -17,6 +17,21 @@ from wetlands._internal.dependency_manager import Dependencies
 class ConfigParser:
     """Parse dependency configurations from various file formats."""
 
+    def _deduplicate_preserve_order(self, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result
+
+    def _set_channels(self, dependencies: Dependencies, channels: list[str]) -> None:
+        channels = self._deduplicate_preserve_order([channel for channel in channels if channel])
+        if channels:
+            dependencies["channels"] = channels
+
     def _format_dependency(self, name: str, version: str) -> str:
         """Format a dependency with its version spec.
 
@@ -172,8 +187,15 @@ class ConfigParser:
             env_config = environments[env_to_use]
             if isinstance(env_config, dict):
                 features = env_config.get("features", [])
+                self._set_channels(
+                    dependencies,
+                    list(config.get("workspace", {}).get("channels", [])) + list(env_config.get("channels", [])),
+                )
             elif isinstance(env_config, list):
                 features = env_config
+                self._set_channels(dependencies, list(config.get("workspace", {}).get("channels", [])))
+        else:
+            self._set_channels(dependencies, list(config.get("workspace", {}).get("channels", [])))
 
         # Extract python version from dependencies
         base_deps = config.get("dependencies", {})
@@ -242,6 +264,10 @@ class ConfigParser:
 
         # Start with base dependencies
         dependencies: Dependencies = {}
+        self._set_channels(
+            dependencies,
+            list(pixi_config.get("workspace", {}).get("channels", [])) + list(env_config.get("channels", [])),
+        )
 
         # Extract python version
         if "python" in pixi_config.get("dependencies", {}):
@@ -335,8 +361,18 @@ class ConfigParser:
                     env_config = environments[env_to_use]
                     if isinstance(env_config, dict):
                         features = env_config.get("features", [])
+                        self._set_channels(
+                            dependencies,
+                            list(pixi_config.get("workspace", {}).get("channels", []))
+                            + list(env_config.get("channels", [])),
+                        )
                     elif isinstance(env_config, list):
                         features = env_config
+                        self._set_channels(
+                            dependencies, list(pixi_config.get("workspace", {}).get("channels", []))
+                        )
+                else:
+                    self._set_channels(dependencies, list(pixi_config.get("workspace", {}).get("channels", [])))
 
                 # Extract python version
                 if "python" in pixi_config.get("dependencies", {}):
@@ -467,6 +503,7 @@ class ConfigParser:
         deps_list = config.get("dependencies", [])
         conda_deps = []
         pip_deps = []
+        self._set_channels(dependencies, list(config.get("channels", [])))
 
         for dep in deps_list:
             if isinstance(dep, str):

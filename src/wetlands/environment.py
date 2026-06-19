@@ -72,7 +72,7 @@ class Environment:
             setattr(FakeModule, f, fake_function)
         return FakeModule
 
-    def install(self, dependencies: Dependencies, additional_install_commands: Commands = {}) -> list[str]:
+    def install(self, dependencies: Dependencies, additional_install_commands: Commands | None = None) -> list[str]:
         """Installs dependencies.
         See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additional_install_commands`` parameters.
 
@@ -197,8 +197,7 @@ class Environment:
     def update(
         self,
         dependencies: Union[Dependencies, None] = None,
-        additional_install_commands: Commands = {},
-        use_existing: bool = False,
+        additional_install_commands: Commands | None = None,
     ) -> "Environment":
         """Update this environment with new dependencies. Only available in ExternalEnvironment."""
         raise NotImplementedError("update() in ExternalEnvironment")

@@ -8,6 +8,12 @@ from wetlands.environment_manager import EnvironmentManager
 from wetlands.external_environment import ExternalEnvironment
 from wetlands._internal.dependency_manager import Dependencies
 from wetlands._internal.command_generator import Commands
+from wetlands._internal.environment_metadata import (
+    MANAGED_STATUS,
+    UNMANAGED_STATUS,
+    read_environment_metadata,
+    write_environment_metadata,
+)
 from wetlands._internal.shell import shell_quote
 
 
@@ -101,6 +107,47 @@ def test_install_in_existing_env(environment_manager_fixture):
     assert any(
         "micromamba activate" in cmd or ". /path/to/micromamba" in cmd for cmd in command_list
     )  # Check general activation pattern
+
+
+def test_install_marks_external_environment_unmanaged(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    env_name = "metadata-install-env"
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
+    manager.environments[env_name] = env
+
+    manager.install(env, {"pip": ["requests"]})
+
+    assert env.path is not None
+    metadata, reason = read_environment_metadata(env.path, use_pixi=False)
+    assert reason is None
+    assert metadata is not None
+    assert metadata["status"] == UNMANAGED_STATUS
+    assert metadata["unmanaged_reason"] == "manual install"
+
+
+def test_install_failure_leaves_existing_metadata_unchanged(environment_manager_fixture):
+    manager, _, mock_execute_and_get_output = environment_manager_fixture
+    env_name = "failed-install-env"
+    env = ExternalEnvironment(env_name, manager.settings_manager.get_environment_path_from_name(env_name), manager)
+    manager.environments[env_name] = env
+    assert env.path is not None
+    original_metadata = {
+        "schema_version": 1,
+        "status": MANAGED_STATUS,
+        "name": env_name,
+        "manager": "micromamba",
+        "recipe_hash": "sha256:original",
+        "recipe": {},
+    }
+    write_environment_metadata(env.path, use_pixi=False, metadata=original_metadata)
+    mock_execute_and_get_output.side_effect = Exception("install failed")
+
+    with pytest.raises(Exception, match="install failed"):
+        manager.install(env, {"pip": ["requests"]})
+
+    metadata, reason = read_environment_metadata(env.path, use_pixi=False)
+    assert reason is None
+    assert metadata == original_metadata
 
 
 def test_install_in_existing_env_includes_local_dependency_commands(environment_manager_fixture, tmp_path):

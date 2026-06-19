@@ -46,7 +46,12 @@ environment_manager = EnvironmentManager()
 
 #### 2. Create (or get) an Environment and Install Dependencies
 
-Next, we define and create the Conda environment. We give it a name (`"cellpose_env"`) and specify its dependencies using a dictionary. Here, we require `cellpose` version 3.1.0, to be installed via Conda. If an environment with this name already exists, Wetlands will use it (and *ignore the dependencies*); otherwise, it will create it and install the specified dependencies. The `create` method returns an `Environment` object.
+Next, we define and create the Conda environment.
+We give it a name (`"cellpose_env"`) and specify its dependencies using a dictionary.
+Here, we require `cellpose` version 3.1.0, to be installed via Conda.
+If an environment with this name already exists, Wetlands reuses it only when its stored creation recipe hash matches the requested recipe.
+If the stored recipe is different, Wetlands raises an error instead of silently returning an environment with the wrong dependencies.
+The `create` method returns an `Environment` object.
 
 ```python
 env = environment_manager.create(
@@ -69,22 +74,28 @@ env = environment_manager.create(
 )
 ```
 
-!!! note
-
-    If a `main_conda_environment_path` was provided when instanciating the `EnvironmentManager`, Wetlands will check if `cellpose==3.1.0` is already installed in the main environment and return it if it is the case. If `main_conda_environment_path` is not provided but the required dependencies are only pip packages, Wetlands will check if the dependencies are installed in the current python environment and return it if it is the case.
-
-!!! note "Reusing existing environments with `use_existing=True`"
-
-    You can pass `use_existing=True` to `create()` to search for and reuse an existing environment that satisfies the dependencies. This includes the main environment. If no environment satisfies the requirements, a new one will be created. By default, `use_existing=False`, which always creates a new environment.
+!!! note "Reusing, replacing, and unmanaged environments"
 
     ```python
-    # Return main or existing environment if it satisfies the dependencies
+    # Reuses only if the same-name environment was created with the same recipe
     env = environment_manager.create(
         "cellpose_env",
         {"conda": ["cellpose==3.1.0"]},
-        use_existing=True  # Check if any existing env satisfies the dependencies
     )
+
+    # Recreate the same-name environment when the stored recipe differs
+    env = environment_manager.create(
+        "cellpose_env",
+        {"conda": ["cellpose==3.2.0"]},
+        replace_existing=True,
+    )
+
+    # Load the existing same-name environment without recipe validation
+    env = environment_manager.load("cellpose_env")
     ```
+
+    `create()` is strict: metadata must exist and its recipe hash must match.
+    `load(name)` is the explicit escape hatch when you want the existing default-path environment regardless of its metadata or installed dependencies.
 
 !!! note "Specifying dependencies"
 
@@ -94,7 +105,7 @@ env = environment_manager.create(
 
 !!! note "Load an existing environment"
 
-    You can also load an existing environment with `environment.load("env_name", Path("Path/to/existing/environment/pyproject.toml"))`. See [`EnvironmentManager.load()`][wetlands.environment_manager.EnvironmentManager.load].
+    You can load Wetlands' default path for a name with `environment_manager.load("env_name")`, or an explicit path with `environment_manager.load("env_name", Path("Path/to/existing/environment/pyproject.toml"))`. See [`EnvironmentManager.load()`][wetlands.environment_manager.EnvironmentManager.load].
 
 
 #### 3. Launch the Environment's Worker Processes
