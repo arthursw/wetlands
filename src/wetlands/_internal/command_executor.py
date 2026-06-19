@@ -212,8 +212,13 @@ class CommandExecutor:
         original_commands = list(commands)
         commands_string = "\n\t\t".join(commands)
         logger.debug(f"Execute commands:\n\n\t\t{commands_string}\n")
+        script_encoding = "utf-8-sig" if self._is_windows() else "utf-8"
         with tempfile.NamedTemporaryFile(
-            dir=self.scripts_path, suffix=".ps1" if self._is_windows() else ".sh", mode="w", delete=False
+            dir=self.scripts_path,
+            suffix=".ps1" if self._is_windows() else ".sh",
+            mode="w",
+            encoding=script_encoding,
+            delete=False,
         ) as tmp:
             if exit_if_command_error:
                 commands = self._insert_command_error_checks(commands)

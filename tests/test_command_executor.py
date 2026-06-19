@@ -1,4 +1,6 @@
 from unittest.mock import MagicMock
+from pathlib import Path
+import codecs
 import logging
 
 import pytest
@@ -44,10 +46,25 @@ def test_execute_commands_wait_failure_raises(executor):
         executor.execute_commands(["echo 'dependency solve failed'", "exit 1"], wait=True)
 
 
+def test_execute_commands_writes_windows_script_with_unicode_encoding(tmp_path, monkeypatch):
+    executor = CommandExecutor(scripts_path=tmp_path)
+    process = MagicMock(pid=123, stdout=None, stderr=None, returncode=0)
+    process._conda_exit_detected = False
+    popen = MagicMock(return_value=process)
+    monkeypatch.setattr(executor, "_is_windows", lambda: True)
+    monkeypatch.setattr("wetlands._internal.command_executor.subprocess.Popen", popen)
+
+    executor.execute_commands(["python -c \"print('✔')\""], wait=True, log=False)
+
+    script_bytes = Path(process._wetlands_script_path).read_bytes()
+    assert script_bytes.startswith(codecs.BOM_UTF8)
+    assert "✔".encode() in script_bytes
+
+
 def test_execute_commands_successful_stderr_logs_info_and_remains_captured(executor, caplog):
     with caplog.at_level(logging.INFO, logger=logger.logger.name):
         process = executor.execute_commands(
-            ["python -c \"import sys; print('✔ Added python=3.12', file=sys.stderr)\""],
+            ["python -c \"import sys; sys.stderr.buffer.write('✔ Added python=3.12\\n'.encode())\""],
             wait=True,
         )
 
@@ -62,11 +79,11 @@ def test_execute_commands_successful_stderr_logs_info_and_remains_captured(execu
 
 def test_execute_commands_wait_failure_logs_summary_and_bounded_stderr_tail(executor, caplog):
     stderr_lines = [f"err-{index}" for index in range(25)]
-    command = "python -c \"import sys; [print(f'err-{i}', file=sys.stderr) for i in range(25)]; sys.exit(3)\""
+    command = "python -c \"import sys; [print(f'err-{i}', file=sys.stderr) for i in range(25)]\""
 
     with pytest.raises(Exception, match="failed"):
         with caplog.at_level(logging.INFO, logger=logger.logger.name):
-            executor.execute_commands([command], exit_if_command_error=False, wait=True)
+            executor.execute_commands([command, "exit 3"], exit_if_command_error=False, wait=True)
 
     error_messages = [record.getMessage() for record in caplog.records if record.levelno == logging.ERROR]
     assert any("failed with exit code 3" in message for message in error_messages)
