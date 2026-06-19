@@ -482,6 +482,68 @@ class TestLaunchListener:
 
             MockListener.assert_called_once_with(("localhost", module_executor.port), authkey=b"root-auth-key")
 
+    def test_launch_listener_sends_startup_payload(self):
+        """Test listener reports its bound port over the startup callback."""
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.get_message", side_effect=[{"action": "exit"}]),
+            patch("wetlands.module_executor._notify_startup") as mock_notify,
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+            mock_listener.accept.return_value.__enter__.return_value = MagicMock()
+
+            module_executor.launch_listener(
+                authkey=b"root-auth-key",
+                startup_host="127.0.0.1",
+                startup_port=41000,
+                startup_token="startup-token",
+                debug_port=5678,
+            )
+
+            mock_notify.assert_called_once()
+            args = mock_notify.call_args.args
+            assert args[:3] == ("127.0.0.1", 41000, "startup-token")
+            payload = args[3]
+            assert payload["event"] == "wetlands.worker.ready"
+            assert payload["schema_version"] == 1
+            assert payload["token"] == "startup-token"
+            assert payload["port"] == 5000
+            assert payload["debug_port"] == 5678
+
+    def test_launch_listener_does_not_print_legacy_startup_lines(self):
+        """Test worker startup readiness is no longer announced on stdout."""
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor.get_message", side_effect=[{"action": "exit"}]),
+            patch("wetlands.module_executor._safe_print") as mock_safe_print,
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+            mock_listener.accept.return_value.__enter__.return_value = MagicMock()
+
+            module_executor.launch_listener()
+
+            mock_safe_print.assert_not_called()
+
+    def test_launch_listener_raises_when_required_startup_notification_fails(self):
+        """Test worker does not continue if the parent callback cannot be reached."""
+        with (
+            patch("wetlands.module_executor.Listener") as MockListener,
+            patch("wetlands.module_executor._notify_startup", side_effect=ConnectionError("callback failed")),
+        ):
+            mock_listener = MockListener.return_value.__enter__.return_value
+            mock_listener.address = ("localhost", 5000)
+
+            with pytest.raises(ConnectionError, match="callback failed"):
+                module_executor.launch_listener(
+                    startup_host="127.0.0.1",
+                    startup_port=41000,
+                    startup_token="startup-token",
+                )
+
+            mock_listener.accept.assert_not_called()
+
     def test_launch_listener_exit_action(self):
         """Test listener exits on exit action"""
         with (

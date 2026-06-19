@@ -7,7 +7,8 @@ Wetlands leverages **Pixi**, a package management tool for developers, or **Micr
 3.  **Dependency Installation:** Dependencies (Conda packages, Pip packages) are installed into the target environment using `pixi add ...` or `micromamba install ...` and `pip install ...` (executed within the activated environment).
 4.  **Launching Workers (`launch`):**
     *   `launch(max_workers=N)` starts one or more `module_executor` worker processes *within* the activated target environment using `subprocess.Popen`. All workers share the same Conda environment on disk — no duplication.
-    *   Each worker listens on its own local TCP socket using `multiprocessing.connection.Listener`.
+    *   Before each worker starts, the manager opens a one-shot localhost startup callback socket and passes its address plus a random token to `module_executor`.
+    *   Each worker binds its own local TCP socket using `multiprocessing.connection.Listener` with port `0`, then reports the OS-assigned port back through the startup callback.
     *   The main process connects to each worker using `multiprocessing.connection.Client`.
     *   Worker connections are authenticated with the Wetlands root auth key stored at `wetlands/state/auth.key`.
     *   A dedicated IPC reader daemon thread is started per worker to receive messages asynchronously.
@@ -57,7 +58,7 @@ For those workers, Wetlands uses the recorded PID for liveness checks and cleanu
 If a manager disconnects while a persistent worker is idle, the worker returns to `accept()` and can authenticate a later manager.
 If the disconnect happens while a task is running, the worker waits for that task thread to finish before accepting more work; the detached manager does not receive the result.
 If a later attach attempt reaches a worker that is alive but still busy, the attach attempt is bounded and the registry entry is preserved so a future attach call can succeed.
-Persistent workers redirect ongoing stdout/stderr dependence after startup and continue writing worker logs under the Wetlands instance path.
+Persistent workers detach from the launching process streams after the startup callback succeeds and continue writing worker logs under the Wetlands instance path.
 
 The authenticated local TCP transport is a trusted-local IPC mechanism.
 It does not turn `execute()` or `run_script()` into a sandboxed remote service; those APIs still execute arbitrary Python in the target environment.

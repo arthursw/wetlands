@@ -56,6 +56,9 @@ process = env.execute_commands(["python -u manual_communication_module.py"])
 
 The script we just launched (`manual_communication_module.py`) is designed to start a server and print the port it's listening on to its standard output. Our main script now needs to read the `stdout` of the `process` launched by Wetlands to discover this port number. We loop through the output lines until we find the line indicating the port.
 
+This stdout handshake belongs only to this custom example script.
+Wetlands' own `module_executor` workers use an internal startup callback to report their dynamically assigned ports.
+
 ```python
 port = None
 if process.stdout is None:
@@ -174,6 +177,8 @@ def segment_image(image_path_str, segmentation_path_str, connection):
 **Set Up the Server**
 
 The main part of the script uses [`multiprocessing.connection.Listener`](https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Listener) to create a server socket listening on `localhost` and an OS-assigned port (`0`). **Crucially, it prints the chosen port number to standard output**, which is how the main script discovers where to connect. It then waits for the main script to connect (`listener.accept()`).
+
+This is an application-level protocol for this example, not the startup protocol used by Wetlands workers.
 
 ```python
 

@@ -143,15 +143,14 @@ def check_output(line: str, _context: dict) -> None:
 # Be aware of the include_history arg to apply the callback on the entire log history, or only the futur logs
 process_logger.subscribe(check_output, include_history=False)
 
-# Wait for port announcement with timeout
-def port_predicate(line: str) -> bool:
-    return line.startswith("Listening port ")
+# Wait for a custom application log line with timeout
+def ready_predicate(line: str) -> bool:
+    return "Custom server ready" in line
 
-port_line = process_logger.wait_for_line(port_predicate, timeout=30)
+ready_line = process_logger.wait_for_line(ready_predicate, timeout=30)
 
-if port_line:
-    port = int(port_line.replace("Listening port ", ""))
-    connection = Client(("localhost", self.port))
+if ready_line:
+    print(ready_line)
 
 ```
 

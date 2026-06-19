@@ -13,6 +13,7 @@ Designed to be run within isolated environments for sandboxed execution of Pytho
 from __future__ import annotations
 
 import sys
+import json
 import logging
 import threading
 import traceback
@@ -20,6 +21,7 @@ import argparse
 import runpy
 import inspect
 import os
+import socket
 from pathlib import Path
 import importlib
 import importlib.util
@@ -88,6 +90,10 @@ port = 0
 logger = logging.getLogger("module_executor")
 _detached_stdio = False
 args: argparse.Namespace | None = None
+active_debug_port: int | None = None
+STARTUP_EVENT = "wetlands.worker.ready"
+STARTUP_SCHEMA_VERSION = 1
+STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
 
 
 class _MaxLevelFilter(logging.Filter):
@@ -145,6 +151,14 @@ def _safe_print(message: str) -> None:
         pass
 
 
+def _notify_startup(host: str, port: int, token: str, payload: dict) -> None:
+    payload = payload.copy()
+    payload["token"] = token
+    data = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+    with socket.create_connection((host, port), timeout=5.0) as connection:
+        connection.sendall(data)
+
+
 def _detach_standard_streams() -> None:
     """Stop persistent workers from depending on the launching process pipes."""
     global _detached_stdio
@@ -186,7 +200,20 @@ if __name__ == "__main__":
         help="Keep the worker process alive after client disconnects so managers can reconnect.",
         action="store_true",
     )
+    parser.add_argument(
+        "--startup_host",
+        help="Private Wetlands startup callback host used to report the dynamically assigned worker port.",
+        default=None,
+    )
+    parser.add_argument(
+        "--startup_port",
+        help="Private Wetlands startup callback port used to report the dynamically assigned worker port.",
+        default=None,
+        type=int,
+    )
     args = parser.parse_args()
+    if (args.startup_host is None) != (args.startup_port is None):
+        parser.error("--startup_host and --startup_port must be provided together")
     port = args.port
     configure_logging(args.wetlands_instance_path)
     logger = logging.getLogger(args.environment)
@@ -196,8 +223,7 @@ if __name__ == "__main__":
             import debugpy  # type: ignore[unused-import]
 
             logger.debug(f"Starting {args.environment} with python {sys.version}")
-            _, debug_port = debugpy.listen(args.debug_port)
-            print(f"Listening debug port {debug_port}")
+            _, active_debug_port = debugpy.listen(args.debug_port)
         except ImportError as ie:
             logger.error("debugpy is not installed in this environment. Debugging is not available.")
             logger.error(str(ie))
@@ -389,7 +415,15 @@ def load_root_authkey(wetlands_instance_path: Path) -> bytes:
     return (Path(wetlands_instance_path).resolve() / "state" / "auth.key").read_bytes()
 
 
-def launch_listener(authkey: bytes | None = None, persistent: bool = False):
+def launch_listener(
+    authkey: bytes | None = None,
+    persistent: bool = False,
+    *,
+    startup_host: str | None = None,
+    startup_port: int | None = None,
+    startup_token: str | None = None,
+    debug_port: int | None = None,
+):
     """
     Launches a listener on a random available port on localhost.
     Waits for client connections and handles 'execute', 'run', or 'exit' messages.
@@ -397,7 +431,24 @@ def launch_listener(authkey: bytes | None = None, persistent: bool = False):
     lock = threading.Lock()
     with Listener(("localhost", port), authkey=authkey) as listener:
         task_threads: list[threading.Thread] = []
-        _safe_print(f"Listening port {listener.address[1]}")
+        if startup_host is not None or startup_port is not None:
+            if startup_host is None or startup_port is None:
+                raise ValueError("startup_host and startup_port must be provided together")
+            if startup_token is None:
+                raise ValueError(f"{STARTUP_TOKEN_ENV} must be set when startup callback is enabled")
+            _notify_startup(
+                startup_host,
+                startup_port,
+                startup_token,
+                {
+                    "event": STARTUP_EVENT,
+                    "schema_version": STARTUP_SCHEMA_VERSION,
+                    "token": startup_token,
+                    "pid": os.getpid(),
+                    "port": listener.address[1],
+                    "debug_port": debug_port,
+                },
+            )
         if persistent:
             _detach_standard_streams()
         while True:
@@ -472,6 +523,13 @@ def launch_listener(authkey: bytes | None = None, persistent: bool = False):
 
 if __name__ == "__main__":
     assert args is not None
-    launch_listener(authkey=load_root_authkey(args.wetlands_instance_path), persistent=args.persistent)
+    launch_listener(
+        authkey=load_root_authkey(args.wetlands_instance_path),
+        persistent=args.persistent,
+        startup_host=args.startup_host,
+        startup_port=args.startup_port,
+        startup_token=os.environ.get(STARTUP_TOKEN_ENV),
+        debug_port=active_debug_port,
+    )
 
 logger.debug("Exit")

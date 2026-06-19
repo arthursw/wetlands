@@ -144,7 +144,7 @@ class ProcessLogger:
     ) -> Optional[str]:
         """Wait for a line matching predicate and return it.
 
-        Useful for parsing lines like "Listening port 12345" during env startup.
+        Useful for waiting on custom subprocess log lines such as "Custom server ready".
 
         Args:
             predicate: Function that takes a line and returns True if it's the line we're waiting for
