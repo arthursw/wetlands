@@ -1,5 +1,6 @@
 import json
 import logging
+import queue
 import socket
 import subprocess
 import time
@@ -208,30 +209,40 @@ def test_launch_worker_registers_debug_port_with_real_manager_method(tmp_path):
 def test_wait_for_startup_payload_ignores_invalid_preconnection():
     startup_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     startup_socket.bind(("127.0.0.1", 0))
-    startup_socket.listen(1)
+    startup_socket.listen(2)
     host, port = startup_socket.getsockname()
     process = MagicMock()
     process.poll.return_value = None
+    result_queue: queue.Queue[Any] = queue.Queue()
 
     def send_payload(payload: dict[str, Any]) -> None:
         with socket.create_connection((host, port), timeout=1.0) as connection:
             connection.sendall((json.dumps(payload) + "\n").encode("utf-8"))
 
+    def wait_for_payload() -> None:
+        try:
+            result_queue.put(_wait_for_startup_payload(startup_socket, "expected-token", process, timeout=2.0))
+        except BaseException as exc:
+            result_queue.put(exc)
+
     bad_payload = _startup_payload()
     bad_payload["token"] = "wrong-token"
     good_payload = _startup_payload(port=5678)
     good_payload["token"] = "expected-token"
+    waiter = threading.Thread(target=wait_for_payload)
+    waiter.start()
 
     try:
         send_payload(bad_payload)
-        good_sender = threading.Thread(target=send_payload, args=(good_payload,), daemon=True)
-        good_sender.start()
-
-        payload = _wait_for_startup_payload(startup_socket, "expected-token", process, timeout=2.0)
-        good_sender.join(timeout=1.0)
+        send_payload(good_payload)
+        result = result_queue.get(timeout=3.0)
     finally:
         startup_socket.close()
+        waiter.join(timeout=1.0)
 
+    if isinstance(result, BaseException):
+        raise result
+    payload = cast(dict[str, Any], result)
     assert payload["port"] == 5678
 
 
