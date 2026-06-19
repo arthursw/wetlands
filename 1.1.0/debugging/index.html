@@ -2320,7 +2320,7 @@
 <h2 id="how-it-works-under-the-hood">How It Works Under the Hood</h2>
 <ol>
 <li><strong>Process Detection</strong>: Wetlands uses <code>psutil</code> to find running processes matching your environment</li>
-<li><strong>Port Assignment</strong>: Each environment gets a unique debug port from <code>debug_ports.json</code></li>
+<li><strong>Port Assignment</strong>: Each module executor reports its debug port during the Wetlands startup callback, and Wetlands stores that port in <code>debug_ports.json</code></li>
 <li><strong>Debugpy Integration</strong>: The environment's module executor runs <code>debugpy</code> in socket mode</li>
 <li><strong>IDE Configuration</strong>: Wetlands generates IDE-specific configuration files for remote attach</li>
 <li><strong>Network Connection</strong>: Your IDE connects via localhost to the debug port in the isolated environment</li>
