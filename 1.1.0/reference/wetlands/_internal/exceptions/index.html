@@ -11,7 +11,7 @@
         <link rel="canonical" href="https://arthursw.github.io/wetlands/1.1.0/reference/wetlands/_internal/exceptions/">
       
       
-        <link rel="prev" href="../diagnostics/">
+        <link rel="prev" href="../environment_metadata/">
       
       
         <link rel="next" href="../install/">
@@ -908,6 +908,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -982,6 +1010,17 @@
     <span class="md-ellipsis">
       
         ExecutionException
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wetlands._internal.exceptions.EnvironmentReuseError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnvironmentReuseError
       
     </span>
   </a>
@@ -1198,6 +1237,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wetlands._internal.exceptions.EnvironmentReuseError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnvironmentReuseError
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1338,6 +1388,45 @@
 
 
   </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="wetlands._internal.exceptions.EnvironmentReuseError" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <code>EnvironmentReuseError</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="Exception">Exception</span></code></p>
+
+
+
+        <p>Raised when an existing same-name environment cannot be safely reused.</p>
+
+
+
+
+
+
+
+
+
+              <details class="mkdocstrings-source">
+                <summary>Source code in <code>wetlands/_internal/exceptions.py</code></summary>
+                <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-36">36</a></span>
+<span class="normal"><a href="#__codelineno-0-37">37</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36"></a><span class="k">class</span><span class="w"> </span><span class="nc">EnvironmentReuseError</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Raised when an existing same-name environment cannot be safely reused.&quot;&quot;&quot;</span>
+</span></code></pre></div></td></tr></table></div>
+              </details>
 
     </div>
 

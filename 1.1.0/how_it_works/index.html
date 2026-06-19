@@ -983,6 +983,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/environment_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../reference/wetlands/_internal/exceptions/" class="md-nav__link">
         
   
@@ -1242,8 +1270,9 @@
 <p>Wetlands leverages <strong>Pixi</strong>, a package management tool for developers, or <strong>Micromamba</strong>, a fast, native reimplementation of the Conda package manager.</p>
 <ol>
 <li><strong>Pixi or Micromamba Setup:</strong> When <code>EnvironmentManager</code> is initialized, it checks for a <code>pixi</code> or <code>micromamba</code> executable at the specified path (e.g., <code>"micromamba/"</code>). If not found, it downloads a self-contained Pixi or Micromamba binary suitable for the current operating system and architecture into that directory. This means Wetlands doesn't require a pre-existing Conda/Mamba installation.</li>
-<li><strong>Environment Creation:</strong> <code>create(envName, dependencies)</code> uses Pixi or Micromamba commands (<code>pixi init /path/to/envName</code> or  <code>micromamba create -n envName -c channel package ...</code>) to build a new, isolated Conda environment within the Pixi or Micromamba prefix (e.g., <code>pixi/workspaces/envName/envs/default/</code> or <code>micromamba/envs/envName</code>). When using Pixi, Wetlands also creates a workspace for the environment (e.g. <code>pixi/workspace/envName/</code>). Note that the main environment is returned if it already satisfies the required dependencies.</li>
-<li><strong>Dependency Installation:</strong> Dependencies (Conda packages, Pip packages) are installed into the target environment using <code>pixi add ...</code> or <code>micromamba install ...</code> and <code>pip install ...</code> (executed within the activated environment).</li>
+<li><strong>Environment Creation:</strong> <code>create(envName, dependencies)</code> uses Pixi or Micromamba commands (<code>pixi init /path/to/envName</code> or  <code>micromamba create -n envName -c channel package ...</code>) to build a new, isolated Conda environment within the Pixi or Micromamba prefix (e.g., <code>pixi/workspaces/envName/envs/default/</code> or <code>micromamba/envs/envName</code>). When using Pixi, Wetlands also creates a workspace for the environment (e.g. <code>pixi/workspace/envName/</code>). Wetlands stores a <code>.wetlands/environment.json</code> metadata file beside the managed environment and records a SHA-256 hash of the canonical creation recipe.</li>
+<li><strong>Strict Same-Name Reuse:</strong> A later <code>create(envName, dependencies)</code> call reuses the same-name environment only when its stored recipe hash matches the requested recipe. If the hash differs, metadata is missing, or the environment was marked unmanaged after a manual install, Wetlands raises an error by default. Use <code>replace_existing=True</code> to recreate the default managed environment, or <code>load(envName)</code> to intentionally load the existing default-path environment without recipe validation.</li>
+<li><strong>Dependency Installation:</strong> Dependencies (Conda packages, Pip packages) are installed into the target environment using <code>pixi add ...</code> or <code>micromamba install ...</code> and <code>pip install ...</code> (executed within the activated environment). Calling <code>env.install()</code> or <code>EnvironmentManager.install()</code> after creation marks the environment unmanaged because its actual contents no longer correspond exactly to the original creation recipe.</li>
 <li><strong>Launching Workers (<code>launch</code>):</strong><ul>
 <li><code>launch(max_workers=N)</code> starts one or more <code>module_executor</code> worker processes <em>within</em> the activated target environment using <code>subprocess.Popen</code>. All workers share the same Conda environment on disk — no duplication.</li>
 <li>Before each worker starts, the manager opens a one-shot localhost startup callback socket and passes its address plus a random token to <code>module_executor</code>.</li>

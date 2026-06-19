@@ -1160,6 +1160,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../reference/wetlands/_internal/environment_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../reference/wetlands/_internal/exceptions/" class="md-nav__link">
         
   
@@ -1934,7 +1962,7 @@ For trusted local workflows where workers should remain alive after the current 
 No secret is stored in <code>workers.json</code>.
 <code>launch_or_attach()</code> first tries to attach to existing live persistent workers for that environment name.
 If no live workers remain and the manager already knows the environment, it launches new persistent workers with the supplied launch options.
-Name-only use is reconnect-only unless the manager has already created or loaded that environment; pass an <a class="autorefs autorefs-internal" title="            Environment" href="../reference/wetlands/environment/#wetlands.environment.Environment"><code>Environment</code></a> object or call <a class="autorefs autorefs-internal" title="            create(name, dependencies=None, additional_install_commands={}, use_existing=False)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.create"><code>create()</code></a> or <a class="autorefs autorefs-internal" title="            load(name, environment_path)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.load"><code>load()</code></a> first when a launch fallback is needed.
+Name-only use is reconnect-only unless the manager has already created or loaded that environment; pass an <a class="autorefs autorefs-internal" title="            Environment" href="../reference/wetlands/environment/#wetlands.environment.Environment"><code>Environment</code></a> object or call <a class="autorefs autorefs-internal" title="            create(name, dependencies=None, additional_install_commands=None, *, replace_existing=False)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.create"><code>create()</code></a> or <a class="autorefs autorefs-internal" title="            load(name, environment_path=None)" href="../reference/wetlands/environment_manager/#wetlands.environment_manager.EnvironmentManager.load"><code>load()</code></a> first when a launch fallback is needed.
 Use plain <a class="autorefs autorefs-internal" title="            launch(additional_activate_commands={}, *, max_workers=1, worker_env=None, worker_timeout=None, persistent=False)" href="../reference/wetlands/environment/#wetlands.environment.Environment.launch"><code>env.launch()</code></a> for non-persistent workers.</p>
 <p>Use <a class="autorefs autorefs-internal" title="            detach()" href="../reference/wetlands/environment/#wetlands.environment.Environment.detach"><code>env.detach()</code></a> to close the current manager's client connections without sending <code>"exit"</code> to the workers:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">env</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>

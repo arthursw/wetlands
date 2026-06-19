@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../_internal/environment_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../_internal/exceptions/" class="md-nav__link">
         
   
@@ -1606,7 +1634,7 @@
               </td>
             </tr>
             <tr class="doc-section-item">
-              <td><code><a class="autorefs autorefs-internal" title="            install(dependencies, additional_install_commands={}) (wetlands.environment.Environment.install)" href="#wetlands.environment.Environment.install">install</a></code></td>
+              <td><code><a class="autorefs autorefs-internal" title="            install(dependencies, additional_install_commands=None) (wetlands.environment.Environment.install)" href="#wetlands.environment.Environment.install">install</a></code></td>
               <td>
                 <div class="doc-md-description">
                   <p>Installs dependencies.</p>
@@ -1706,7 +1734,7 @@
               </td>
             </tr>
             <tr class="doc-section-item">
-              <td><code><a class="autorefs autorefs-internal" title="            update(dependencies=None, additional_install_commands={}, use_existing=False) (wetlands.environment.Environment.update)" href="#wetlands.environment.Environment.update">update</a></code></td>
+              <td><code><a class="autorefs autorefs-internal" title="            update(dependencies=None, additional_install_commands=None) (wetlands.environment.Environment.update)" href="#wetlands.environment.Environment.update">update</a></code></td>
               <td>
                 <div class="doc-md-description">
                   <p>Update this environment with new dependencies. Only available in ExternalEnvironment.</p>
@@ -1900,8 +1928,7 @@
 <span class="normal"><a href="#__codelineno-0-200">200</a></span>
 <span class="normal"><a href="#__codelineno-0-201">201</a></span>
 <span class="normal"><a href="#__codelineno-0-202">202</a></span>
-<span class="normal"><a href="#__codelineno-0-203">203</a></span>
-<span class="normal"><a href="#__codelineno-0-204">204</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="k">class</span><span class="w"> </span><span class="nc">Environment</span><span class="p">:</span>
+<span class="normal"><a href="#__codelineno-0-203">203</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="k">class</span><span class="w"> </span><span class="nc">Environment</span><span class="p">:</span>
 </span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23"></a>    <span class="n">modules</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ModuleType</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
 </span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24"></a>
 </span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">environment_manager</span><span class="p">:</span> <span class="s2">&quot;EnvironmentManager&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
@@ -1954,7 +1981,7 @@
 </span><span id="__span-0-72"><a id="__codelineno-0-72" name="__codelineno-0-72"></a>            <span class="nb">setattr</span><span class="p">(</span><span class="n">FakeModule</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">fake_function</span><span class="p">)</span>
 </span><span id="__span-0-73"><a id="__codelineno-0-73" name="__codelineno-0-73"></a>        <span class="k">return</span> <span class="n">FakeModule</span>
 </span><span id="__span-0-74"><a id="__codelineno-0-74" name="__codelineno-0-74"></a>
-</span><span id="__span-0-75"><a id="__codelineno-0-75" name="__codelineno-0-75"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">install</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dependencies</span><span class="p">:</span> <span class="n">Dependencies</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">=</span> <span class="p">{})</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+</span><span id="__span-0-75"><a id="__codelineno-0-75" name="__codelineno-0-75"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">install</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dependencies</span><span class="p">:</span> <span class="n">Dependencies</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
 </span><span id="__span-0-76"><a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Installs dependencies.</span>
 </span><span id="__span-0-77"><a id="__codelineno-0-77" name="__codelineno-0-77"></a><span class="sd">        See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additional_install_commands`` parameters.</span>
 </span><span id="__span-0-78"><a id="__codelineno-0-78" name="__codelineno-0-78"></a>
@@ -2079,11 +2106,10 @@
 </span><span id="__span-0-197"><a id="__codelineno-0-197" name="__codelineno-0-197"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span>
 </span><span id="__span-0-198"><a id="__codelineno-0-198" name="__codelineno-0-198"></a>        <span class="bp">self</span><span class="p">,</span>
 </span><span id="__span-0-199"><a id="__codelineno-0-199" name="__codelineno-0-199"></a>        <span class="n">dependencies</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dependencies</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-200"><a id="__codelineno-0-200" name="__codelineno-0-200"></a>        <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">=</span> <span class="p">{},</span>
-</span><span id="__span-0-201"><a id="__codelineno-0-201" name="__codelineno-0-201"></a>        <span class="n">use_existing</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-202"><a id="__codelineno-0-202" name="__codelineno-0-202"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Environment&quot;</span><span class="p">:</span>
-</span><span id="__span-0-203"><a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Update this environment with new dependencies. Only available in ExternalEnvironment.&quot;&quot;&quot;</span>
-</span><span id="__span-0-204"><a id="__codelineno-0-204" name="__codelineno-0-204"></a>        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() in ExternalEnvironment&quot;</span><span class="p">)</span>
+</span><span id="__span-0-200"><a id="__codelineno-0-200" name="__codelineno-0-200"></a>        <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-201"><a id="__codelineno-0-201" name="__codelineno-0-201"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Environment&quot;</span><span class="p">:</span>
+</span><span id="__span-0-202"><a id="__codelineno-0-202" name="__codelineno-0-202"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Update this environment with new dependencies. Only available in ExternalEnvironment.&quot;&quot;&quot;</span>
+</span><span id="__span-0-203"><a id="__codelineno-0-203" name="__codelineno-0-203"></a>        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() in ExternalEnvironment&quot;</span><span class="p">)</span>
 </span></code></pre></div></td></tr></table></div>
               </details>
 
@@ -2168,7 +2194,7 @@ that contains the same methods of the module which will be executed within the e
 
 
 <h3 id="wetlands.environment.Environment.install" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">install</span><span class="p">(</span><span class="n">dependencies</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="o">=</span><span class="p">{})</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">install</span><span class="p">(</span><span class="n">dependencies</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
@@ -2176,7 +2202,7 @@ that contains the same methods of the module which will be executed within the e
     <div class="doc doc-contents ">
 
         <p>Installs dependencies.
-See <a class="autorefs autorefs-internal" title="            create(name, dependencies=None, additional_install_commands={}, use_existing=False)" href="../environment_manager/#wetlands.environment_manager.EnvironmentManager.create"><code>EnvironmentManager.create</code></a> for more details on the <code>dependencies</code> and <code>additional_install_commands</code> parameters.</p>
+See <a class="autorefs autorefs-internal" title="            create(name, dependencies=None, additional_install_commands=None, *, replace_existing=False)" href="../environment_manager/#wetlands.environment_manager.EnvironmentManager.create"><code>EnvironmentManager.create</code></a> for more details on the <code>dependencies</code> and <code>additional_install_commands</code> parameters.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2211,7 +2237,7 @@ See <a class="autorefs autorefs-internal" title="            create(name, depend
                 <code>additional_install_commands</code>
             </td>
             <td>
-                  <code><span title="wetlands._internal.command_generator.Commands">Commands</span></code>
+                  <code><span title="wetlands._internal.command_generator.Commands">Commands</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -2219,7 +2245,7 @@ See <a class="autorefs autorefs-internal" title="            create(name, depend
               </div>
             </td>
             <td>
-                  <code>{}</code>
+                  <code>None</code>
             </td>
           </tr>
       </tbody>
@@ -2240,7 +2266,7 @@ See <a class="autorefs autorefs-internal" title="            create(name, depend
 <span class="normal"><a href="#__codelineno-0-82">82</a></span>
 <span class="normal"><a href="#__codelineno-0-83">83</a></span>
 <span class="normal"><a href="#__codelineno-0-84">84</a></span>
-<span class="normal"><a href="#__codelineno-0-85">85</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-75"><a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="k">def</span><span class="w"> </span><span class="nf">install</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dependencies</span><span class="p">:</span> <span class="n">Dependencies</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">=</span> <span class="p">{})</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="normal"><a href="#__codelineno-0-85">85</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-75"><a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="k">def</span><span class="w"> </span><span class="nf">install</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dependencies</span><span class="p">:</span> <span class="n">Dependencies</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
 </span><span id="__span-0-76"><a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Installs dependencies.</span>
 </span><span id="__span-0-77"><a id="__codelineno-0-77" name="__codelineno-0-77"></a><span class="sd">    See [`EnvironmentManager.create`][wetlands.environment_manager.EnvironmentManager.create] for more details on the ``dependencies`` and ``additional_install_commands`` parameters.</span>
 </span><span id="__span-0-78"><a id="__codelineno-0-78" name="__codelineno-0-78"></a>
@@ -2821,7 +2847,7 @@ Base implementation raises NotImplementedError.</p>
 
 
 <h3 id="wetlands.environment.Environment.update" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">update</span><span class="p">(</span><span class="n">dependencies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="o">=</span><span class="p">{},</span> <span class="n">use_existing</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">update</span><span class="p">(</span><span class="n">dependencies</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">additional_install_commands</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
@@ -2839,15 +2865,13 @@ Base implementation raises NotImplementedError.</p>
 <span class="normal"><a href="#__codelineno-0-200">200</a></span>
 <span class="normal"><a href="#__codelineno-0-201">201</a></span>
 <span class="normal"><a href="#__codelineno-0-202">202</a></span>
-<span class="normal"><a href="#__codelineno-0-203">203</a></span>
-<span class="normal"><a href="#__codelineno-0-204">204</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-197"><a id="__codelineno-0-197" name="__codelineno-0-197"></a><span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span>
+<span class="normal"><a href="#__codelineno-0-203">203</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-197"><a id="__codelineno-0-197" name="__codelineno-0-197"></a><span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span>
 </span><span id="__span-0-198"><a id="__codelineno-0-198" name="__codelineno-0-198"></a>    <span class="bp">self</span><span class="p">,</span>
 </span><span id="__span-0-199"><a id="__codelineno-0-199" name="__codelineno-0-199"></a>    <span class="n">dependencies</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dependencies</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-200"><a id="__codelineno-0-200" name="__codelineno-0-200"></a>    <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">=</span> <span class="p">{},</span>
-</span><span id="__span-0-201"><a id="__codelineno-0-201" name="__codelineno-0-201"></a>    <span class="n">use_existing</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-202"><a id="__codelineno-0-202" name="__codelineno-0-202"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Environment&quot;</span><span class="p">:</span>
-</span><span id="__span-0-203"><a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Update this environment with new dependencies. Only available in ExternalEnvironment.&quot;&quot;&quot;</span>
-</span><span id="__span-0-204"><a id="__codelineno-0-204" name="__codelineno-0-204"></a>    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() in ExternalEnvironment&quot;</span><span class="p">)</span>
+</span><span id="__span-0-200"><a id="__codelineno-0-200" name="__codelineno-0-200"></a>    <span class="n">additional_install_commands</span><span class="p">:</span> <span class="n">Commands</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-201"><a id="__codelineno-0-201" name="__codelineno-0-201"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Environment&quot;</span><span class="p">:</span>
+</span><span id="__span-0-202"><a id="__codelineno-0-202" name="__codelineno-0-202"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Update this environment with new dependencies. Only available in ExternalEnvironment.&quot;&quot;&quot;</span>
+</span><span id="__span-0-203"><a id="__codelineno-0-203" name="__codelineno-0-203"></a>    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;update() in ExternalEnvironment&quot;</span><span class="p">)</span>
 </span></code></pre></div></td></tr></table></div>
             </details>
     </div>
