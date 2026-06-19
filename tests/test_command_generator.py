@@ -101,8 +101,8 @@ def test_add_multiple_channels_micromamba_preserves_channel_order(command_genera
     )
 
     assert commands == [
-        f"micromamba config prepend --file {shell_quote(conda_path / '.mambarc')} channels bioconda",
-        f"micromamba config prepend --file {shell_quote(conda_path / '.mambarc')} channels conda-forge",
+        f"micromamba config prepend --file {shell_quote(conda_path / '.mambarc')} channels {shell_quote('bioconda')}",
+        f"micromamba config prepend --file {shell_quote(conda_path / '.mambarc')} channels {shell_quote('conda-forge')}",
     ]
 
 
