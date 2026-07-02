@@ -1,5 +1,6 @@
 import platform
 import re
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
 import subprocess
@@ -244,6 +245,37 @@ def test_create_same_name_missing_metadata_raises(environment_manager_fixture):
 
     with pytest.raises(EnvironmentReuseError, match="metadata"):
         manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+
+def test_create_unreusable_disk_environment_is_not_cached(environment_manager_fixture):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "uncached-missing-metadata"
+    manager.environment_exists.return_value = True
+
+    with pytest.raises(EnvironmentReuseError, match="metadata"):
+        manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+    assert env_name not in manager.environments
+
+    manager.environment_exists.return_value = False
+    replacement = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+    assert replacement is manager.environments[env_name]
+    mock_execute.assert_called_once()
+
+
+def test_create_recreates_registered_default_environment_removed_on_disk(environment_manager_fixture):
+    manager, mock_execute, _ = environment_manager_fixture
+    env_name = "removed-registered-env"
+    env = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+    shutil.rmtree(env.path)
+    mock_execute.reset_mock()
+
+    replacement = manager.create(env_name, dependencies={"pip": ["numpy==1.2.3"]})
+
+    assert replacement is manager.environments[env_name]
+    assert replacement is not env
+    mock_execute.assert_called_once()
 
 
 def test_create_same_name_unmanaged_metadata_raises(environment_manager_fixture):

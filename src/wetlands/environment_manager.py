@@ -497,6 +497,11 @@ class EnvironmentManager:
     def _paths_match(self, left: Path | None, right: Path) -> bool:
         return left is not None and left.resolve() == right.resolve()
 
+    def _default_environment_path_present(self, path: Path) -> bool:
+        if self.settings_manager.use_pixi:
+            return path.is_file()
+        return path.is_dir()
+
     def _format_environment_reuse_error(
         self,
         *,
@@ -622,9 +627,25 @@ class EnvironmentManager:
 
         # Check if environment already exists on disk
         path = self.settings_manager.get_environment_path_from_name(name)
+        registered_environment = self.environments.get(name)
+        if (
+            isinstance(registered_environment, ExternalEnvironment)
+            and self._paths_match(registered_environment.path, path)
+            and not self._default_environment_path_present(path)
+        ):
+            del self.environments[name]
+
         if self.environment_exists(path) and name not in self.environments:
             logger.log_environment(f"Loading existing environment '{name}' from '{path}'", name, stage="create")
-            self.environments[name] = ExternalEnvironment(name, path, self)
+            existing_environment = self._validate_existing_environment_for_create(
+                environment=ExternalEnvironment(name, path, self),
+                default_path=path,
+                requested_hash=recipe_hash,
+                replace_existing=replace_existing,
+            )
+            if existing_environment is not None:
+                self.environments[name] = existing_environment
+                return existing_environment
 
         if name in self.environments:
             existing_environment = self._validate_existing_environment_for_create(
