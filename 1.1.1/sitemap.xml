@@ -2,114 +2,114 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/debugging/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/dependencies/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/getting_started/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/how_it_works/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/logging/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/manual_communication/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/shared_memory/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/tasks/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/SUMMARY/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/environment/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/environment_manager/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/external_environment/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/internal_environment/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/ndarray/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/task/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/command_executor/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/command_generator/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/config_parser/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/dependency_manager/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/diagnostics/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/environment_metadata/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/exceptions/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/install/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/process_logger/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/runtime_state/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/settings_manager/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://arthursw.github.io/wetlands/1.1.1/reference/wetlands/_internal/shell/</loc>
-         <lastmod>2026-06-19</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
 </urlset>
