@@ -26,6 +26,19 @@ class CommandsDict(TypedDict):
 Commands = Union[CommandsDict, list[str]]
 
 
+def _deduplicate_preserve_order(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+def _infer_channels_from_conda_dependencies(conda_dependencies: list[str]) -> list[str]:
+    inferred_channels = []
+    for dependency in conda_dependencies:
+        channel, separator, _ = dependency.partition("::")
+        if separator and channel:
+            inferred_channels.append(channel)
+    return _deduplicate_preserve_order(inferred_channels)
+
+
 class CommandGenerator:
     """Generate Conda commands."""
 
@@ -160,12 +173,14 @@ class CommandGenerator:
                 ]
             else:
                 return []
-        channels += set([dep.split("::")[0].replace('"', "") for dep in conda_dependencies if "::" in dep])
-        if len(channels) == 0:
+        channels_to_add = _deduplicate_preserve_order(
+            channels + _infer_channels_from_conda_dependencies(conda_dependencies)
+        )
+        if len(channels_to_add) == 0:
             return []
         commands = self.get_activate_conda_commands() if activate_conda else []
         commands += [
             f"{self.settings_manager.conda_bin} project channel add --manifest-path {shell_quote(environment.path)} --no-progress --prepend "
-            + " ".join(shell_quote(channel) for channel in channels)
+            + " ".join(shell_quote(channel) for channel in channels_to_add)
         ]
         return commands

@@ -144,6 +144,7 @@ class DependencyManager:
         conda_dependencies, condaDependenciesNoDeps, hasCondaDependencies = self.format_dependencies(
             "conda", dependencies
         )
+        conda_dependencies_unquoted, _, _ = self.format_dependencies("conda", dependencies, quotes=False)
         pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.format_dependencies("pip", dependencies)
         local_dependencies = self.normalize_local_dependencies(dependencies)
 
@@ -164,7 +165,7 @@ class DependencyManager:
                 environment, activate_conda=False
             )
             install_deps_commands += self.command_generator.get_add_channels_commands(
-                environment, dependencies.get("channels", []), conda_dependencies, activate_conda=False
+                environment, dependencies.get("channels", []), conda_dependencies_unquoted, activate_conda=False
             )
 
         proxy_string = self.settings_manager.get_proxy_string()

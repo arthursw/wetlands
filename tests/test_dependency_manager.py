@@ -213,6 +213,92 @@ def test_get_install_dependencies_commands_pixi(mock_command_generator_pixi):
     )
 
 
+def test_get_install_dependencies_commands_pixi_infers_unquoted_channel(mock_command_generator_pixi):
+    dependency_manager = DependencyManager(mock_command_generator_pixi)
+    dependencies: Dependencies = {
+        "python": "3.13.2",
+        "conda": ["bioimageit::atlas>=0"],
+        "pip": [],
+    }
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+    channel_commands = [cmd for cmd in commands if "project channel add" in cmd]
+
+    assert channel_commands == [
+        f"pixi project channel add --manifest-path {shell_quote(environment.path)} --no-progress --prepend bioimageit"
+    ]
+    assert "'" not in channel_commands[0].split("--prepend", maxsplit=1)[1]
+    assert any(
+        cmd == f"pixi add --manifest-path {shell_quote(environment.path)} {shell_quote('bioimageit::atlas>=0')}"
+        for cmd in commands
+    )
+
+
+def test_get_install_dependencies_commands_pixi_combines_explicit_and_inferred_channels(
+    mock_command_generator_pixi,
+):
+    dependency_manager = DependencyManager(mock_command_generator_pixi)
+    dependencies: Dependencies = {
+        "channels": ["conda-forge"],
+        "conda": ["bioimageit::atlas>=0"],
+    }
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+    channel_commands = [cmd for cmd in commands if "project channel add" in cmd]
+
+    assert len(channel_commands) == 1
+    assert "conda-forge" in channel_commands[0]
+    assert "bioimageit" in channel_commands[0]
+
+
+def test_get_install_dependencies_commands_pixi_does_not_infer_channels_without_prefix(
+    mock_command_generator_pixi,
+):
+    dependency_manager = DependencyManager(mock_command_generator_pixi)
+    dependencies: Dependencies = {
+        "conda": ["atlas>=0"],
+    }
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+
+    assert not any("project channel add" in cmd for cmd in commands)
+    assert any(
+        cmd == f"pixi add --manifest-path {shell_quote(environment.path)} {shell_quote('atlas>=0')}" for cmd in commands
+    )
+
+
+def test_get_install_dependencies_commands_pixi_quotes_special_conda_dependency(
+    mock_command_generator_pixi,
+):
+    dependency_manager = DependencyManager(mock_command_generator_pixi)
+    dependency = "conda-forge::some-pkg>=1.0,<2.0"
+    dependencies: Dependencies = {
+        "conda": [dependency],
+    }
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+
+    assert any(
+        cmd == f"pixi add --manifest-path {shell_quote(environment.path)} {shell_quote(dependency)}" for cmd in commands
+    )
+
+
 def test_get_install_dependencies_commands_pixi_local_dependencies(mock_command_generator_pixi, tmp_path):
     dependency_manager = DependencyManager(mock_command_generator_pixi)
     editable_path = tmp_path / "editable package"
