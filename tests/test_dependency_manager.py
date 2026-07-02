@@ -2,7 +2,7 @@ import pytest
 import re
 import platform
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from wetlands._internal.exceptions import IncompatibilityException
 from wetlands._internal.dependency_manager import DependencyManager, Dependencies
 from wetlands._internal.shell import shell_quote
@@ -229,13 +229,36 @@ def test_get_install_dependencies_commands_pixi_infers_unquoted_channel(mock_com
     channel_commands = [cmd for cmd in commands if "project channel add" in cmd]
 
     assert channel_commands == [
-        f"pixi project channel add --manifest-path {shell_quote(environment.path)} --no-progress --prepend bioimageit"
+        f"pixi project channel add --manifest-path {shell_quote(environment.path)} --no-progress --prepend {shell_quote('bioimageit')}"
     ]
-    assert "'" not in channel_commands[0].split("--prepend", maxsplit=1)[1]
+    assert shell_quote("'bioimageit") not in channel_commands[0]
     assert any(
         cmd == f"pixi add --manifest-path {shell_quote(environment.path)} {shell_quote('bioimageit::atlas>=0')}"
         for cmd in commands
     )
+
+
+@patch("platform.system", return_value="Windows")
+def test_get_install_dependencies_commands_pixi_infers_unquoted_channel_with_windows_shell_quotes(
+    mock_platform,
+    mock_command_generator_pixi,
+):
+    dependency_manager = DependencyManager(mock_command_generator_pixi)
+    dependencies: Dependencies = {
+        "conda": ["bioimageit::atlas>=0"],
+    }
+
+    environment = MagicMock()
+    environment.name = "envName"
+    environment.path = Path("/tmp/envName")
+
+    commands = dependency_manager.get_install_dependencies_commands(environment, dependencies)
+    channel_commands = [cmd for cmd in commands if "project channel add" in cmd]
+
+    assert channel_commands == [
+        f"pixi project channel add --manifest-path {shell_quote(environment.path)} --no-progress --prepend {shell_quote('bioimageit')}"
+    ]
+    assert shell_quote("'bioimageit") not in channel_commands[0]
 
 
 def test_get_install_dependencies_commands_pixi_combines_explicit_and_inferred_channels(
