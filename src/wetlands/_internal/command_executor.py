@@ -10,6 +10,45 @@ import psutil
 from wetlands.logger import logger
 from wetlands._internal.process_logger import ProcessLogger
 
+MAX_JSON_DIAGNOSTIC_PREFIX_LENGTH = 64 * 1024
+
+
+def _decode_json_line_suffix(lines: list[str]) -> tuple[int, Any] | None:
+    """Return the first JSON container that starts at a line boundary and consumes the suffix."""
+    decoder = json.JSONDecoder()
+    prefix_length = 0
+
+    for index, line in enumerate(lines):
+        stripped_line = line.lstrip()
+        if stripped_line.startswith(("{", "[")) and prefix_length <= MAX_JSON_DIAGNOSTIC_PREFIX_LENGTH:
+            candidate = "\n".join([stripped_line, *lines[index + 1 :]])
+            try:
+                value, end = decoder.raw_decode(candidate)
+            except json.JSONDecodeError:
+                pass
+            else:
+                if not candidate[end:].strip() and isinstance(value, (dict, list)):
+                    return index, value
+        prefix_length += len(line) + 1
+
+    return None
+
+
+def _parse_json_output(lines: list[str]) -> Any:
+    """Parse one JSON document, allowing bounded non-JSON diagnostics before it."""
+    raw_output = "\n".join(lines).strip()
+    try:
+        return json.loads(raw_output)
+    except json.JSONDecodeError as original_error:
+        decoded_suffix = _decode_json_line_suffix(lines)
+        if decoded_suffix is None:
+            raise original_error
+
+        json_start, value = decoded_suffix
+        if _decode_json_line_suffix(lines[:json_start]) is not None:
+            raise ValueError("Command output contained more than one JSON document.") from original_error
+        return value
+
 
 class CommandExecutor:
     """Handles execution of shell commands with error checking and logging."""
@@ -260,7 +299,7 @@ class CommandExecutor:
                     env.pop(var, None)
                 popen_kwargs["env"] = env
 
-            default_popen_kwargs = {
+            default_popen_kwargs: dict[str, Any] = {
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.PIPE if log else subprocess.STDOUT,
                 "stdin": subprocess.DEVNULL,  # Prevent the command to wait for input: instead we want to stop if this happens
@@ -272,6 +311,7 @@ class CommandExecutor:
             process._wetlands_script_path = tmp.name  # type: ignore[attr-defined]
 
             # Create ProcessLogger to handle stdout in background if logging is enabled
+            process_logger: ProcessLogger | None = None
             if log:
                 process_logger = self._create_process_logger(process, log_context)
 
@@ -286,7 +326,6 @@ class CommandExecutor:
 
             if wait:
                 process.wait()
-                process_logger = None
                 if log:
                     process_logger = self._get_complete_process_logger(process)
                 if getattr(process, "_conda_exit_detected", False) or process.returncode != 0:
@@ -349,7 +388,7 @@ class CommandExecutor:
 
     def execute_commands_and_get_json_output(
         self, commands: list[str], exit_if_command_error: bool = True, popen_kwargs: dict[str, Any] = {}
-    ) -> list[dict[str, str]]:
+    ) -> Any:
         """Execute commands and parse the json output.
 
         Args:
@@ -370,5 +409,5 @@ class CommandExecutor:
         if process_logger is None:
             return []
 
-        output = process_logger.get_output()
-        return json.loads("".join(output))
+        stdout = process_logger.get_stdout_output()
+        return _parse_json_output(stdout)

@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 from pathlib import Path
 import codecs
+import json
 import logging
 
 import pytest
@@ -113,6 +114,48 @@ def test_get_output_success_keeps_stderr_output_available(executor):
 def test_get_output_failure(executor):
     with pytest.raises(Exception, match="failed"):
         executor.execute_commands_and_get_output(["exit 1"])
+
+
+def test_get_json_output_accepts_leading_stdout_diagnostic(executor):
+    output = executor.execute_commands_and_get_json_output(
+        [
+            "echo 'WARN the lock file uses an older format'",
+            """echo '[{"name": "requests", "version": "2.32.0"}]'""",
+        ]
+    )
+
+    assert output == [{"name": "requests", "version": "2.32.0"}]
+
+
+def test_get_json_output_ignores_stderr_diagnostic(executor):
+    output = executor.execute_commands_and_get_json_output(
+        [
+            "python -c \"import sys; print('WARN progress', file=sys.stderr)\"",
+            """echo '{"status": "ok"}'""",
+        ]
+    )
+
+    assert output == {"status": "ok"}
+
+
+def test_get_json_output_rejects_trailing_diagnostic(executor):
+    with pytest.raises(json.JSONDecodeError):
+        executor.execute_commands_and_get_json_output(
+            [
+                """echo '{"status": "ok"}'""",
+                "echo 'WARN unexpected trailing output'",
+            ]
+        )
+
+
+def test_get_json_output_rejects_multiple_json_documents(executor):
+    with pytest.raises(ValueError, match="more than one JSON document"):
+        executor.execute_commands_and_get_json_output(
+            [
+                """echo '{"first": true}'""",
+                """echo '{"second": true}'""",
+            ]
+        )
 
 
 def test_conda_system_exit(executor):
