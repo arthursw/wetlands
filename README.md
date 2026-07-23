@@ -199,6 +199,16 @@ The updater requires exact release tags, verifies the complete platform allowlis
 If the installed GitHub CLI supports immutable release verification, the updater also uses it for releases GitHub marks immutable.
 Review and commit each version and its full hash mapping as one atomic source change.
 
+To intentionally update both tools to GitHub's latest stable releases, use:
+
+```sh
+uv run python tools/update_artifact_registry.py --latest
+```
+
+The developer-only `latest` alias is resolved to exact release tags before any registry is generated.
+The generated registry always contains concrete versions, and Wetlands runtime installation continues to reject `latest`.
+You can also pass `latest` to one version option and an exact tag to the other when updating only one tool.
+
 Use `--check` to perform the same network-backed validation without writing and fail if the committed registry is stale:
 
 ```sh

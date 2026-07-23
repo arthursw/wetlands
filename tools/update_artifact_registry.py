@@ -59,7 +59,7 @@ MICROMAMBA_ARTIFACTS = (
 PIXI_VERSION_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 MICROMAMBA_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-CHECKSUM_LINE_RE = re.compile(r"^([0-9a-fA-F]{64})(?:[ \t]+\*([^ \t].*))?$")
+CHECKSUM_LINE_RE = re.compile(r"^([0-9a-fA-F]{64})(?:[ \t]+(?:\*|[ \t])([^ \t].*))?$")
 
 
 class RegistryUpdateError(RuntimeError):
@@ -131,9 +131,38 @@ def validate_url(url: str, allowed_hosts: Set[str]) -> None:
 def validate_version(tool: str, version: str, pattern: re.Pattern[str]) -> None:
     if not pattern.fullmatch(version):
         raise RegistryUpdateError(
-            f"{tool} version {version!r} is not an exact supported release tag; latest, branches, and "
-            "ambiguous identifiers are not allowed."
+            f"{tool} version {version!r} is not an exact supported release tag; branches and ambiguous "
+            "identifiers are not allowed."
         )
+
+
+def resolve_release_version(
+    downloader: Downloader,
+    tool: str,
+    repository: str,
+    requested_version: str,
+    pattern: re.Pattern[str],
+) -> str:
+    """Resolve the developer-only ``latest`` alias to an exact release tag."""
+    if requested_version != "latest":
+        validate_version(tool, requested_version, pattern)
+        return requested_version
+
+    url = f"https://api.github.com/repos/{repository}/releases/latest"
+    try:
+        metadata = json.loads(downloader.read_bytes(url, GITHUB_API_HOSTS).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise RegistryUpdateError(f"Malformed latest-release metadata for {repository}.") from e
+
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("tag_name"), str):
+        raise RegistryUpdateError(f"GitHub returned no exact latest release tag for {repository}.")
+    if metadata.get("draft") or metadata.get("prerelease"):
+        raise RegistryUpdateError(f"GitHub returned a draft or prerelease as the latest release for {repository}.")
+
+    resolved_version = metadata["tag_name"]
+    validate_version(tool, resolved_version, pattern)
+    print(f"Resolved latest {tool} release to exact tag {resolved_version}.")
+    return resolved_version
 
 
 def parse_checksum(content: bytes, expected_filename: str) -> str:
@@ -402,31 +431,43 @@ def generate_registry(
     registry_path: Path = REGISTRY_PATH,
     downloader: Optional[Downloader] = None,
 ) -> str:
-    validate_version("Pixi", pixi_version, PIXI_VERSION_RE)
-    validate_version("Micromamba", micromamba_version, MICROMAMBA_VERSION_RE)
     if downloader is None:
         downloader = Downloader()
 
+    resolved_pixi_version = resolve_release_version(
+        downloader,
+        "Pixi",
+        PIXI_REPOSITORY,
+        pixi_version,
+        PIXI_VERSION_RE,
+    )
+    resolved_micromamba_version = resolve_release_version(
+        downloader,
+        "Micromamba",
+        MICROMAMBA_REPOSITORY,
+        micromamba_version,
+        MICROMAMBA_VERSION_RE,
+    )
     current_artifact_name, current_vc_url = load_current_vc_redist(registry_path)
     selected_vc_url = vc_redist_url or current_vc_url
 
     pixi_hashes = fetch_github_hashes(
         downloader,
         PIXI_REPOSITORY,
-        pixi_version,
+        resolved_pixi_version,
         PIXI_ARTIFACTS,
     )
     micromamba_hashes = fetch_github_hashes(
         downloader,
         MICROMAMBA_REPOSITORY,
-        micromamba_version,
+        resolved_micromamba_version,
         MICROMAMBA_ARTIFACTS,
     )
     vc_redist_hash = fetch_vc_redist_hash(downloader, selected_vc_url, current_artifact_name)
     return render_registry(
-        pixi_version,
+        resolved_pixi_version,
         pixi_hashes,
-        micromamba_version,
+        resolved_micromamba_version,
         micromamba_hashes,
         current_artifact_name,
         selected_vc_url,
@@ -455,11 +496,18 @@ def write_atomic(path: Path, content: str) -> None:
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pixi-version", required=True, help="Exact prefix-dev/pixi release tag, including v.")
+    parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="Resolve and use the latest stable Pixi and Micromamba releases.",
+    )
+    parser.add_argument(
+        "--pixi-version",
+        help="Exact prefix-dev/pixi release tag, including v, or latest.",
+    )
     parser.add_argument(
         "--micromamba-version",
-        required=True,
-        help="Exact mamba-org/micromamba-releases tag.",
+        help="Exact mamba-org/micromamba-releases tag, or latest.",
     )
     parser.add_argument(
         "--vc-redist-url",
@@ -474,11 +522,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = build_argument_parser().parse_args(argv)
+    parser = build_argument_parser()
+    args = parser.parse_args(argv)
+    if args.latest:
+        if args.pixi_version is not None or args.micromamba_version is not None:
+            parser.error("--latest cannot be combined with --pixi-version or --micromamba-version.")
+        pixi_version = "latest"
+        micromamba_version = "latest"
+    else:
+        if args.pixi_version is None or args.micromamba_version is None:
+            parser.error("provide both --pixi-version and --micromamba-version, or use --latest.")
+        pixi_version = args.pixi_version
+        micromamba_version = args.micromamba_version
+
     try:
         generated = generate_registry(
-            args.pixi_version,
-            args.micromamba_version,
+            pixi_version,
+            micromamba_version,
             args.vc_redist_url,
         )
         current = REGISTRY_PATH.read_text(encoding="utf-8") if REGISTRY_PATH.exists() else ""

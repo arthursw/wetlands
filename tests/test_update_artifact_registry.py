@@ -38,6 +38,18 @@ class FakeDownloader:
         if parsed.hostname == "api.github.com":
             parts = parsed.path.split("/")
             repository = "/".join(parts[2:4])
+            if parsed.path.endswith("/releases/latest"):
+                versions = {
+                    updater.PIXI_REPOSITORY: "v0.48.2",
+                    updater.MICROMAMBA_REPOSITORY: "2.3.0-1",
+                }
+                return json.dumps(
+                    {
+                        "tag_name": versions[repository],
+                        "draft": False,
+                        "prerelease": False,
+                    }
+                ).encode()
             version = updater.urllib.parse.unquote(parts[-1])
             assets = [
                 {"name": name}
@@ -80,6 +92,7 @@ class FakeDownloader:
     [
         (b"a" * 64, "a" * 64),
         (f"{'B' * 64} *artifact.bin\n".encode(), "b" * 64),
+        (f"{'C' * 64}  artifact.bin\n".encode(), "c" * 64),
     ],
 )
 def test_checksum_parser_accepts_supported_formats(content, expected):
@@ -110,6 +123,52 @@ def test_incomplete_release_is_rejected():
             updater.PIXI_REPOSITORY,
             "v0.48.2",
             updater.PIXI_ARTIFACTS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("tool", "repository", "pattern", "expected"),
+    [
+        ("Pixi", updater.PIXI_REPOSITORY, updater.PIXI_VERSION_RE, "v0.48.2"),
+        (
+            "Micromamba",
+            updater.MICROMAMBA_REPOSITORY,
+            updater.MICROMAMBA_VERSION_RE,
+            "2.3.0-1",
+        ),
+    ],
+)
+def test_latest_resolves_to_an_exact_stable_release(tool, repository, pattern, expected):
+    resolved = updater.resolve_release_version(
+        FakeDownloader(),
+        tool,
+        repository,
+        "latest",
+        pattern,
+    )
+
+    assert resolved == expected
+    assert resolved != "latest"
+
+
+def test_latest_resolution_rejects_ambiguous_returned_tag():
+    class AmbiguousLatestDownloader(FakeDownloader):
+        def read_bytes(self, url, allowed_hosts, limit=1024 * 1024):
+            return json.dumps(
+                {
+                    "tag_name": "main",
+                    "draft": False,
+                    "prerelease": False,
+                }
+            ).encode()
+
+    with pytest.raises(updater.RegistryUpdateError, match="not an exact supported release tag"):
+        updater.resolve_release_version(
+            AmbiguousLatestDownloader(),
+            "Pixi",
+            updater.PIXI_REPOSITORY,
+            "latest",
+            updater.PIXI_VERSION_RE,
         )
 
 
@@ -172,6 +231,24 @@ def test_generate_registry_builds_complete_source_in_memory(tmp_path):
     assert hashlib.sha256(b"vc-redist").hexdigest() in generated
 
 
+def test_generate_registry_writes_resolved_versions_not_latest(tmp_path):
+    registry = tmp_path / "artifact_registry.py"
+    vc_url = "https://download.visualstudio.microsoft.com/VC_redist.x64.exe"
+    registry.write_text(f"VC_REDIST_ARTIFACT_NAME = 'VC_redist.x64.exe'\nVC_REDIST_URL = {vc_url!r}\n")
+
+    generated = updater.generate_registry(
+        "latest",
+        "latest",
+        None,
+        registry_path=registry,
+        downloader=FakeDownloader(),
+    )
+
+    assert 'PIXI_VERSION = "v0.48.2"' in generated
+    assert 'MICROMAMBA_VERSION = "2.3.0-1"' in generated
+    assert 'VERSION = "latest"' not in generated
+
+
 def test_check_mode_detects_stale_registry(tmp_path, monkeypatch):
     registry = tmp_path / "artifact_registry.py"
     registry.write_text("stale\n")
@@ -193,3 +270,21 @@ def test_check_mode_accepts_current_registry(tmp_path, monkeypatch):
     result = updater.main(["--pixi-version", "v0.48.2", "--micromamba-version", "2.3.0-1", "--check"])
 
     assert result == 0
+
+
+def test_latest_flag_requests_latest_for_both_tools(tmp_path, monkeypatch):
+    registry = tmp_path / "artifact_registry.py"
+    registry.write_text("current\n")
+    requested = {}
+
+    def fake_generate(pixi_version, micromamba_version, vc_redist_url):
+        requested["versions"] = (pixi_version, micromamba_version)
+        return "current\n"
+
+    monkeypatch.setattr(updater, "REGISTRY_PATH", registry)
+    monkeypatch.setattr(updater, "generate_registry", fake_generate)
+
+    result = updater.main(["--latest", "--check"])
+
+    assert result == 0
+    assert requested["versions"] == ("latest", "latest")
