@@ -4,26 +4,26 @@
 # Embedded hashes keep artifact verification compatible with freezers and zip imports.
 # They become trusted only after this generated file is reviewed and committed.
 
-# Source: https://github.com/prefix-dev/pixi/releases/tag/v0.48.2
-PIXI_VERSION = "v0.48.2"
+# Source: https://github.com/prefix-dev/pixi/releases/tag/v0.73.0
+PIXI_VERSION = "v0.73.0"
 PIXI_SHA256 = {
-    "pixi-aarch64-apple-darwin.tar.gz": "ed426d19a0dd9f9933837825948ddd8bad9dbff1e4a4424ad44cf51f7be2edf1",
-    "pixi-aarch64-pc-windows-msvc.zip": "10f7db54662d5452ff4c543793d79de5014b96711c69ea448de86bbd17d62616",
-    "pixi-aarch64-unknown-linux-musl.tar.gz": "403235fa576410165235733a316c764f66175593bef4b1e9233dabfdc34d6bf3",
-    "pixi-x86_64-apple-darwin.tar.gz": "14d5ea0383e52cf8caac43586c0ec9c709263a765365d6897a8d111ea27d6e2e",
-    "pixi-x86_64-pc-windows-msvc.zip": "1d91033aeab21c83538f34aa6288aa862d55a32e0d45aa6a4dd9f89c7e0ddb92",
-    "pixi-x86_64-unknown-linux-musl.tar.gz": "6c7d338892c54a5d45d241a11ec0e563104325fcec3d19cde483366f87b88692",
+    "pixi-aarch64-apple-darwin.tar.gz": "63e7cc91ef10eda71765c42e951362a084b2cbcbc93fb55c375c4f3acbfd7d00",
+    "pixi-aarch64-pc-windows-msvc.zip": "0ed95db2387984cc8a03aaceb7e493bb43a78cd901ef977e2bdbc2e641e491dd",
+    "pixi-aarch64-unknown-linux-musl.tar.gz": "0788f47eb37e0706de209c3ce81cc804ee128f7dd4ec09a686754a67170ddb64",
+    "pixi-x86_64-apple-darwin.tar.gz": "0c89d86eb3adc35773e3b00f443b68edcfcdd7b61700282d712613bcaf797f61",
+    "pixi-x86_64-pc-windows-msvc.zip": "d9044186bfea9771b8e35b0ed032352b557a82528cd5165db6b8ad137c7a873c",
+    "pixi-x86_64-unknown-linux-musl.tar.gz": "682564e7cd35d38307df3cd6c8e9a45a1437d20febac0c8d165809d7c38408d1",
 }
 
-# Source: https://github.com/mamba-org/micromamba-releases/releases/tag/2.3.0-1
-MICROMAMBA_VERSION = "2.3.0-1"
+# Source: https://github.com/mamba-org/micromamba-releases/releases/tag/2.8.1-0
+MICROMAMBA_VERSION = "2.8.1-0"
 MICROMAMBA_SHA256 = {
-    "micromamba-linux-64": "83f38b81295dade6b242b40dbab81bcd9fb03bb196928ab15f552cbafe82386b",
-    "micromamba-linux-aarch64": "ca8af1dcf82059612d0dc110de3e875d107e6e77a6e77578b0ffeb74bfc2c2eb",
-    "micromamba-linux-ppc64le": "65f596573e531694d24b41968458fd347dbd3b3b7f59ba0095ade911b8b599b4",
-    "micromamba-osx-64": "1aac2a0c345c4ee441040a07784c5b6ed432738fa4500b15cb1e758870205320",
-    "micromamba-osx-arm64": "b2f8c1756d20ac5dadd40a822761b6940e7685ab53e1a09d83ece38fbb366209",
-    "micromamba-win-64": "7033f20918a00f490b2d6d493738d2b8552fcb0f7fb2eab06a6b191bd7a33477",
+    "micromamba-linux-64": "9689782d863c05a1bf5d2d371ba527104e7a4eb4310c1637d8653b751aed9c82",
+    "micromamba-linux-aarch64": "e5ba23b5945aa49dfd11022e592a510d2686a8feee810e00140b73c9fdf0ba2a",
+    "micromamba-linux-ppc64le": "321c822aaf4c2922cf3e653cbe8b44a86e28cda8f81f8fac3c0804744c7baf75",
+    "micromamba-osx-64": "b2bd613791c0a524883d7cb66505d630bf15badd1f492bc93ba78550a3a1a94b",
+    "micromamba-osx-arm64": "de71a646b73af92dd663e6ddc78993a6a4d47ea28b5d8908c3cc2b9c3077e528",
+    "micromamba-win-64": "8a51f88ec02600488ea20c3acd93fbd4da6c0f03fc499aa53fd234c6749b94b0",
 }
 
 # Source: Microsoft Visual C++ Redistributable for Visual Studio 2015-2022.
