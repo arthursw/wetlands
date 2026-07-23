@@ -179,6 +179,35 @@ For detailed debugging instructions and workflows, see the [Debugging guide](htt
 
 Use [uv](https://docs.astral.sh/uv/) to easily manage the project.
 
+### Update external artifacts
+
+Wetlands embeds the expected hashes for one exact Pixi release, one exact Micromamba release, and the configured Microsoft Visual C++ Redistributable in `src/wetlands/_internal/artifact_registry.py`.
+Embedding these small trusted constants keeps runtime verification compatible with PyInstaller, cx_Freeze, Nuitka, and zip imports without freezer-specific package-data hooks.
+Runtime code never downloads expected checksums: fetching a checksum beside a binary at application runtime would not provide the same pinning property.
+
+Regenerate and revalidate the complete registry deliberately with:
+
+```sh
+uv run python tools/update_artifact_registry.py \
+    --pixi-version v0.48.2 \
+    --micromamba-version 2.3.0-1
+```
+
+Pass `--vc-redist-url URL` only when intentionally replacing the Microsoft download URL.
+Without it, the updater preserves and revalidates the currently registered URL.
+The updater requires exact release tags, verifies the complete platform allowlists against upstream checksum sidecars and locally calculated hashes, validates GitHub release digests and immutable-release metadata when available, and writes only after every artifact succeeds.
+If the installed GitHub CLI supports immutable release verification, the updater also uses it for releases GitHub marks immutable.
+Review and commit each version and its full hash mapping as one atomic source change.
+
+Use `--check` to perform the same network-backed validation without writing and fail if the committed registry is stale:
+
+```sh
+uv run python tools/update_artifact_registry.py \
+    --pixi-version v0.48.2 \
+    --micromamba-version 2.3.0-1 \
+    --check
+```
+
 ### Check & Format
 
 Check for code errors with `uv run ruff check` and format the code with `uv run ruff format`.
