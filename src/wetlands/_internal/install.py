@@ -1,5 +1,10 @@
+from __future__ import annotations
+
+import contextlib
 import hashlib
+import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -8,8 +13,9 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Literal, Optional, Tuple
 
 import yaml
 
@@ -23,6 +29,10 @@ from wetlands._internal.artifact_registry import (
     VC_REDIST_URL,
 )
 from wetlands._internal.shell import shell_quote
+
+ToolName = Literal["pixi", "micromamba"]
+TOOL_VERSION_TIMEOUT_SECONDS = 10
+INSTALL_LOCK_FILENAME = ".wetlands-install.lock"
 
 # --- Helper Functions ---
 
@@ -85,6 +95,152 @@ def downloadAndVerify(url: str, download_path: Path, expected_checksum: str, pro
         if download_path.exists():
             download_path.unlink()
         raise
+
+
+def get_tool_executable_path(install_path: Path, tool: ToolName) -> Path:
+    """Return the platform-specific path for a Wetlands-managed tool."""
+    suffix = ".exe" if platform.system() == "Windows" else ""
+    return install_path / "bin" / f"{tool}{suffix}"
+
+
+def get_expected_executable_version(tool: ToolName, release_version: str) -> str:
+    """Convert an upstream release tag to the version printed by its executable."""
+    if tool == "pixi":
+        return release_version.removeprefix("v")
+    return release_version.split("-", 1)[0]
+
+
+def _parse_tool_version_output(tool: ToolName, output: str) -> str | None:
+    """Parse the supported forms of ``--version`` output for one tool."""
+    patterns = {
+        "pixi": r"(?:pixi(?:\s+version)?\s+)?v?([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)",
+        "micromamba": (
+            r"(?:micromamba(?:\s+version)?\s+)?v?"
+            r"([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)"
+        ),
+    }
+    matches = []
+    for line in output.splitlines():
+        match = re.fullmatch(rf"\s*{patterns[tool]}\s*", line, flags=re.IGNORECASE)
+        if match:
+            matches.append(match.group(1))
+    return matches[0] if len(matches) == 1 else None
+
+
+def detect_tool_version(executable_path: Path, tool: ToolName) -> str | None:
+    """Return an executable's version, or ``None`` when it cannot be trusted."""
+    try:
+        result = subprocess.run(
+            [str(executable_path), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=TOOL_VERSION_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return _parse_tool_version_output(tool, "\n".join((result.stdout, result.stderr)))
+
+
+def _require_expected_executable_version(executable_path: Path, tool: ToolName, release_version: str) -> None:
+    expected_version = get_expected_executable_version(tool, release_version)
+    actual_version = detect_tool_version(executable_path, tool)
+    if actual_version != expected_version:
+        display_name = "Pixi" if tool == "pixi" else "Micromamba"
+        raise RuntimeError(
+            f"{display_name} {release_version} produced an unexpected executable version at "
+            f"{executable_path}. Expected: {expected_version}. Detected: {actual_version or 'unavailable'}."
+        )
+
+
+def get_tool_release_marker_path(install_path: Path, tool: ToolName) -> Path:
+    """Return the marker that records the exact installed upstream release."""
+    return install_path / "bin" / f".wetlands-{tool}-version"
+
+
+def _read_tool_release_marker(install_path: Path, tool: ToolName) -> str | None:
+    try:
+        return get_tool_release_marker_path(install_path, tool).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def _write_tool_release_marker(install_path: Path, tool: ToolName, release_version: str) -> None:
+    """Atomically record the exact release installed by Wetlands."""
+    marker_path = get_tool_release_marker_path(install_path, tool)
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{marker_path.name}.", dir=marker_path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as marker:
+            marker.write(f"{release_version}\n")
+            marker.flush()
+            os.fsync(marker.fileno())
+        os.replace(temporary_name, marker_path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary_name)
+        raise
+
+
+@contextlib.contextmanager
+def _installation_lock(install_path: Path) -> Iterator[None]:
+    """Serialize version checks and installations for one managed tool root."""
+    install_path.mkdir(parents=True, exist_ok=True)
+    lock_path = install_path / INSTALL_LOCK_FILENAME
+    with open(lock_path, "a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            if lock_file.tell() == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def ensure_conda_tool(install_path: Path, use_pixi: bool, proxies: Optional[Dict[str, str]] = None) -> Path:
+    """Install or migrate the configured tool to Wetlands' trusted release."""
+    tool: ToolName = "pixi" if use_pixi else "micromamba"
+    display_name = "Pixi" if use_pixi else "Micromamba"
+    release_version = PIXI_VERSION if use_pixi else MICROMAMBA_VERSION
+    expected_version = get_expected_executable_version(tool, release_version)
+    executable_path = get_tool_executable_path(install_path, tool)
+
+    with _installation_lock(install_path):
+        installed_version = detect_tool_version(executable_path, tool) if executable_path.is_file() else None
+        installed_release = _read_tool_release_marker(install_path, tool)
+        if installed_version == expected_version and installed_release == release_version:
+            return executable_path
+
+        if executable_path.exists():
+            print(
+                f"Migrating {display_name} at {executable_path}. "
+                f"Installed version: {installed_version or 'unavailable'}; required release: {release_version}."
+            )
+        else:
+            print(f"{display_name} is not installed at {executable_path}; installing {release_version}.")
+
+        installer = installPixi if use_pixi else installMicromamba
+        installed_path = installer(install_path, version=release_version, proxies=proxies)
+        _require_expected_executable_version(installed_path, tool, release_version)
+        _write_tool_release_marker(install_path, tool, release_version)
+        return installed_path
 
 
 # --- Micromamba ---
@@ -185,8 +341,11 @@ def install_vc_redist_windows(proxies: Optional[Dict[str, str]]) -> None:
 
 
 def create_mamba_config_file(mamba_path):
-    """Create Mamba config file .mambarc in conda_path, with nodefaults and conda-forge channels."""
-    with open(mamba_path / ".mambarc", "w") as f:
+    """Create the default Mamba config without replacing an existing configuration."""
+    config_path = mamba_path / ".mambarc"
+    if config_path.exists():
+        return
+    with open(config_path, "w") as f:
         mamba_settings = dict(
             channel_priority="flexible",
             channels=["conda-forge", "nodefaults"],
@@ -204,37 +363,33 @@ def installMicromamba(
     micromambaBaseName = f"micromamba-{currentOs}-{currentArch}"
     expected_checksum = _registered_checksum("Micromamba", version, micromambaBaseName, MICROMAMBA_SHA256)
 
-    if currentOs == "win":
-        install_vc_redist_windows(proxies)
-
     print(f"\n--- Starting Micromamba Setup for {currentOs}-{currentArch} ---")
     micromambaUrl, micromambaBaseName = get_micromamba_url(currentOs, currentArch, version)
     print(f"Target Micromamba URL: {micromambaUrl}")
 
-    suffix = ".exe" if currentOs == "win" else ""
-    micromamba_full_path = install_path / "bin" / f"micromamba{suffix}"
-    micromamba_full_path.parent.mkdir(exist_ok=True, parents=True)
+    micromamba_full_path = get_tool_executable_path(install_path, "micromamba")
+    bin_dir = micromamba_full_path.parent
+    bin_dir.mkdir(exist_ok=True, parents=True)
 
-    # Use the combined helper to download and verify
-    downloadAndVerify(micromambaUrl, micromamba_full_path, expected_checksum, proxies)
+    try:
+        with tempfile.TemporaryDirectory(prefix=".micromamba-install-", dir=bin_dir) as tmpDir:
+            staged_path = Path(tmpDir) / micromamba_full_path.name
+            downloadAndVerify(micromambaUrl, staged_path, expected_checksum, proxies)
 
-    # Ensure the file is executable and properly named on Windows
-    if currentOs == "win":
-        # On Windows, verify the file exists and has the correct extension
-        if not micromamba_full_path.exists():
-            raise Exception(f"Micromamba executable not found at {micromamba_full_path}")
-        # Make sure it's readable and not locked
-        try:
-            micromamba_full_path.stat()
-        except Exception as e:
-            raise Exception(f"Failed to access micromamba executable at {micromamba_full_path}: {e}") from e
-    else:
-        micromamba_full_path.chmod(0o755)  # rwxr-xr-x
-        print(f"Made {micromamba_full_path} executable.")
+            if currentOs != "win":
+                staged_path.chmod(0o755)
+            if currentOs == "win":
+                install_vc_redist_windows(proxies)
+
+            _require_expected_executable_version(staged_path, "micromamba", version)
+            create_mamba_config_file(install_path)
+            os.replace(staged_path, micromamba_full_path)
+    except Exception as e:
+        raise RuntimeError(
+            f"Micromamba {version} installation failed; the existing executable was left unchanged."
+        ) from e
 
     print(f"Micromamba successfully set up at {micromamba_full_path}")
-
-    create_mamba_config_file(install_path)
     return micromamba_full_path
 
 
@@ -279,54 +434,47 @@ def installPixi(install_path: Path, version: str = PIXI_VERSION, proxies: Option
     print(f"  URL: {download_url}")
     print(f"  Destination: {bin_dir}")
 
-    try:
-        with tempfile.TemporaryDirectory() as tmpDir:
-            archive_path = Path(tmpDir) / binary_filename
-            downloadAndVerify(download_url, archive_path, expected_checksum, proxies)
+    pixi_full_path = get_tool_executable_path(install_path, "pixi")
+    bin_dir.mkdir(parents=True, exist_ok=True)
 
-            print(f"Extracting {archive_path.name} to {bin_dir}...")
-            bin_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix=".pixi-install-", dir=bin_dir) as tmpDir:
+            archive_path = Path(tmpDir) / binary_filename
+            staged_path = Path(tmpDir) / pixi_full_path.name
+            downloadAndVerify(download_url, archive_path, expected_checksum, proxies)
 
             if binary_filename.endswith(".zip"):
                 with zipfile.ZipFile(archive_path, "r") as zip_ref:
-                    zip_ref.extractall(bin_dir)
-            else:  # .tar.gz
-                with tarfile.open(archive_path, "r:gz") as tar_ref:
-                    if sys.version_info >= (3, 12):
-                        tar_ref.extractall(bin_dir, filter="data")
-                    else:
-                        # Emulate 'filter="data"' for 3.10–3.11
-                        for member in tar_ref.getmembers():
-                            if member.isfile():  # Only extract files, not symlinks/devices/etc
-                                tar_ref.extract(member, path=bin_dir)
-
-            print("Pixi installed successfully.")
-
-    except (RuntimeError, ValueError, FileNotFoundError) as e:
-        raise Exception("Pixi installation failed") from e
-
-    # Find the actual executable - it may be named 'pixi' or 'pixi.exe' depending on the zip contents
-    # and the platform
-    is_windows = platform.system() == "Windows"
-
-    # On Windows, the executable might be named just 'pixi' in the zip, so we need to rename it to 'pixi.exe'
-    # to ensure it can be executed properly
-    pixi_without_ext = bin_dir / "pixi"
-    pixi_with_ext = bin_dir / "pixi.exe"
-
-    if pixi_without_ext.is_file():
-        if is_windows:
-            # Rename to add .exe extension if it doesn't have one
-            if not pixi_with_ext.exists():
-                pixi_without_ext.rename(pixi_with_ext)
+                    zip_members = [
+                        member
+                        for member in zip_ref.infolist()
+                        if not member.is_dir() and Path(member.filename).name in {"pixi", "pixi.exe"}
+                    ]
+                    if len(zip_members) != 1:
+                        raise RuntimeError(f"Expected exactly one Pixi executable in {binary_filename}.")
+                    with zip_ref.open(zip_members[0]) as source, open(staged_path, "wb") as destination:
+                        shutil.copyfileobj(source, destination)
             else:
-                pixi_without_ext.unlink()  # Remove the non-.exe version
-            return pixi_with_ext
-        else:
-            pixi_without_ext.chmod(0o755)  # Make executable on Unix-like systems
-            return pixi_without_ext
+                with tarfile.open(archive_path, "r:gz") as tar_ref:
+                    tar_members = [
+                        member
+                        for member in tar_ref.getmembers()
+                        if member.isfile() and Path(member.name).name in {"pixi", "pixi.exe"}
+                    ]
+                    if len(tar_members) != 1:
+                        raise RuntimeError(f"Expected exactly one Pixi executable in {binary_filename}.")
+                    tar_source = tar_ref.extractfile(tar_members[0])
+                    if tar_source is None:
+                        raise RuntimeError(f"Could not read the Pixi executable from {binary_filename}.")
+                    with tar_source, open(staged_path, "wb") as destination:
+                        shutil.copyfileobj(tar_source, destination)
 
-    if pixi_with_ext.is_file():
-        return pixi_with_ext
+            if platform.system() != "Windows":
+                staged_path.chmod(0o755)
+            _require_expected_executable_version(staged_path, "pixi", version)
+            os.replace(staged_path, pixi_full_path)
+    except Exception as e:
+        raise RuntimeError(f"Pixi {version} installation failed; the existing executable was left unchanged.") from e
 
-    raise Exception(f"Pixi executable not found. Checked locations: {pixi_without_ext}, {pixi_with_ext}")
+    print(f"Pixi installed successfully at {pixi_full_path}.")
+    return pixi_full_path

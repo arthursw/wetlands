@@ -60,6 +60,7 @@ def test_default_micromamba_version_uses_matching_registry_entry(tmp_path, monke
         path.write_bytes(b"micromamba")
 
     monkeypatch.setattr(install, "downloadAndVerify", fake_download)
+    monkeypatch.setattr(install, "_require_expected_executable_version", lambda *args: None)
 
     executable = INSTALL_MICROMAMBA(tmp_path)
 
@@ -79,7 +80,7 @@ def test_default_pixi_version_uses_matching_registry_entry(tmp_path, monkeypatch
 
     monkeypatch.setattr(install, "downloadAndVerify", stop_after_checksum_selection)
 
-    with pytest.raises(Exception, match="Pixi installation failed"):
+    with pytest.raises(Exception, match="Pixi.*installation failed"):
         INSTALL_PIXI(tmp_path)
 
     assert artifact_registry.PIXI_VERSION in seen["url"]

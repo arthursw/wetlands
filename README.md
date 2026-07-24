@@ -47,7 +47,10 @@ pip install wetlands
 
 ## 🚀 Usage Example
 
-If the user doesn't have pixi or micromamba installed, Wetlands will download and set it up automatically.
+Wetlands downloads its registered Pixi or Micromamba release when the configured installation is absent.
+When a Wetlands update changes that registered release, creating an `EnvironmentManager` detects the installed executable version and safely migrates it before use.
+Existing environments and manifests are preserved.
+The first start after such an update requires network access; if the verified replacement cannot be installed, Wetlands leaves the previous executable intact and refuses to use the mismatched version.
 
 ```python
 from wetlands.environment_manager import EnvironmentManager

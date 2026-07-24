@@ -1,9 +1,12 @@
+import platform
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from wetlands._internal.install import installMicromamba, installPixi
+from wetlands._internal import install
+from wetlands._internal.artifact_registry import MICROMAMBA_VERSION, PIXI_VERSION
+from wetlands._internal.install import ensure_conda_tool, installMicromamba, installPixi
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.manual, pytest.mark.slow]
@@ -15,7 +18,7 @@ def test_install_micromamba(tmp_path: Path):
     # 1. ARRANGE: The tmp_path fixture handles setup. The installation
     # directory is ready and isolated.
     install_root_dir = tmp_path
-    version = "2.3.0-1"
+    version = MICROMAMBA_VERSION
 
     # 2. ACT: Call the function to be tested.
     # Any exception here will automatically fail the test.
@@ -52,7 +55,7 @@ def test_install_pixi(tmp_path: Path):
     # 1. ARRANGE: The tmp_path fixture handles setup. The installation
     # directory is ready and isolated.
     install_root_dir = tmp_path
-    version = "v0.48.2"
+    version = PIXI_VERSION
 
     # 2. ACT: Call the function to be tested.
     # Any exception here will automatically fail the test.
@@ -81,3 +84,19 @@ def test_install_pixi(tmp_path: Path):
     assert version_number in stdout, f"The output of '--version' should contain {version_number}"
 
     print(f"--- Test successful. Micromamba version output: {result.stdout.strip()} ---")
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="The legacy executable fixture is a POSIX shell script.")
+def test_existing_pixi_is_migrated_once(tmp_path: Path, monkeypatch):
+    executable = install.get_tool_executable_path(tmp_path, "pixi")
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\necho 'pixi 0.1.0'\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    migrated = ensure_conda_tool(tmp_path, use_pixi=True)
+
+    assert install.detect_tool_version(migrated, "pixi") == PIXI_VERSION.removeprefix("v")
+    assert install.get_tool_release_marker_path(tmp_path, "pixi").read_text(encoding="utf-8").strip() == PIXI_VERSION
+
+    monkeypatch.setattr(install, "installPixi", pytest.fail)
+    assert ensure_conda_tool(tmp_path, use_pixi=True) == migrated
