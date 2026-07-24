@@ -26,9 +26,9 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Install dependencies
-        run: uv pip install ".[docs]" --system
+        run: uv sync --frozen --group dev
       - name: Run lint checks
-        run: uv run ruff check
+        run: uv run --frozen ruff check
 
   test:
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip tests]')
@@ -46,9 +46,9 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Install dependencies
-        run: uv pip install ".[docs]" --system
+        run: uv sync --frozen --group dev
       - name: Run tests
-        run: uv run pytest tests -m "not integration and not compat and not manual"
+        run: uv run --frozen pytest tests -m "not integration and not compat and not manual"
 
   compat:
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip tests]')
@@ -62,9 +62,9 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Install dependencies
-        run: uv pip install ".[docs]" --system
+        run: UV_PROJECT_ENVIRONMENT=.venv-py39 uv sync --frozen --python 3.9 --group dev
       - name: Run compatibility tests
-        run: UV_PROJECT_ENVIRONMENT=.venv-py39 uv run --python 3.9 pytest -m compat
+        run: UV_PROJECT_ENVIRONMENT=.venv-py39 uv run --frozen --python 3.9 pytest -m compat
 
   agent-integration:
     if: >
@@ -80,9 +80,9 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Install dependencies
-        run: uv pip install ".[docs]" --system
+        run: UV_PROJECT_ENVIRONMENT=.venv-py313 uv sync --frozen --python 3.13 --group dev
       - name: Run pixi agent integration tests
-        run: UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --python 3.13 pytest -m "not manual and not compat and agent_integration" --backend=pixi
+        run: UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --frozen --python 3.13 pytest -m "not manual and not compat and agent_integration" --backend=pixi
 
   deploy:
     if: github.event_name == 'push' && always() # Deploy only after push-triggered checks finish.
@@ -116,13 +116,13 @@ jobs:
         run: pip install uv
 
       - name: Install docs dependencies
-        run: uv pip install ".[docs]" --system
+        run: uv sync --frozen --extra docs --no-dev
 
       - name: Get gh-pages branch
         run: git fetch origin gh-pages --depth=1
 
       - name: Set version default
-        run: mike set-default --push latest
+        run: uv run --frozen --extra docs --no-dev mike set-default --push latest
 
       - name: Read project version
         run: |
@@ -130,4 +130,4 @@ jobs:
           echo "PROJECT_VERSION=${PROJECT_VERSION}" >> "$GITHUB_ENV"
 
       - name: Deploy version with mike (update gh-pages branch and push it)
-        run: mike deploy --push --update-aliases "$PROJECT_VERSION" latest
+        run: uv run --frozen --extra docs --no-dev mike deploy --push --update-aliases "$PROJECT_VERSION" latest

@@ -183,6 +183,8 @@ For detailed debugging instructions and workflows, see the [Debugging guide](htt
 ## 🤖 Development
 
 Use [uv](https://docs.astral.sh/uv/) to easily manage the project.
+The committed `uv.lock` keeps CI and developer tooling reproducible.
+Use `uv sync --frozen --group dev` to install the locked development environment, and update tool constraints deliberately in `pyproject.toml` before regenerating the lockfile.
 
 ### Update external artifacts
 
