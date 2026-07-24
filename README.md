@@ -77,7 +77,9 @@ env.exit()
 ```
 
 Wetlands records a hash of each environment's creation recipe.
-Calling `create()` again with the same name reuses the existing environment only when the stored recipe hash matches the requested dependencies, backend, platform, and creation commands.
+Calling `create()` again with the same name reuses the existing environment only when the stored recipe hash matches the requested dependencies, backend, platform, and creation commands and the installed direct Conda and Python packages still satisfy the declared version constraints.
+Compatibility is checked against the declared ranges; exact version pins are not required.
+Local editable dependencies are covered by the recipe comparison because their source paths, rather than their installed package metadata, define them.
 Use `replace_existing=True` to recreate a same-name environment with a different recipe, or `load(name)` to intentionally load the existing default-path environment without recipe validation.
 
 with `minimal_module.py`:

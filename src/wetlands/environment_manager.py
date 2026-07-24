@@ -16,7 +16,9 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-from packaging.specifiers import SpecifierSet
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.utils import canonicalize_name
 from packaging.version import Version, InvalidVersion
 
 from wetlands._internal.install import ensure_conda_tool
@@ -217,23 +219,32 @@ class EnvironmentManager:
         - "numpy~=2.28" (compatible release)
         - "numpy!=1.5.0" (any except specific version)
         """
-        if package_manager == "conda":
-            dependency = self._remove_channel(dependency)
-
         package_manager_name = "conda" if package_manager == "conda" else "pypi"
-
-        # Parse dependency string to extract package name and version specifier
-        # Package name is followed by optional version specifier (starts with ==, >=, <=, >, <, !=, ~=)
-        match = re.match(r"^([a-zA-Z0-9._-]+)((?:[<>=!~].*)?)", dependency)
-        if not match:
-            return False
-
-        package_name = match.group(1)
-        version_spec = match.group(2).strip()
+        if package_manager == "pip":
+            try:
+                requirement = Requirement(dependency)
+            except InvalidRequirement:
+                return False
+            package_name = canonicalize_name(requirement.name)
+            version_spec = str(requirement.specifier)
+        else:
+            dependency = self._remove_channel(dependency)
+            match = re.fullmatch(r"\s*([a-zA-Z0-9._-]+)\s*((?:[<>=!~].*)?)\s*", dependency)
+            if not match:
+                return False
+            package_name = canonicalize_name(match.group(1))
+            version_spec = match.group(2).strip()
+            if version_spec.startswith("=") and not version_spec.startswith("=="):
+                version_spec = f"={version_spec}"
 
         # Find matching package
         for package in installed_packages:
-            if package_name != package["name"] or package_manager_name != package["kind"]:
+            installed_name = package.get("name")
+            if (
+                not installed_name
+                or package_name != canonicalize_name(installed_name)
+                or package_manager_name != package.get("kind")
+            ):
                 continue
 
             # If no version specified, just match on name
@@ -246,7 +257,7 @@ class EnvironmentManager:
                 specifier_set = SpecifierSet(version_spec)
                 if installed_version in specifier_set:
                     return True
-            except InvalidVersion:
+            except (InvalidSpecifier, InvalidVersion):
                 # If version parsing fails, continue to next package
                 continue
 
@@ -264,8 +275,6 @@ class EnvironmentManager:
         Returns:
                 True if all dependencies are installed, False otherwise.
         """
-        if not sys.version.startswith(dependencies.get("python", "").replace("=", "")):
-            return False
         if len(dependencies.get("local", [])) > 0:
             return False
 
@@ -275,11 +284,15 @@ class EnvironmentManager:
         pipDependencies, pipDependenciesNoDeps, hasPipDependencies = self.dependency_manager.format_dependencies(
             "pip", dependencies, False, False
         )
-        if not hasPipDependencies and not hasCondaDependencies:
+        python_requirement = dependencies.get("python", "").replace("=", "")
+        if not python_requirement and not hasPipDependencies and not hasCondaDependencies:
             return True
 
-        # Special handling for main environment with None path
         is_main_environment = environment == self.main_environment
+        if is_main_environment and not sys.version.startswith(python_requirement):
+            return False
+
+        # Special handling for main environment with None path
         if is_main_environment and environment.path is None:
             if hasCondaDependencies:
                 return False
@@ -293,6 +306,17 @@ class EnvironmentManager:
         else:
             # Get installed packages for the environment
             installed_packages = self.get_installed_packages(environment)
+            if (
+                not is_main_environment
+                and python_requirement
+                and not any(
+                    package.get("kind") == "conda"
+                    and canonicalize_name(package.get("name", "")) == "python"
+                    and package.get("version", "").startswith(python_requirement)
+                    for package in installed_packages
+                )
+            ):
+                return False
 
         conda_satisfied = (
             all(
@@ -520,6 +544,7 @@ class EnvironmentManager:
         *,
         environment: Environment,
         default_path: Path,
+        dependencies: Dependencies,
         requested_hash: str,
         replace_existing: bool,
     ) -> Environment | None:
@@ -539,14 +564,29 @@ class EnvironmentManager:
                 requested_hash=requested_hash,
             )
 
-        metadata, metadata_reason = read_environment_metadata(
-            default_path, use_pixi=self.settings_manager.use_pixi
-        )
+        metadata, metadata_reason = read_environment_metadata(default_path, use_pixi=self.settings_manager.use_pixi)
         if metadata is not None and metadata.get("status") == MANAGED_STATUS:
             existing_hash = metadata.get("recipe_hash")
             if existing_hash == requested_hash:
-                logger.debug(f"Environment '{environment.name}' already exists with matching recipe, returning it.")
-                return environment
+                dependencies_to_validate = copy.deepcopy(dependencies)
+                dependencies_to_validate.pop("local", None)
+                if self._environment_validates_requirements(environment, dependencies_to_validate):
+                    logger.log_environment(
+                        f"Environment '{environment.name}' has a matching recipe and satisfies its declared dependencies.",
+                        environment.name,
+                        stage="create",
+                    )
+                    return environment
+                if replace_existing:
+                    environment.delete()
+                    return None
+                raise self._format_environment_reuse_error(
+                    name=environment.name,
+                    path=environment.path,
+                    reason="its installed packages no longer satisfy the dependencies in its matching recipe",
+                    requested_hash=requested_hash,
+                    existing_hash=existing_hash,
+                )
             if replace_existing:
                 environment.delete()
                 return None
@@ -599,7 +639,7 @@ class EnvironmentManager:
     ) -> Environment:
         """Creates a new Conda environment with specified dependencies or returns an existing one.
 
-        Same-name existing environments are reused only when their stored recipe hash matches the requested recipe.
+        Same-name existing environments are reused only when their stored recipe hash matches the requested recipe and their installed direct dependencies still satisfy it.
         Use ``load(name)`` to intentionally load the existing default-path environment without validating its recipe.
 
         Args:
@@ -635,6 +675,7 @@ class EnvironmentManager:
             existing_environment = self._validate_existing_environment_for_create(
                 environment=ExternalEnvironment(name, path, self),
                 default_path=path,
+                dependencies=dependencies,
                 requested_hash=recipe_hash,
                 replace_existing=replace_existing,
             )
@@ -646,6 +687,7 @@ class EnvironmentManager:
             existing_environment = self._validate_existing_environment_for_create(
                 environment=self.environments[name],
                 default_path=path,
+                dependencies=dependencies,
                 requested_hash=recipe_hash,
                 replace_existing=replace_existing,
             )
@@ -705,7 +747,7 @@ class EnvironmentManager:
     ) -> Environment:
         """Creates a new Conda environment from a config file (pixi.toml, pyproject.toml, environment.yml, or requirements.txt) or returns an existing one.
 
-        Same-name existing environments are reused only when their stored recipe hash matches the parsed recipe.
+        Same-name existing environments are reused only when their stored recipe hash matches the parsed recipe and their installed direct dependencies still satisfy it.
         Use ``load(name)`` to intentionally load the existing default-path environment without validating its recipe.
 
         Args:
@@ -719,7 +761,7 @@ class EnvironmentManager:
                 project_editable: If True, install the project in editable mode.
 
         Returns:
-                The created environment, or an existing same-name environment when its stored recipe matches.
+                The created environment, or an existing same-name environment when its stored recipe matches and its installed direct dependencies satisfy it.
         """
         if not install_project:
             if project_path is not None:

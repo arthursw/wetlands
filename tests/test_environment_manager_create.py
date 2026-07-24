@@ -194,10 +194,15 @@ def test_create_writes_metadata_after_success(environment_manager_fixture):
     assert metadata["recipe"]["dependencies"]["pip"] == ["numpy==1.2.3"]
 
 
-def test_create_same_name_same_recipe_reuses_existing_environment(environment_manager_fixture):
+def test_create_same_name_same_recipe_reuses_existing_environment(environment_manager_fixture, monkeypatch):
     manager, mock_execute, _ = environment_manager_fixture
     env_name = "reuse-same-recipe"
     dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
+    monkeypatch.setattr(
+        manager,
+        "get_installed_packages",
+        MagicMock(return_value=[{"name": "numpy", "version": "1.2.3", "kind": "pypi"}]),
+    )
 
     env = manager.create(env_name, dependencies=dependencies)
     mock_execute.reset_mock()
@@ -208,10 +213,17 @@ def test_create_same_name_same_recipe_reuses_existing_environment(environment_ma
     mock_execute.assert_not_called()
 
 
-def test_create_same_name_same_recipe_reuses_disk_environment_after_manager_forgets_it(environment_manager_fixture):
+def test_create_same_name_same_recipe_reuses_disk_environment_after_manager_forgets_it(
+    environment_manager_fixture, monkeypatch
+):
     manager, mock_execute, _ = environment_manager_fixture
     env_name = "reuse-disk-recipe"
     dependencies: Dependencies = {"pip": ["numpy==1.2.3"]}
+    monkeypatch.setattr(
+        manager,
+        "get_installed_packages",
+        MagicMock(return_value=[{"name": "numpy", "version": "1.2.3", "kind": "pypi"}]),
+    )
 
     env = manager.create(env_name, dependencies=dependencies)
     manager.environments.pop(env_name)
@@ -225,6 +237,40 @@ def test_create_same_name_same_recipe_reuses_disk_environment_after_manager_forg
     assert reused is not env
     assert reused.path == env.path
     mock_execute.assert_not_called()
+
+
+def test_create_same_recipe_rejects_incompatible_micromamba_environment(environment_manager_fixture, monkeypatch):
+    manager, _, _ = environment_manager_fixture
+    env_name = "incompatible-micromamba-env"
+    dependencies: Dependencies = {"pip": ["bioimageflow-core>=0.2"]}
+    monkeypatch.setattr(
+        manager,
+        "get_installed_packages",
+        MagicMock(return_value=[{"name": "bioimageflow-core", "version": "0.1.7", "kind": "pypi"}]),
+    )
+
+    manager.create(env_name, dependencies=dependencies)
+
+    with pytest.raises(EnvironmentReuseError, match="installed packages no longer satisfy"):
+        manager.create(env_name, dependencies=dependencies)
+
+
+def test_create_same_recipe_rejects_incompatible_pixi_environment(environment_manager_pixi_fixture, monkeypatch):
+    manager, _, _ = environment_manager_pixi_fixture
+    env_name = "incompatible-pixi-env"
+    dependencies: Dependencies = {"pip": ["bioimageflow-core>=0.2"]}
+    monkeypatch.setattr(
+        manager,
+        "get_installed_packages",
+        MagicMock(return_value=[{"name": "bioimageflow-core", "version": "0.1.7", "kind": "pypi"}]),
+    )
+
+    environment = manager.create(env_name, dependencies=dependencies)
+    assert environment.path is not None
+    environment.path.touch()
+
+    with pytest.raises(EnvironmentReuseError, match="installed packages no longer satisfy"):
+        manager.create(env_name, dependencies=dependencies)
 
 
 def test_create_same_name_different_recipe_raises(environment_manager_fixture):

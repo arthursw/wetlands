@@ -264,6 +264,24 @@ def test_check_requirement_conda_with_channel(environment_manager_fixture):
     assert result is True
 
 
+def test_check_requirement_normalizes_python_package_names_and_extras(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "My_Package", "version": "1.5.0", "kind": "pypi"}]
+
+    result = manager._check_requirement("my-package[extra]>=1.0,<2", "pip", installed_packages)
+
+    assert result is True
+
+
+def test_check_requirement_accepts_conda_single_equals(environment_manager_fixture):
+    manager, _, _ = environment_manager_fixture
+    installed_packages = [{"name": "zlib", "version": "1.2.13", "kind": "conda"}]
+
+    result = manager._check_requirement("zlib=1.2.13", "conda", installed_packages)
+
+    assert result is True
+
+
 def test_check_requirement_package_not_found(environment_manager_fixture):
     """Test when package is not in installed list."""
     manager, _, _ = environment_manager_fixture
@@ -389,3 +407,27 @@ def test_environment_validates_requirements_mixed_deps(environment_manager_fixtu
     result = manager._environment_validates_requirements(test_env, dependencies)
 
     assert result is True
+
+
+def test_environment_validates_external_environment_python_version(environment_manager_fixture, monkeypatch):
+    manager, _, _ = environment_manager_fixture
+    from wetlands.external_environment import ExternalEnvironment
+
+    test_env = ExternalEnvironment("test_env", Path("some/path"), manager)
+    dependencies: Dependencies = {"python": "=3.10"}
+    installed_packages = [{"name": "python", "version": "3.10.16", "kind": "conda"}]
+    monkeypatch.setattr(manager, "get_installed_packages", MagicMock(return_value=installed_packages))
+
+    assert manager._environment_validates_requirements(test_env, dependencies) is True
+
+
+def test_environment_rejects_external_environment_python_version_mismatch(environment_manager_fixture, monkeypatch):
+    manager, _, _ = environment_manager_fixture
+    from wetlands.external_environment import ExternalEnvironment
+
+    test_env = ExternalEnvironment("test_env", Path("some/path"), manager)
+    dependencies: Dependencies = {"python": "=3.12"}
+    installed_packages = [{"name": "python", "version": "3.10.16", "kind": "conda"}]
+    monkeypatch.setattr(manager, "get_installed_packages", MagicMock(return_value=installed_packages))
+
+    assert manager._environment_validates_requirements(test_env, dependencies) is False
