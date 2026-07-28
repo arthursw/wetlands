@@ -32,13 +32,13 @@ extra:
 nav:
   - Overview: index.md
   - Getting started: getting_started.md
-  - Tasks and parallel execution: tasks.md
-  - Manual communication: manual_communication.md
-  - Debugging: debugging.md
-  - Logging: logging.md
-  - Shared memory: shared_memory.md
-  - Specifying dependencies: dependencies.md
+  - Environment specifications: dependencies.md
+  - Operations and tasks: tasks.md
+  - Automatic NumPy transport: shared_memory.md
+  - Migration to Wetlands 2: migration_v2.md
   - How it works: how_it_works.md
+  - Debugging: debugging.md
+  - Events and logging: logging.md
   - Code Reference: reference/
 
 plugins:

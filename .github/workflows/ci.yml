@@ -82,7 +82,7 @@ jobs:
       - name: Install dependencies
         run: UV_PROJECT_ENVIRONMENT=.venv-py313 uv sync --frozen --python 3.13 --group dev
       - name: Run pixi agent integration tests
-        run: UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --frozen --python 3.13 pytest -m "not manual and not compat and agent_integration" --backend=pixi
+        run: UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --frozen --python 3.13 pytest -m "not manual and not compat and agent_integration"
 
   deploy:
     if: github.event_name == 'push' && always() # Deploy only after push-triggered checks finish.

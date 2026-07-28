@@ -1,7 +1,4 @@
-"""Task-based API for asynchronous execution in remote environments.
-
-Provides Task[T], TaskStatus, TaskEvent, TaskEventType, and RemoteTaskHandle.
-"""
+"""Cleanup-aware execution tasks for isolated workers."""
 
 from __future__ import annotations
 
@@ -9,7 +6,9 @@ import asyncio
 import enum
 import logging
 import threading
+import time
 import uuid
+from collections import deque
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -28,31 +27,24 @@ else:
         Self = Any  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
-    from wetlands._internal.exceptions import ExecutionException
-    from wetlands._internal.diagnostics import TaskFailure
+    from wetlands._internal.diagnostics import TaskFailure as ExecutionFailure
 else:
     try:
-        from wetlands._internal.exceptions import ExecutionException
+        from wetlands._internal.diagnostics import TaskFailure as ExecutionFailure
     except ImportError:
-        # When loaded in isolated environments via import_from_path,
-        # wetlands package is not available. RemoteTaskHandle doesn't need it.
-        ExecutionException = Exception
-    try:
-        from wetlands._internal.diagnostics import TaskFailure
-    except ImportError:
-        TaskFailure = None  # type: ignore[assignment]
+        ExecutionFailure = None  # type: ignore[assignment,misc]
 
 try:
-    from wetlands._internal.diagnostics import RemoteExceptionInfo, TaskFailureCategory, WorkerInfo
+    from wetlands.operation import ExecutionError, OperationCanceled
 except ImportError:
-    RemoteExceptionInfo = Any  # type: ignore[misc,assignment]
-    TaskFailureCategory = Any  # type: ignore[misc,assignment]
-    WorkerInfo = Any  # type: ignore[misc,assignment]
+    # The isolated worker loads this module without installing Wetlands.
+    ExecutionError = RuntimeError  # type: ignore[assignment,misc]
+    OperationCanceled = RuntimeError  # type: ignore[assignment,misc]
 
 T = TypeVar("T")
 
 
-class TaskStatus(enum.Enum):
+class ExecutionState(enum.Enum):
     """Status of a task through its lifecycle."""
 
     PENDING = "pending"
@@ -61,49 +53,64 @@ class TaskStatus(enum.Enum):
     FAILED = "failed"
     CANCELED = "canceled"
 
-    def is_finished(self) -> bool:
-        """Return True if the task has reached a terminal state."""
-        return self in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELED)
+    @property
+    def terminal(self) -> bool:
+        """Whether the execution reached a terminal state."""
+        return self in (ExecutionState.COMPLETED, ExecutionState.FAILED, ExecutionState.CANCELED)
 
 
-class TaskEventType(enum.Enum):
-    """Types of events emitted by a Task."""
+class ExecutionEventKind(enum.Enum):
+    """Types of events emitted by an execution task."""
 
     STARTED = "started"
     UPDATE = "update"
     COMPLETION = "completion"
     FAILURE = "failure"
-    CANCELATION = "cancelation"
+    CANCELLATION_REQUESTED = "cancellation_requested"
+    CANCELLATION = "cancellation"
 
 
 @dataclass(frozen=True)
-class TaskEvent:
-    """Emitted by a Task to notify listeners of state changes."""
+class ExecutionEvent:
+    """Immutable observation snapshot emitted by an execution task."""
 
-    task: Task[Any]
-    type: TaskEventType
+    sequence: int
+    timestamp: float
+    task_id: str
+    kind: ExecutionEventKind
+    state: ExecutionState
+    message: str
+    current: int | None = None
+    maximum: int | None = None
+    progress: float | None = None
+    failure: ExecutionFailure | None = None
 
 
-class Task(Generic[T]):
+class ExecutionTask(Generic[T]):
     """Represents an asynchronous unit of work in a remote environment.
 
     Type parameter T is the return type of the remote function.
     """
 
+    _EVENT_HISTORY_LIMIT = 2048
+
     def __init__(self, task_id: str | None = None) -> None:
         self._id = task_id or str(uuid.uuid4())
-        self._status = TaskStatus.PENDING
+        self._status = ExecutionState.PENDING
         self._result: T | None = None
-        self._error: TaskFailure | None = None
+        self._error: ExecutionFailure | None = None
         self._traceback: str | None = None
-        self._exception: ExecutionException | None = None
+        self._exception: ExecutionError | None = None
         self._message: str | None = None
         self._current: int | None = None
         self._maximum: int | None = None
         self._outputs: dict[str, Any] = {}
-        self._listeners: list[Callable[[TaskEvent], None]] = []
-        self._terminal_event: TaskEvent | None = None
+        self._listeners: list[Callable[[ExecutionEvent], None]] = []
+        self._events: deque[ExecutionEvent] = deque(maxlen=self._EVENT_HISTORY_LIMIT)
+        self._sequence = 0
+        self._last_event_timestamp = 0.0
         self._future: Future[T] = Future()
+        self._cancellation_requested = False
         self._lock = threading.RLock()
         self._done_event = threading.Event()
         self._payload: dict[str, Any] = {}
@@ -117,18 +124,20 @@ class Task(Generic[T]):
         return self._id
 
     @property
-    def status(self) -> TaskStatus:
-        return self._status
+    def state(self) -> ExecutionState:
+        """The execution lifecycle state."""
+        with self._lock:
+            return self._status
 
     @property
     def result(self) -> T:
         """The return value. Raises InvalidStateError if not COMPLETED."""
-        if self._status != TaskStatus.COMPLETED:
+        if self._status != ExecutionState.COMPLETED:
             raise InvalidStateError(f"Task is {self._status.value}, not completed")
         return self._result  # type: ignore[return-value]
 
     @property
-    def error(self) -> TaskFailure | None:
+    def error(self) -> ExecutionFailure | None:
         return self._error
 
     @property
@@ -136,7 +145,7 @@ class Task(Generic[T]):
         return self._traceback
 
     @property
-    def exception(self) -> ExecutionException | None:
+    def exception(self) -> ExecutionError | None:
         return self._exception
 
     @property
@@ -160,7 +169,8 @@ class Task(Generic[T]):
 
     @property
     def outputs(self) -> dict[str, Any]:
-        return self._outputs
+        with self._lock:
+            return dict(self._outputs)
 
     # --- Control ---
 
@@ -169,7 +179,7 @@ class Task(Generic[T]):
         No-op if already started. Returns self for chaining.
         """
         with self._lock:
-            if self._status != TaskStatus.PENDING:
+            if self._status != ExecutionState.PENDING:
                 return self
             if self._start_fn is None:
                 raise InvalidStateError("Task has no start function. Was it created via submit()?")
@@ -177,102 +187,152 @@ class Task(Generic[T]):
         start_fn()
         return self
 
-    def cancel(self) -> None:
+    @property
+    def cancellation_requested(self) -> bool:
+        with self._lock:
+            return self._cancellation_requested
+
+    def cancel(self) -> bool:
         """Request cooperative cancellation.
         Sets a flag that the remote code can check via task.cancel_requested.
         Does nothing if the task is already finished.
         """
         with self._lock:
-            if self._status.is_finished():
-                return
-            if self._cancel_fn is not None:
-                self._cancel_fn()
+            if self._status.terminal:
+                return False
+            first_request = not self._cancellation_requested
+            self._cancellation_requested = True
+            cancel_fn = self._cancel_fn
+            event_data = (
+                self._record_event_locked(
+                    ExecutionEventKind.CANCELLATION_REQUESTED,
+                    "Cancellation requested",
+                )
+                if first_request
+                else None
+            )
+        if event_data is not None:
+            self._notify(*event_data)
+        if first_request and cancel_fn is not None:
+            cancel_fn()
+        return True
 
-    def wait_for(self, timeout: float | None = None) -> Self:
+    def wait_for(self, timeout: float | None = None) -> T:
         """Block until the task reaches a terminal state.
         Raises TimeoutError if timeout (in seconds) is exceeded.
         Does NOT cancel the task on timeout (matches concurrent.futures behavior).
-        Returns self for chaining.
+        Returns the task result.
         """
         if not self._done_event.wait(timeout=timeout):
             raise TimeoutError(f"Task {self._id} did not finish within {timeout}s")
-        return self
+        if self._status == ExecutionState.COMPLETED:
+            return cast(T, self._result)
+        if self._status == ExecutionState.CANCELED:
+            raise OperationCanceled(self._id)
+        if self._exception is not None:
+            raise self._exception
+        raise InvalidStateError(f"Task reached unexpected terminal state {self._status.value}")
 
     # --- Observation ---
 
-    def listen(self, callback: Callable[[TaskEvent], None]) -> Self:
-        """Register a listener for task events. Returns self for chaining.
-        If the task has already reached a terminal state, the terminal event is
-        replayed immediately to the callback.
-        """
+    def listen(
+        self,
+        callback: Callable[[ExecutionEvent], None],
+        *,
+        replay: bool = True,
+    ) -> Self:
+        """Register a listener, replaying bounded history by default."""
         with self._lock:
-            self._listeners.append(callback)
-            terminal = self._terminal_event
-        if terminal is not None:
-            callback(terminal)
+            history = tuple(self._events) if replay else ()
+            for event in history:
+                self._notify_listener(callback, event)
+            if not self._status.terminal:
+                self._listeners.append(callback)
         return self
 
-    def remove_listener(self, callback: Callable[[TaskEvent], None]) -> None:
+    def remove_listener(self, callback: Callable[[ExecutionEvent], None]) -> None:
         """Remove a previously registered listener."""
         with self._lock:
-            self._listeners.remove(callback)
-
-    # --- concurrent.futures interop ---
-
-    @property
-    def future(self) -> Future[T]:
-        """A standard Future that resolves with the task result."""
-        return self._future
+            if callback in self._listeners:
+                self._listeners.remove(callback)
 
     # --- Awaitable ---
 
     def __await__(self):
-        """Makes Task awaitable: result = await task"""
+        """Return an awaiter which does not bypass cancellation cleanup."""
         return self._async_result().__await__()
 
     async def _async_result(self) -> T:
-        loop = asyncio.get_event_loop()
-        result = await asyncio.wrap_future(self._future, loop=loop)
-        return result
+        loop = asyncio.get_running_loop()
+        waiter = asyncio.wrap_future(self._future, loop=loop)
+        try:
+            return await asyncio.shield(waiter)
+        except asyncio.CancelledError:
+            self.cancel()
+            cleanup_waiter = loop.run_in_executor(None, self._done_event.wait)
+            while not cleanup_waiter.done():
+                try:
+                    await asyncio.shield(cleanup_waiter)
+                except asyncio.CancelledError:
+                    continue
+            try:
+                await asyncio.shield(waiter)
+            except BaseException:
+                pass
+            raise
 
     # --- Async event stream ---
 
-    async def events(self) -> AsyncIterator[TaskEvent]:
-        """Async iterator over task events. Terminates after the terminal event."""
-        queue: asyncio.Queue[TaskEvent | None] = asyncio.Queue()
-        loop = asyncio.get_event_loop()
+    async def events(self, *, replay: bool = True) -> AsyncIterator[ExecutionEvent]:
+        """Iterate over bounded history and live events until terminal state."""
+        queue: asyncio.Queue[ExecutionEvent] = asyncio.Queue(maxsize=self._EVENT_HISTORY_LIMIT)
+        loop = asyncio.get_running_loop()
 
-        def _on_event(event: TaskEvent) -> None:
-            loop.call_soon_threadsafe(queue.put_nowait, event)
-            if event.type in (TaskEventType.COMPLETION, TaskEventType.FAILURE, TaskEventType.CANCELATION):
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+        def enqueue(event: ExecutionEvent) -> None:
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait(event)
 
-        self.listen(_on_event)
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            yield event
+        def receive(event: ExecutionEvent) -> None:
+            loop.call_soon_threadsafe(enqueue, event)
+
+        with self._lock:
+            terminal_without_replay = self._status.terminal and not replay
+            if replay:
+                for event in self._events:
+                    queue.put_nowait(event)
+            if not self._status.terminal:
+                self._listeners.append(receive)
+        if terminal_without_replay:
+            return
+        try:
+            while True:
+                event = await queue.get()
+                yield event
+                if event.state.terminal:
+                    return
+        finally:
+            self.remove_listener(receive)
 
     # --- Context manager (auto-cancel on exit) ---
 
     def __enter__(self) -> Self:
-        if self._status == TaskStatus.PENDING:
+        if self._status == ExecutionState.PENDING:
             self.start()
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if not self._status.is_finished():
+        if not self._status.terminal:
             self.cancel()
             self.wait_for()
 
     async def __aenter__(self) -> Self:
-        if self._status == TaskStatus.PENDING:
+        if self._status == ExecutionState.PENDING:
             self.start()
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if not self._status.is_finished():
+        if not self._status.terminal:
             self.cancel()
             await self
 
@@ -286,46 +346,77 @@ class Task(Generic[T]):
 
     def _set_running(self) -> None:
         with self._lock:
-            self._status = TaskStatus.RUNNING
-        self._emit(TaskEventType.STARTED)
+            if self._status is not ExecutionState.PENDING:
+                return
+            self._status = ExecutionState.RUNNING
+            event_data = self._record_event_locked(
+                ExecutionEventKind.STARTED,
+                "Execution started",
+            )
+        self._notify(*event_data)
 
     def _set_completed(self, result: T) -> None:
         with self._lock:
-            if self._status.is_finished():
+            if self._status.terminal:
                 return
-            self._status = TaskStatus.COMPLETED
-            self._result = result
+            if self._cancellation_requested:
+                canceled = True
+            else:
+                canceled = False
+                self._status = ExecutionState.COMPLETED
+                self._result = result
+                event_data = self._record_event_locked(
+                    ExecutionEventKind.COMPLETION,
+                    "Execution completed",
+                )
+        if canceled:
+            self._set_canceled()
+            return
         self._future.set_result(result)
-        self._emit(TaskEventType.COMPLETION)
         self._done_event.set()
+        self._notify(*event_data)
 
     def _set_failed(self, error: Any, traceback: list[str] | str | None = None) -> None:
         call_target = self._payload.get("_call_target") if isinstance(self._payload, dict) else None
-        if TaskFailure is not None:
-            failure = TaskFailure.normalize(error, traceback=traceback, task_id=self._id, call_target=call_target)
-            exception = ExecutionException(failure)
+        if ExecutionFailure is not None:
+            failure = ExecutionFailure.normalize(
+                error,
+                traceback=traceback,
+                task_id=self._id,
+                call_target=call_target,
+            )
+            exception = ExecutionError(failure)
         else:
             failure = error
-            exception = ExecutionException({"exception": str(error), "traceback": traceback or []})
+            exception = ExecutionError(str(error))
         with self._lock:
-            if self._status.is_finished():
+            if self._status.terminal:
                 return
-            self._status = TaskStatus.FAILED
+            self._status = ExecutionState.FAILED
             self._error = failure
-            self._traceback = failure.traceback if TaskFailure is not None else traceback  # type: ignore[union-attr,assignment]
+            self._traceback = failure.traceback if ExecutionFailure is not None else traceback  # type: ignore[union-attr,assignment]
             self._exception = exception
+            event_data = self._record_event_locked(
+                ExecutionEventKind.FAILURE,
+                str(exception) or "Execution failed",
+                failure=failure,
+            )
         self._future.set_exception(self._exception)
-        self._emit(TaskEventType.FAILURE)
         self._done_event.set()
+        self._notify(*event_data)
 
     def _set_canceled(self) -> None:
         with self._lock:
-            if self._status.is_finished():
+            if self._status.terminal:
                 return
-            self._status = TaskStatus.CANCELED
-        self._future.cancel()
-        self._emit(TaskEventType.CANCELATION)
+            self._status = ExecutionState.CANCELED
+            event_data = self._record_event_locked(
+                ExecutionEventKind.CANCELLATION,
+                "Execution canceled",
+            )
+        self._future.set_exception(OperationCanceled(self._id))
         self._done_event.set()
+        self._notify(*event_data)
 
     def _set_update(
         self,
@@ -334,6 +425,13 @@ class Task(Generic[T]):
         maximum: int | None = None,
         outputs: dict[str, Any] | None = None,
     ) -> None:
+        if message is not None and not isinstance(message, str):
+            raise TypeError("Progress message must be a string")
+        for field, value in {"current": current, "maximum": maximum}.items():
+            if value is not None and (type(value) is not int or value < 0):
+                raise TypeError(f"Progress {field} must be a nonnegative integer")
+        if outputs:
+            _validate_intermediate_value(outputs, path="outputs")
         with self._lock:
             if message is not None:
                 self._message = message
@@ -343,17 +441,59 @@ class Task(Generic[T]):
                 self._maximum = maximum
             if outputs:
                 self._outputs.update(outputs)
-        self._emit(TaskEventType.UPDATE)
+            event_data = self._record_event_locked(
+                ExecutionEventKind.UPDATE,
+                message or self._message or "Execution progress updated",
+            )
+        self._notify(*event_data)
 
-    def _emit(self, event_type: TaskEventType) -> None:
-        event = TaskEvent(task=self, type=event_type)
-        is_terminal = event_type in (TaskEventType.COMPLETION, TaskEventType.FAILURE, TaskEventType.CANCELATION)
-        with self._lock:
-            if is_terminal:
-                self._terminal_event = event
-            listeners = list(self._listeners)
+    def _record_event_locked(
+        self,
+        kind: ExecutionEventKind,
+        message: str,
+        *,
+        failure: Any | None = None,
+    ) -> tuple[ExecutionEvent, tuple[Callable[[ExecutionEvent], None], ...]]:
+        self._sequence += 1
+        timestamp = max(time.time(), self._last_event_timestamp)
+        self._last_event_timestamp = timestamp
+        progress = (
+            self._current / self._maximum
+            if self._current is not None and self._maximum is not None and self._maximum > 0
+            else None
+        )
+        event = ExecutionEvent(
+            sequence=self._sequence,
+            timestamp=timestamp,
+            task_id=self._id,
+            kind=kind,
+            state=self._status,
+            message=message,
+            current=self._current,
+            maximum=self._maximum,
+            progress=progress,
+            failure=failure,
+        )
+        self._events.append(event)
+        return event, tuple(self._listeners)
+
+    def _notify(
+        self,
+        event: ExecutionEvent,
+        listeners: tuple[Callable[[ExecutionEvent], None], ...],
+    ) -> None:
         for listener in listeners:
+            self._notify_listener(listener, event)
+
+    def _notify_listener(
+        self,
+        listener: Callable[[ExecutionEvent], None],
+        event: ExecutionEvent,
+    ) -> None:
+        try:
             listener(event)
+        except Exception:
+            logging.getLogger(__name__).exception("Execution listener failed")
 
     def _on_message(self, message: dict[str, Any]) -> None:
         """Handle an IPC message from the remote worker."""
@@ -376,7 +516,7 @@ class Task(Generic[T]):
 class RemoteTaskHandle:
     """Available to remote code for progress reporting and cancellation.
 
-    Injected by the module_executor when the function signature has a 'task' parameter.
+    Injected only when the submitter explicitly selects a context keyword.
     """
 
     def __init__(self, task_id: str, connection_lock: threading.Lock, connection: Any) -> None:
@@ -398,7 +538,12 @@ class RemoteTaskHandle:
         maximum: int | None = None,
     ) -> None:
         """Report progress. Sends an UPDATE event to the caller."""
-        payload: dict[str, Any] = {"action": "update", "task_id": self._task_id}
+        if message is not None and not isinstance(message, str):
+            raise TypeError("Progress message must be a string")
+        for field, value in {"current": current, "maximum": maximum}.items():
+            if value is not None and (type(value) is not int or value < 0):
+                raise TypeError(f"Progress {field} must be a nonnegative integer")
+        payload: dict[str, Any] = self._message("update")
         if message is not None:
             payload["message"] = message
         if current is not None:
@@ -408,27 +553,28 @@ class RemoteTaskHandle:
         self._send(payload, "update")
 
     def set_output(self, key: str, value: Any) -> None:
-        """Publish a named intermediate output (must be picklable)."""
-        payload = {
-            "action": "update",
-            "task_id": self._task_id,
-            "outputs": {key: value},
-        }
+        """Publish a simple named intermediate value.
+
+        Arrays and extension-codec values are intentionally unsupported for
+        intermediate output in execution protocol version 1.
+        """
+        if not isinstance(key, str) or not key:
+            raise TypeError("Intermediate output keys must be nonempty strings")
+        _validate_intermediate_value(value, path=f"outputs[{key!r}]")
+        payload = self._message("update", outputs={key: value})
         self._send(payload, "output")
 
     def cancel(self) -> None:
-        """Acknowledge cancellation. Transitions the task to CANCELED."""
-        payload = {"action": "canceled", "task_id": self._task_id}
-        self._send(payload, "cancel")
+        """Request cancellation of the current worker function."""
+        self._set_cancel_requested()
 
     def log(self, message: str, level: int = logging.INFO) -> None:
         """Send a log message to the caller's logging system."""
-        payload = {
-            "action": "log",
-            "task_id": self._task_id,
-            "message": message,
-            "level": level,
-        }
+        if not isinstance(message, str):
+            raise TypeError("Log message must be a string")
+        if type(level) is not int:
+            raise TypeError("Log level must be an integer")
+        payload = self._message("log", message=message, level=level)
         self._send(payload, "log")
 
     def _set_cancel_requested(self) -> None:
@@ -441,6 +587,14 @@ class RemoteTaskHandle:
                 self._connection.send(payload)
         except Exception as e:
             raise RemoteTaskSerializationError(context, e) from e
+
+    def _message(self, action: str, **payload: Any) -> dict[str, Any]:
+        return {
+            "action": action,
+            "protocol_version": 1,
+            "task_id": self._task_id,
+            **payload,
+        }
 
 
 class RemoteTaskSerializationError(RuntimeError):
@@ -455,4 +609,25 @@ class RemoteTaskSerializationError(RuntimeError):
 class InvalidStateError(Exception):
     """Raised when accessing task result in an invalid state."""
 
-    pass
+
+def _validate_intermediate_value(value: Any, *, path: str, seen: set[int] | None = None) -> None:
+    if value is None or type(value) in {bool, int, float, str, bytes}:
+        return
+    if not isinstance(value, (list, tuple, dict)):
+        raise TypeError(f"{path}: unsupported intermediate value type {type(value).__qualname__}")
+    active = seen if seen is not None else set()
+    identity = id(value)
+    if identity in active:
+        raise TypeError(f"{path}: cyclic intermediate values are unsupported")
+    active.add(identity)
+    try:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key is not None and type(key) not in {bool, int, float, str, bytes}:
+                    raise TypeError(f"{path}: unsupported dictionary key {key!r}")
+                _validate_intermediate_value(item, path=f"{path}[{key!r}]", seen=active)
+        else:
+            for index, item in enumerate(value):
+                _validate_intermediate_value(item, path=f"{path}[{index}]", seen=active)
+    finally:
+        active.remove(identity)

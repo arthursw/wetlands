@@ -14,19 +14,3 @@ PIXI_SHA256 = {
     "pixi-x86_64-pc-windows-msvc.zip": "d9044186bfea9771b8e35b0ed032352b557a82528cd5165db6b8ad137c7a873c",
     "pixi-x86_64-unknown-linux-musl.tar.gz": "682564e7cd35d38307df3cd6c8e9a45a1437d20febac0c8d165809d7c38408d1",
 }
-
-# Source: https://github.com/mamba-org/micromamba-releases/releases/tag/2.8.1-0
-MICROMAMBA_VERSION = "2.8.1-0"
-MICROMAMBA_SHA256 = {
-    "micromamba-linux-64": "9689782d863c05a1bf5d2d371ba527104e7a4eb4310c1637d8653b751aed9c82",
-    "micromamba-linux-aarch64": "e5ba23b5945aa49dfd11022e592a510d2686a8feee810e00140b73c9fdf0ba2a",
-    "micromamba-linux-ppc64le": "321c822aaf4c2922cf3e653cbe8b44a86e28cda8f81f8fac3c0804744c7baf75",
-    "micromamba-osx-64": "b2bd613791c0a524883d7cb66505d630bf15badd1f492bc93ba78550a3a1a94b",
-    "micromamba-osx-arm64": "de71a646b73af92dd663e6ddc78993a6a4d47ea28b5d8908c3cc2b9c3077e528",
-    "micromamba-win-64": "8a51f88ec02600488ea20c3acd93fbd4da6c0f03fc499aa53fd234c6749b94b0",
-}
-
-# Source: Microsoft Visual C++ Redistributable for Visual Studio 2015-2022.
-VC_REDIST_ARTIFACT_NAME = "VC_redist.x64.exe"
-VC_REDIST_URL = "https://download.visualstudio.microsoft.com/download/pr/7ebf5fdb-36dc-4145-b0a0-90d3d5990a61/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe"
-VC_REDIST_SHA256 = "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"

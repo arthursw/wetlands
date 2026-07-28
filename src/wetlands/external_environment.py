@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import logging
 import subprocess
 import time
 import socket
 import os
 import secrets
+import uuid
 from pathlib import Path
 from multiprocessing import connection as mp_connection
 from multiprocessing.context import AuthenticationError
@@ -15,29 +15,50 @@ import functools
 import hmac
 import threading
 import queue
-from collections.abc import Callable, Iterable, Iterator
-from typing import Any, TYPE_CHECKING, Union
-from send2trash import send2trash
+from collections.abc import Callable, Iterable
+from typing import Any, TYPE_CHECKING
 
 from wetlands.logger import logger, LOG_SOURCE_EXECUTION
-from wetlands._internal.command_generator import Commands
-from wetlands._internal.dependency_manager import Dependencies
-from wetlands.environment import Environment
-from wetlands._internal.exceptions import ExecutionException
-from wetlands._internal.diagnostics import TaskFailure, TaskFailureCategory, WorkerInfo
-from wetlands._internal.command_executor import CommandExecutor
+from wetlands._internal.diagnostics import TaskFailure, WorkerInfo
+from wetlands._internal.process_termination import (
+    ProcessIdentityError,
+    ProcessTerminationError,
+    capture_process_identity,
+    identity_matches,
+    terminate_attached_process_tree,
+    terminate_launched_process_tree,
+)
 from wetlands._internal.process_logger import ProcessLogger
-from wetlands._internal.shell import shell_quote
 from wetlands._internal import runtime_state
-from wetlands.task import Task, TaskStatus
-
-try:
-    from wetlands.ndarray import register_ndarray_pickle
-
-    register_ndarray_pickle()
-except ImportError:
-    # Do not support ndarray if numpy is not installed
-    pass
+from wetlands._internal.provisioning import _read_ready, environment_lifecycle_gate
+from wetlands._internal.value_codec import (
+    REQUIRED_WORKER_CODECS,
+    decode_value,
+    descriptor_codecs,
+    dispose_leases,
+    encode_value,
+    reconcile_shared_memory_leases,
+    unlink_names,
+)
+from wetlands.protocol import (
+    ACTION_ACCEPTED,
+    ACTION_CANCELED,
+    ACTION_FAILURE,
+    ACTION_INPUT_RELEASED,
+    ACTION_LOG,
+    ACTION_RELEASED,
+    ACTION_RESULT_OFFER,
+    ACTION_UPDATE,
+    EXECUTION_PROTOCOL_VERSION,
+    WORKER_RUNTIME_VERSION,
+    execution_envelope,
+    import_target,
+    path_target,
+    protocol_message,
+    validate_worker_capabilities,
+)
+from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
+from wetlands.task import ExecutionTask
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
@@ -50,12 +71,88 @@ STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
 STARTUP_CALLBACK_TIMEOUT = 30.0
 STARTUP_CONNECTION_READ_TIMEOUT = 0.5
 STARTUP_MAX_PAYLOAD_BYTES = 64 * 1024
+POOL_COMMISSION_ACK_TIMEOUT = 5.0
+LAUNCHER_LOSS_TIMEOUT_MARGIN = 30.0
 WORKER_GRACEFUL_EXIT_TIMEOUT = 2.0
 PROCESS_LOGGER_JOIN_TIMEOUT = 5.0
+_NO_RESULT = object()
+_WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 
 
 class _AttachTimeout(TimeoutError):
     """Raised when a live worker does not complete attach in time."""
+
+
+def _assign_windows_kill_job(process: subprocess.Popen) -> None:
+    """Put a worker in a kill-on-close Job Object when Windows permits it."""
+    import ctypes
+    from ctypes import wintypes
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+            ("IoInfo", IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    info.BasicLimitInformation.LimitFlags = _WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    configured = kernel32.SetInformationJobObject(
+        job,
+        9,
+        ctypes.byref(info),
+        ctypes.sizeof(info),
+    )
+    assigned = configured and kernel32.AssignProcessToJobObject(
+        job,
+        wintypes.HANDLE(process._handle),  # type: ignore[attr-defined]
+    )
+    if not assigned:
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(job)
+        raise ctypes.WinError(error)
+    process._wetlands_job_handle = job  # type: ignore[attr-defined]
+
+
+def _close_windows_job(process: subprocess.Popen) -> None:
+    handle = getattr(process, "_wetlands_job_handle", None)
+    if handle is None:
+        return
+    process._wetlands_job_handle = None  # type: ignore[attr-defined]
+    import ctypes
+
+    ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(handle)
 
 
 def _mp_connection_attr(*names: str) -> Any:
@@ -118,6 +215,7 @@ def _validate_startup_payload(payload: dict[str, Any], token: str) -> dict[str, 
     if debug_port is not None and (not isinstance(debug_port, int) or not (0 < debug_port <= 65535)):
         raise ValueError("startup payload had an invalid debug port")
 
+    validate_worker_capabilities(payload, required_codecs=REQUIRED_WORKER_CODECS)
     return payload
 
 
@@ -177,9 +275,15 @@ class _Worker:
         "reader_thread",
         "pid",
         "persistent",
+        "process_started_at",
+        "process_group_id",
+        "session_id",
         "_current_task",
         "_last_activity",
         "_finished_task_ids",
+        "_retired",
+        "_commissioned",
+        "capabilities",
     )
 
     def __init__(
@@ -192,6 +296,10 @@ class _Worker:
         *,
         pid: int | None = None,
         persistent: bool = False,
+        process_started_at: float | None = None,
+        process_group_id: int | None = None,
+        session_id: int | None = None,
+        capabilities: Any = None,
     ) -> None:
         self.index = index
         self.process = process
@@ -200,43 +308,106 @@ class _Worker:
         self.process_logger = process_logger
         self.pid = pid if pid is not None else (process.pid if process is not None else None)
         self.persistent = persistent
+        launched_started_at = getattr(process, "_wetlands_started_at", None)
+        launched_group_id = getattr(process, "_wetlands_process_group_id", None)
+        launched_session_id = getattr(process, "_wetlands_session_id", None)
+        self.process_started_at = (
+            process_started_at
+            if process_started_at is not None
+            else (float(launched_started_at) if isinstance(launched_started_at, (int, float)) else None)
+        )
+        self.process_group_id = (
+            process_group_id
+            if process_group_id is not None
+            else launched_group_id
+            if isinstance(launched_group_id, int)
+            else None
+        )
+        self.session_id = (
+            session_id
+            if session_id is not None
+            else launched_session_id
+            if isinstance(launched_session_id, int)
+            else None
+        )
         self.reader_thread: threading.Thread | None = None
-        self._current_task: Task[Any] | None = None
+        self._current_task: ExecutionTask[Any] | None = None
         self._last_activity: float = 0.0
         self._finished_task_ids: set[str] = set()
+        self._retired = False
+        self._commissioned = threading.Event()
+        self.capabilities = capabilities
 
     def alive(self) -> bool:
         if self.process is not None:
             return self.process.poll() is None
-        if self.pid is not None:
-            return runtime_state.pid_exists(self.pid)
+        if self.pid is not None and self.process_started_at is not None:
+            return identity_matches(self.pid, self.process_started_at)
         return False
 
 
-class ExternalEnvironment(Environment):
-    port: int | None = None
-    process: subprocess.Popen | None = None
-    connection: Connection | None = None
-
-    def __init__(self, name: str, path: Path | None, environment_manager: "EnvironmentManager") -> None:
-        super().__init__(name, path, environment_manager)
+class ExternalEnvironment:
+    def __init__(
+        self,
+        name: str,
+        path: Path | None,
+        environment_manager: "EnvironmentManager",
+        *,
+        expected_generation_id: str | None = None,
+        expected_recipe_hash: str | None = None,
+    ) -> None:
+        self.name = name
+        self.path = path.resolve() if path is not None else None
+        self.environment_manager = environment_manager
+        self._expected_generation_id = expected_generation_id
+        self._expected_recipe_hash = expected_recipe_hash
+        self._pool_id: str | None = uuid.uuid4().hex
+        self._fatal_error: BaseException | None = None
         self._lock = threading.RLock()
-        self._process_logger: ProcessLogger | None = None
         # Worker pool state
         self._workers: list[_Worker] = []
         self._idle_workers: queue.Queue[_Worker] = queue.Queue()
-        self._task_queue: queue.Queue[Task[Any]] = queue.Queue()
-        self._additional_activate_commands: Commands = {}
+        self._task_queue: queue.Queue[ExecutionTask[Any]] = queue.Queue()
         self._worker_env: Callable[[int], dict[str, str]] | None = None
         self._worker_timeout: float | None = None
         self._persistent: bool = False
+        self._pool_commissioned = False
+        self._launcher_loss_timeout = STARTUP_CALLBACK_TIMEOUT + LAUNCHER_LOSS_TIMEOUT_MARGIN
         self._authkey: bytes | None = None
         self._shutdown_event = threading.Event()
+        self._controller_id: str | None = None
+
+    def _ready_identity(self) -> dict[str, Any]:
+        ready = _read_ready(Path(self.path).parent) if self.path is not None else None
+        actual_generation_id = str(ready.get("generation_id")) if ready is not None else None
+        actual_recipe_hash = str(ready.get("recipe_hash")) if ready is not None else None
+        if (
+            self._expected_generation_id is not None
+            and self._expected_recipe_hash is not None
+            and (
+                actual_generation_id != self._expected_generation_id or actual_recipe_hash != self._expected_recipe_hash
+            )
+        ):
+            raise EnvironmentGenerationChangedError(
+                self.name,
+                expected_generation_id=self._expected_generation_id,
+                expected_recipe_hash=self._expected_recipe_hash,
+                actual_generation_id=actual_generation_id,
+                actual_recipe_hash=actual_recipe_hash,
+            )
+        if ready is None:
+            raise RuntimeError(f"Environment {self.name!r} no longer has valid ready metadata")
+        return ready
+
+    def _raise_if_failed(self) -> None:
+        with self._lock:
+            error = self._fatal_error
+        if error is not None:
+            raise error
 
     @synchronized
     def launch(
         self,
-        additional_activate_commands: Commands = {},
         *,
         max_workers: int = 1,
         worker_env: Callable[[int], dict[str, str]] | None = None,
@@ -246,9 +417,8 @@ class ExternalEnvironment(Environment):
         """Launches module executor process(es) in the environment.
 
         Args:
-            additional_activate_commands: Platform-specific activation commands.
             max_workers: Number of worker processes to start.
-                All workers share the same conda environment (no duplication).
+                All workers share the same Pixi environment.
             worker_env: Optional callable receiving worker index (0-based),
                 returning extra environment variables for that worker.
             worker_timeout: Optional inactivity timeout in seconds. If set and a
@@ -257,39 +427,127 @@ class ExternalEnvironment(Environment):
             persistent: If True, workers are recorded in the root registry and can
                 later be reconnected with EnvironmentManager.attach().
         """
+        self._raise_if_failed()
         if self.launched():
             return
+        if max_workers < 1:
+            raise ValueError("max_workers must be at least one")
+        reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
 
-        self._additional_activate_commands = additional_activate_commands
         self._worker_env = worker_env
         self._worker_timeout = worker_timeout
         self._persistent = persistent
+        self._pool_commissioned = False
+        self._launcher_loss_timeout = max_workers * STARTUP_CALLBACK_TIMEOUT + LAUNCHER_LOSS_TIMEOUT_MARGIN
         self._authkey = runtime_state.load_or_create_root_authkey(self.environment_manager.wetlands_instance_path)
         self._shutdown_event.clear()
         if self._persistent:
-            live_workers = runtime_state.live_workers_for_env(self.environment_manager.wetlands_instance_path, self.name)
-            if live_workers:
-                raise Exception(
-                    f"Live persistent workers already exist for environment '{self.name}'. "
-                    "Use EnvironmentManager.attach() or exit the existing workers before launching again."
+            self._controller_id = uuid.uuid4().hex
+            try:
+                runtime_state.claim_controller(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                    self._controller_id,
                 )
+            except BaseException:
+                self._controller_id = None
+                raise
+            try:
+                runtime_state.reconcile_persistent_pool(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                    grace=float(self.environment_manager.termination_grace),
+                )
+                live_workers = runtime_state.live_workers_for_env(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                )
+                if live_workers:
+                    raise WorkerStartError(
+                        self.name,
+                        f"Live persistent workers already exist for environment '{self.name}'. "
+                        "Attach to or exit the existing workers before launching again.",
+                    )
+                assert self._pool_id is not None
+                runtime_state.begin_persistent_pool_attempt(
+                    self.environment_manager.wetlands_instance_path,
+                    env_name=self.name,
+                    pool_id=self._pool_id,
+                    expected_worker_count=max_workers,
+                )
+            except BaseException:
+                runtime_state.release_controller(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                    self._controller_id,
+                )
+                self._controller_id = None
+                raise
 
-        # Ensure debugpy is installed if in debug mode
-        if self.environment_manager.debug:
-            self._ensure_debugpy_installed()
+        started: list[_Worker] = []
+        try:
+            for i in range(max_workers):
+                worker = self._launch_worker(i, worker_env)
+                started.append(worker)
+            if self._persistent:
+                self._commission_workers(started)
+                assert self._pool_id is not None
+                runtime_state.commission_persistent_pool(
+                    self.environment_manager.wetlands_instance_path,
+                    env_name=self.name,
+                    pool_id=self._pool_id,
+                )
+                self._pool_commissioned = True
+        except BaseException as error:
+            self._shutdown_event.set()
+            cleanup_errors: list[str] = []
+            cleanup_complete = True
+            for worker in started:
+                try:
+                    if not self._remove_dead_worker(worker):
+                        cleanup_complete = False
+                        cleanup_errors.append(f"worker {worker.index} process tree could not be verified as terminated")
+                except Exception as cleanup_error:
+                    cleanup_complete = False
+                    cleanup_errors.append(str(cleanup_error))
+            self._drain_idle_workers()
+            if self._persistent and self._pool_id is not None and cleanup_complete:
+                try:
+                    discarded = runtime_state.discard_persistent_pool(
+                        self.environment_manager.wetlands_instance_path,
+                        env_name=self.name,
+                        pool_id=self._pool_id,
+                    )
+                    if not discarded:
+                        cleanup_errors.append(
+                            "persistent pool journal retained because worker records survived cleanup"
+                        )
+                except Exception as cleanup_error:
+                    cleanup_errors.append(str(cleanup_error))
+            if self._controller_id is not None:
+                try:
+                    runtime_state.release_controller(
+                        self.environment_manager.wetlands_instance_path,
+                        self.name,
+                        self._controller_id,
+                    )
+                except Exception as cleanup_error:
+                    cleanup_errors.append(str(cleanup_error))
+                self._controller_id = None
+            if isinstance(
+                error,
+                (EnvironmentGenerationChangedError, WorkerStartError),
+            ) or not isinstance(error, Exception):
+                raise
+            raise WorkerStartError(
+                self.name,
+                str(error),
+                cleanup_errors=tuple(cleanup_errors),
+            ) from error
 
-        for i in range(max_workers):
-            worker = self._launch_worker(i, additional_activate_commands, worker_env)
-            self._workers.append(worker)
+        self._workers.extend(started)
+        for worker in started:
             self._idle_workers.put(worker)
-
-        # For backward compat, expose first worker's port/process/connection
-        if self._workers:
-            first = self._workers[0]
-            self.port = first.port
-            self.process = first.process
-            self.connection = first.connection
-            self._process_logger = first.process_logger
 
         # Start health monitor thread
         self._health_thread = threading.Thread(
@@ -299,65 +557,78 @@ class ExternalEnvironment(Environment):
         )
         self._health_thread.start()
 
+    def _drain_idle_workers(self) -> None:
+        while True:
+            try:
+                self._idle_workers.get_nowait()
+            except queue.Empty:
+                return
+
     def _launch_worker(
         self,
         index: int,
-        additional_activate_commands: Commands,
         worker_env: Callable[[int], dict[str, str]] | None,
     ) -> _Worker:
         """Launch a single module_executor process and return a _Worker."""
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
-
-        debug_args = " --debug_port 0" if self.environment_manager.debug else ""
-        persistent_args = " --persistent" if self._persistent else ""
+        ready = self._ready_identity()
         startup_socket = _open_startup_socket()
         startup_host, startup_port = startup_socket.getsockname()
         startup_token = secrets.token_urlsafe(32)
-        startup_args = " ".join(
-            [
-                " --startup_host",
-                shell_quote(str(startup_host)),
-                "--startup_port",
-                str(startup_port),
-            ]
-        )
         wetlands_instance_path = self.environment_manager.wetlands_instance_path.resolve()
-        commands = [
-            " ".join(
+        argv = [
+            str(self._environment_python()),
+            "-u",
+            str(module_executor_path),
+            self.name,
+            "--wetlands_instance_path",
+            str(wetlands_instance_path),
+            "--environment_path",
+            str(Path(self.path).parent.resolve()),
+            "--generation_id",
+            str(ready["generation_id"]),
+            "--recipe_hash",
+            str(ready["recipe_hash"]),
+            "--startup_host",
+            str(startup_host),
+            "--startup_port",
+            str(startup_port),
+        ]
+        if self._persistent:
+            argv.extend(
                 [
-                    "python",
-                    "-u",
-                    shell_quote(module_executor_path),
-                    shell_quote(self.name),
-                    "--wetlands_instance_path",
-                    shell_quote(wetlands_instance_path),
+                    "--persistent",
+                    "--pool_id",
+                    str(self._pool_id),
+                    "--worker_index",
+                    str(index),
                 ]
             )
-            + debug_args
-            + persistent_args
-            + startup_args
-        ]
+            if self._pool_commissioned:
+                argv.append("--commissioned")
+            else:
+                argv.extend(["--commission_timeout", str(self._launcher_loss_timeout)])
 
         log_context = {"log_source": LOG_SOURCE_EXECUTION, "env_name": self.name, "call_target": MODULE_EXECUTOR_FILE}
         if len(self._workers) > 0 or index > 0:
             log_context["worker_index"] = str(index)
 
-        # Build popen_kwargs with worker-specific env vars
-        popen_kwargs: dict[str, Any] = {}
         env = os.environ.copy()
         if worker_env is not None:
             env.update(worker_env(index))
         env[STARTUP_TOKEN_ENV] = startup_token
-        popen_kwargs["env"] = env
+        for variable in ("PYTHONEXECUTABLE", "PYTHONHOME", "PYTHONPATH"):
+            env.pop(variable, None)
 
+        process: subprocess.Popen | None = None
+        connection: Connection | None = None
+        process_logger: ProcessLogger | None = None
+        recorded = False
+        worker: _Worker | None = None
         try:
-            process = self.execute_commands(
-                commands, additional_activate_commands, log_context=log_context, popen_kwargs=popen_kwargs
-            )
-
-            process_logger = self.environment_manager.get_process_logger(process)
-            if process_logger is None:
-                raise Exception(f"Failed to retrieve ProcessLogger for worker {index}")
+            process = self._spawn_worker_process(argv, env, log_context)
+            process_logger = ProcessLogger(process, log_context, logger)
+            process_logger.start_reading()
 
             try:
                 startup_payload = _wait_for_startup_payload(startup_socket, startup_token, process)
@@ -366,58 +637,233 @@ class ExternalEnvironment(Environment):
                     f"Could not receive startup information for worker {index}: {e}."
                     f"{self._worker_startup_failure_details(process, process_logger)}"
                 ) from e
-        finally:
-            startup_socket.close()
 
-        if process.poll() is not None:
-            raise Exception(
-                f"Worker {index} exited with return code {process.returncode} before accepting connections."
-                f"{self._worker_startup_failure_details(process, process_logger)}"
-            )
-        port = int(startup_payload["port"])
-        if port == 0:
-            raise Exception(
-                f"Could not find the server port for worker {index}."
-                f"{self._worker_startup_failure_details(process, process_logger)}"
-            )
-        debug_port = startup_payload.get("debug_port")
-        if self.environment_manager.debug and debug_port is not None:
-            previous_process = self.process
-            self.process = process
-            try:
-                self.environment_manager.register_environment(self, int(debug_port), module_executor_path)
-            finally:
-                self.process = previous_process
-
-        authkey = self._authkey or runtime_state.load_or_create_root_authkey(self.environment_manager.wetlands_instance_path)
-        connection: Connection | None = None
-        try:
-            connection = self._connect_worker(port, authkey)
-            worker = _Worker(index, process, port, connection, process_logger, persistent=self._persistent)
-
+            expected_identity = {
+                "pid": process.pid,
+                "environment_path": str(Path(self.path).parent.resolve()),
+                "generation_id": str(ready["generation_id"]),
+                "recipe_hash": str(ready["recipe_hash"]),
+            }
             if self._persistent:
-                runtime_state.record_worker(
-                    self.environment_manager.wetlands_instance_path,
-                    env_name=self.name,
-                    env_path=self.path,
-                    worker_index=index,
-                    pid=process.pid,
-                    port=port,
-                    persistent=True,
+                expected_identity.update(
+                    {
+                        "pool_id": self._pool_id,
+                        "worker_index": index,
+                    }
                 )
+            startup_capabilities = validate_worker_capabilities(
+                startup_payload,
+                required_codecs=REQUIRED_WORKER_CODECS,
+                expected_identity=expected_identity,
+            )
+            if process.poll() is not None:
+                raise Exception(
+                    f"Worker {index} exited with return code {process.returncode} before accepting connections."
+                    f"{self._worker_startup_failure_details(process, process_logger)}"
+                )
+            port = int(startup_payload["port"])
+            if port == 0:
+                raise Exception(
+                    f"Could not find the server port for worker {index}."
+                    f"{self._worker_startup_failure_details(process, process_logger)}"
+                )
+            authkey = self._authkey or runtime_state.load_or_create_root_authkey(
+                self.environment_manager.wetlands_instance_path
+            )
+            connection, capabilities = self._connect_worker(
+                port,
+                authkey,
+                expected_identity=expected_identity,
+            )
+            if capabilities != startup_capabilities:
+                raise RuntimeError("Worker connection handshake did not match its startup callback")
+            worker = _Worker(
+                index,
+                process,
+                port,
+                connection,
+                process_logger,
+                persistent=self._persistent,
+                capabilities=capabilities,
+            )
+
+            runtime_state.record_worker(
+                self.environment_manager.wetlands_instance_path,
+                env_name=self.name,
+                env_path=Path(self.path).parent if self.path is not None else None,
+                worker_index=index,
+                pid=process.pid,
+                port=port,
+                persistent=self._persistent,
+                generation_id=str(ready["generation_id"]),
+                recipe_hash=str(ready["recipe_hash"]),
+                worker_runtime_version=WORKER_RUNTIME_VERSION,
+                protocol_version=EXECUTION_PROTOCOL_VERSION,
+                pool_id=self._pool_id,
+            )
+            recorded = True
 
             self._start_reader_thread(worker)
             return worker
-        except Exception:
-            self._cleanup_failed_worker_launch(process, connection)
+        except BaseException as error:
+            if process is None:
+                raise
+            terminated = self._cleanup_failed_worker_launch(process, connection)
+            if recorded and terminated:
+                try:
+                    runtime_state.remove_worker(
+                        self.environment_manager.wetlands_instance_path,
+                        self.name,
+                        index,
+                        self._pool_id,
+                    )
+                except Exception as cleanup_error:
+                    cleanup_failure = WorkerStartError(
+                        self.name,
+                        str(error),
+                        worker_index=index,
+                        cleanup_errors=(
+                            f"worker terminated but its durable ownership record could not be removed: {cleanup_error}",
+                        ),
+                    )
+                    if worker is not None:
+                        worker._retired = True
+                        with self._lock:
+                            if worker not in self._workers:
+                                self._workers.append(worker)
+                            self._fatal_error = cleanup_failure
+                    raise cleanup_failure from error
+            if not terminated:
+                ownership = (
+                    "durable worker ownership record retained"
+                    if recorded
+                    else "worker ownership could not be durably recorded"
+                )
+                cleanup_failure = WorkerStartError(
+                    self.name,
+                    str(error),
+                    worker_index=index,
+                    cleanup_errors=("worker process-tree termination could not be verified; " + ownership,),
+                )
+                if recorded and worker is not None:
+                    worker._retired = True
+                    with self._lock:
+                        if worker not in self._workers:
+                            self._workers.append(worker)
+                        self._fatal_error = cleanup_failure
+                raise cleanup_failure from error
             raise
+        finally:
+            startup_socket.close()
 
-    def _cleanup_failed_worker_launch(
-        self, process: subprocess.Popen, connection: Connection | None = None
-    ) -> None:
+    def _commission_workers(self, workers: Iterable[_Worker]) -> None:
+        if self._pool_id is None:
+            raise RuntimeError("Persistent worker pool has no pool ID")
+        workers = tuple(workers)
+        for worker in workers:
+            worker.connection.send(
+                {
+                    "action": "commission",
+                    "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                    "pool_id": self._pool_id,
+                }
+            )
+        deadline = time.monotonic() + POOL_COMMISSION_ACK_TIMEOUT
+        for worker in workers:
+            if not worker._commissioned.wait(max(0.0, deadline - time.monotonic())):
+                raise RuntimeError(f"Worker {worker.index} did not acknowledge pool commission")
+
+    def _environment_python(self) -> Path:
+        if self.path is None:
+            raise RuntimeError("Managed environment path is unavailable")
+        project = Path(self.path).parent.resolve()
+        prefix = project / ".pixi" / "envs" / "default"
+        candidates = (prefix / "python.exe",) if os.name == "nt" else (prefix / "bin" / "python", prefix / "python")
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        pixi = self.environment_manager.pixi_executable
+        if pixi is None and self.environment_manager._prepared is not None:
+            pixi = self.environment_manager._prepared.executable
+        if pixi is not None:
+            probe = subprocess.run(
+                [
+                    str(pixi),
+                    "run",
+                    "--manifest-path",
+                    str(self.path),
+                    "python",
+                    "-c",
+                    "import sys; print(sys.executable)",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if probe.returncode == 0 and probe.stdout.strip():
+                discovered = Path(probe.stdout.splitlines()[-1]).resolve()
+                if discovered.is_file():
+                    return discovered
+        raise RuntimeError(f"Managed Pixi environment has no discoverable Python executable under {prefix}")
+
+    def _spawn_worker_process(
+        self,
+        argv: list[str],
+        env: dict[str, str],
+        log_context: dict[str, str],
+    ) -> subprocess.Popen:
+        kwargs: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "bufsize": 1,
+            "env": env,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = True
+        process = subprocess.Popen(argv, **kwargs)
+        identity_captured = False
+        try:
+            identity = capture_process_identity(process.pid)
+            identity_captured = True
+            process._wetlands_started_at = identity.started_at  # type: ignore[attr-defined]
+            process._wetlands_process_group_id = identity.process_group_id  # type: ignore[attr-defined]
+            process._wetlands_session_id = identity.session_id  # type: ignore[attr-defined]
+            if os.name == "nt":
+                if not self._persistent:
+                    _assign_windows_kill_job(process)
+            elif identity.process_group_id != process.pid or identity.session_id != process.pid:
+                raise ProcessIdentityError(f"Worker PID {process.pid} did not start in its own POSIX session")
+        except BaseException as error:
+            if identity_captured:
+                try:
+                    terminate_launched_process_tree(
+                        process,
+                        grace=WORKER_GRACEFUL_EXIT_TIMEOUT,
+                        close_windows_job=_close_windows_job,
+                    )
+                except ProcessTerminationError as termination_error:
+                    raise termination_error from error
+            else:
+                # Without a captured start identity there is no safe target for
+                # the normal tree terminator. This immediate child is still the
+                # Popen object we just created, so direct termination is the
+                # bounded last resort.
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+            raise
+        return process
+
+    def _cleanup_failed_worker_launch(self, process: subprocess.Popen, connection: Connection | None = None) -> bool:
         if connection is not None:
             try:
-                connection.send(dict(action="exit"))
+                connection.send({"action": "exit", "protocol_version": EXECUTION_PROTOCOL_VERSION})
             except Exception:
                 pass
             try:
@@ -425,11 +871,39 @@ class ExternalEnvironment(Environment):
             except Exception:
                 pass
 
-        if process.poll() is None:
-            try:
-                process.kill()
-            except Exception:
-                pass
+        return self._terminate_launched_worker(process)
+
+    def _terminate_launched_worker(self, process: subprocess.Popen) -> bool:
+        try:
+            terminate_launched_process_tree(
+                process,
+                grace=WORKER_GRACEFUL_EXIT_TIMEOUT,
+                close_windows_job=_close_windows_job,
+            )
+        except ProcessTerminationError as error:
+            logger.error("Worker process-tree termination failed: %s", error)
+            return False
+        return True
+
+    def _terminate_attached_worker(self, worker: _Worker) -> bool:
+        if worker.pid is None or worker.process_started_at is None:
+            logger.error(
+                "Refusing to terminate attached worker %s: recorded process identity is incomplete",
+                worker.index,
+            )
+            return False
+        try:
+            terminate_attached_process_tree(
+                worker.pid,
+                expected_started_at=worker.process_started_at,
+                expected_process_group_id=worker.process_group_id,
+                expected_session_id=worker.session_id,
+                grace=WORKER_GRACEFUL_EXIT_TIMEOUT,
+            )
+        except ProcessTerminationError as error:
+            logger.error("Attached worker %s termination failed: %s", worker.index, error)
+            return False
+        return True
 
     def _worker_startup_failure_details(self, process: subprocess.Popen, process_logger: ProcessLogger) -> str:
         details: list[str] = []
@@ -449,7 +923,7 @@ class ExternalEnvironment(Environment):
             return ""
         return "\n" + "\n".join(details)
 
-    def _task_call_target(self, task: Task[Any] | None) -> str | None:
+    def _task_call_target(self, task: ExecutionTask[Any] | None) -> str | None:
         if task is None:
             return None
         payload = getattr(task, "_payload", {})
@@ -470,7 +944,12 @@ class ExternalEnvironment(Environment):
         worker.process.poll()
         return worker.process.returncode if isinstance(worker.process.returncode, int) else None
 
-    def _worker_connection_failure(self, worker: _Worker, task: Task[Any], message: str) -> TaskFailure:
+    def _worker_connection_failure(
+        self,
+        worker: _Worker,
+        task: ExecutionTask[Any],
+        message: str,
+    ) -> TaskFailure:
         return TaskFailure.worker_connection(
             message,
             task_id=task.id,
@@ -497,23 +976,40 @@ class ExternalEnvironment(Environment):
                 message = conn.recv()
                 worker._last_activity = time.time()
             except (EOFError, OSError):
+                if self._shutdown_event.is_set():
+                    break
                 task = worker._current_task
-                if task is not None and not task.status.is_finished():
+                if task is not None and not task.state.terminal:
+                    if getattr(task, "_terminal_cleanup_in_progress", False):
+                        break
+                    pending_result = getattr(task, "_pending_result", _NO_RESULT)
+                    offered_names = list(getattr(task, "_offered_names", ()))
                     returncode = self._worker_returncode(worker)
-                    if returncode is not None:
-                        task._set_failed(
-                            TaskFailure.worker_died(
-                                task_id=task.id,
-                                call_target=self._task_call_target(task),
-                                worker=self._worker_info(worker),
-                                returncode=returncode,
-                            )
-                        )
+                    retired = self._remove_dead_worker(worker)
+                    unlink_names(
+                        offered_names,
+                        ledger_root=self.environment_manager.wetlands_instance_path,
+                    )
+                    self._cleanup_task_inputs(task)
+                    if pending_result is not _NO_RESULT:
+                        task._set_completed(pending_result)
                     else:
-                        task._set_failed(self._worker_connection_failure(worker, task, "Worker connection closed unexpectedly"))
+                        if returncode is not None:
+                            task._set_failed(
+                                TaskFailure.worker_died(
+                                    task_id=task.id,
+                                    call_target=self._task_call_target(task),
+                                    worker=self._worker_info(worker),
+                                    returncode=returncode,
+                                )
+                            )
+                        else:
+                            task._set_failed(
+                                self._worker_connection_failure(worker, task, "Worker connection closed unexpectedly")
+                            )
                     worker._current_task = None
-                    self._remove_dead_worker(worker)
-                    self._try_replace_worker(worker.index)
+                    if retired:
+                        self._try_replace_worker(worker.index)
                     break
                 if worker.persistent and worker.alive():
                     with self._lock:
@@ -532,39 +1028,224 @@ class ExternalEnvironment(Environment):
             task = worker._current_task
             message_task_id = message.get("task_id")
             if task is None:
+                if (
+                    message.get("action") == "commissioned"
+                    and message.get("protocol_version") == EXECUTION_PROTOCOL_VERSION
+                    and message.get("pool_id") == self._pool_id
+                ):
+                    worker._commissioned.set()
+                    continue
                 if message_task_id is not None and message_task_id in worker._finished_task_ids:
-                    logger.debug(f"Worker {worker.index}: ignoring late message for finished task {message_task_id}: {message}")
+                    logger.debug(
+                        "Worker %s: ignoring late %r message for finished task %s",
+                        worker.index,
+                        message.get("action"),
+                        message_task_id,
+                    )
                     continue
                 # No active task — this is a legacy message or unexpected
-                logger.warning(f"Worker {worker.index}: received message with no active task: {message}")
-                continue
-            if message_task_id is not None and message_task_id != task.id:
-                if message_task_id in worker._finished_task_ids:
-                    logger.debug(f"Worker {worker.index}: ignoring stale message for finished task {message_task_id}: {message}")
-                    continue
                 logger.warning(
-                    f"Worker {worker.index}: ignoring stale message for task {message_task_id}; "
-                    f"current task is {task.id}: {message}"
+                    "Worker %s: received %r message with no active task",
+                    worker.index,
+                    message.get("action"),
                 )
                 continue
+            if (
+                message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION
+                or not isinstance(message_task_id, str)
+                or not message_task_id
+            ):
+                failure = self._worker_connection_failure(
+                    worker,
+                    task,
+                    "Worker sent a malformed execution message",
+                )
+                retired = self._cleanup_failed_task_worker(worker, task)
+                task._set_failed(failure)
+                if retired:
+                    self._try_replace_worker(worker.index)
+                break
+            if message_task_id is not None and message_task_id != task.id:
+                if message_task_id in worker._finished_task_ids:
+                    logger.debug(
+                        "Worker %s: ignoring stale %r message for finished task %s",
+                        worker.index,
+                        message.get("action"),
+                        message_task_id,
+                    )
+                    continue
+                failure = self._worker_connection_failure(
+                    worker,
+                    task,
+                    f"Worker sent a message for unexpected task {message_task_id}",
+                )
+                retired = self._cleanup_failed_task_worker(worker, task)
+                task._set_failed(failure)
+                if retired:
+                    self._try_replace_worker(worker.index)
+                break
 
             action = message.get("action")
-            if action in ("execution finished", "error", "canceled"):
-                if action == "error":
+            if action == ACTION_RESULT_OFFER:
+                if not getattr(task, "_accepted", False) or not getattr(task, "_inputs_released", False):
+                    failure = self._worker_connection_failure(
+                        worker,
+                        task,
+                        "Worker offered a result out of order",
+                    )
+                    retired = self._cleanup_failed_task_worker(worker, task)
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
+                if getattr(task, "_pending_result", _NO_RESULT) is not _NO_RESULT:
+                    failure = self._worker_connection_failure(
+                        worker,
+                        task,
+                        "Worker offered more than one result",
+                    )
+                    retired = self._cleanup_failed_task_worker(worker, task)
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
+                attachments = []
+                try:
+                    result = decode_value(
+                        message.get("result"),
+                        copy_arrays=True,
+                        path="result",
+                        attachments=attachments,
+                    )
+                    offered_names = [lease.name for lease in attachments]
+                    dispose_leases(attachments, unlink=False)
+                    task._pending_result = result  # type: ignore[attr-defined]
+                    task._offered_names = offered_names  # type: ignore[attr-defined]
+                    worker.connection.send(protocol_message("release", task.id, names=offered_names))
+                    task._result_release_sent = True  # type: ignore[attr-defined]
+                except Exception as error:
+                    offered_names = [lease.name for lease in attachments]
+                    dispose_leases(attachments, unlink=False)
+                    failure = TaskFailure.serialization(
+                        f"Failed to decode worker result: {error}",
+                        task_id=task.id,
+                        call_target=self._task_call_target(task),
+                        context="result",
+                        worker=self._worker_info(worker),
+                    )
+                    retired = self._cleanup_failed_task_worker(
+                        worker,
+                        task,
+                        offered_names=(set(offered_names) | set(getattr(task, "_offered_names", ()))),
+                    )
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
+            elif action == ACTION_RELEASED:
+                result = getattr(task, "_pending_result", _NO_RESULT)
+                if result is _NO_RESULT:
+                    failure = self._worker_connection_failure(
+                        worker,
+                        task,
+                        "Worker released an unknown result",
+                    )
+                    retired = self._cleanup_failed_task_worker(worker, task)
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
+                offered_names = list(getattr(task, "_offered_names", ()))
+                released_names = message.get("names")
+                if not isinstance(released_names, list) or set(released_names) != set(offered_names):
+                    failure = self._worker_connection_failure(
+                        worker,
+                        task,
+                        "Worker result-release acknowledgement was invalid",
+                    )
+                    retired = self._cleanup_failed_task_worker(
+                        worker,
+                        task,
+                        offered_names=offered_names,
+                    )
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
+                self._cleanup_task_inputs(task)
+                if task.cancellation_requested:
+                    task._set_canceled()
+                else:
+                    task._set_completed(result)
+                worker._finished_task_ids.add(task.id)
+                worker._current_task = None
+                self._dispatch_or_idle(worker)
+            elif action in (ACTION_FAILURE, ACTION_CANCELED):
+                if action == ACTION_FAILURE:
                     failure = TaskFailure.from_payload(message, call_target=self._task_call_target(task))
                     self._log_task_failure(failure)
+                self._cleanup_task_inputs(task)
                 task._on_message(message)
                 worker._finished_task_ids.add(task.id)
                 worker._current_task = None
                 # Return worker to idle pool and dispatch next queued task
                 self._dispatch_or_idle(worker)
-            elif action == "update":
+            elif action == ACTION_UPDATE:
+                if not getattr(task, "_accepted", False):
+                    failure = self._worker_connection_failure(
+                        worker,
+                        task,
+                        "Worker sent progress before accepting the task",
+                    )
+                    retired = self._cleanup_failed_task_worker(worker, task)
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
                 task._on_message(message)
-            elif action == "log":
+            elif action == ACTION_ACCEPTED:
+                if getattr(task, "_accepted", False):
+                    failure = self._worker_connection_failure(
+                        worker,
+                        task,
+                        "Worker accepted the task more than once",
+                    )
+                    retired = self._cleanup_failed_task_worker(worker, task)
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
+                task._accepted = True  # type: ignore[attr-defined]
+                logger.debug("Worker %s: task %s accepted", worker.index, task.id)
+            elif action == ACTION_INPUT_RELEASED:
+                if getattr(task, "_inputs_released", False):
+                    failure = self._worker_connection_failure(
+                        worker,
+                        task,
+                        "Worker released task inputs more than once",
+                    )
+                    retired = self._cleanup_failed_task_worker(worker, task)
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
+                    break
+                task._inputs_released = True  # type: ignore[attr-defined]
+                logger.debug("Worker %s: task %s %s", worker.index, task.id, action)
+            elif action == ACTION_LOG:
+                if not getattr(task, "_accepted", False):
+                    continue
                 level = message.get("level", 20)
-                logger.log(level, message.get("message", ""), extra=message.get("extra"))
+                log_message = message.get("message")
+                if type(level) is not int or not isinstance(log_message, str):
+                    continue
+                logger.log(level, log_message)
             else:
-                logger.warning(f"Worker {worker.index}: unexpected message: {message}")
+                logger.warning(
+                    "Worker %s: unexpected action %r for task %s",
+                    worker.index,
+                    action,
+                    task.id,
+                )
 
     _HEALTH_CHECK_INTERVAL = 5  # seconds
 
@@ -576,24 +1257,23 @@ class ExternalEnvironment(Environment):
 
             for worker in workers:
                 task = worker._current_task
-                if task is None or task.status.is_finished():
+                if task is None or task.state.terminal or getattr(task, "_terminal_cleanup_in_progress", False):
                     continue
 
                 # Check 1: Is the process dead?
                 if not worker.alive():
                     rc = self._worker_returncode(worker)
                     logger.error(f"Worker {worker.index} died (exit code {rc}) while running task {task.id}")
-                    task._set_failed(
-                        TaskFailure.worker_died(
-                            task_id=task.id,
-                            call_target=self._task_call_target(task),
-                            worker=self._worker_info(worker),
-                            returncode=rc,
-                        )
+                    failure = TaskFailure.worker_died(
+                        task_id=task.id,
+                        call_target=self._task_call_target(task),
+                        worker=self._worker_info(worker),
+                        returncode=rc,
                     )
-                    worker._current_task = None
-                    self._remove_dead_worker(worker)
-                    self._try_replace_worker(worker.index)
+                    retired = self._cleanup_failed_task_worker(worker, task)
+                    task._set_failed(failure)
+                    if retired:
+                        self._try_replace_worker(worker.index)
                     continue
 
                 # Check 2: Has the worker timed out? (hung but alive)
@@ -604,35 +1284,95 @@ class ExternalEnvironment(Environment):
                             f"Worker {worker.index} timed out (no response for {elapsed:.0f}s) "
                             f"while running task {task.id}"
                         )
-                        task._set_failed(
-                            TaskFailure.timeout_failure(
-                                task_id=task.id,
-                                call_target=self._task_call_target(task),
-                                worker=self._worker_info(worker),
-                                timeout=self._worker_timeout,
-                                elapsed=elapsed,
-                            )
+                        failure = TaskFailure.timeout_failure(
+                            task_id=task.id,
+                            call_target=self._task_call_target(task),
+                            worker=self._worker_info(worker),
+                            timeout=self._worker_timeout,
+                            elapsed=elapsed,
                         )
-                        worker._current_task = None
-                        self._remove_dead_worker(worker)
-                        self._try_replace_worker(worker.index)
+                        retired = self._cleanup_failed_task_worker(worker, task)
+                        task._set_failed(failure)
+                        if retired:
+                            self._try_replace_worker(worker.index)
 
     def _try_replace_worker(self, index: int) -> None:
         """Attempt to launch a replacement worker at the given index."""
+        with self._lock:
+            if self._shutdown_event.is_set() or any(worker.index == index for worker in self._workers):
+                return
         try:
-            worker = self._launch_worker(index, self._additional_activate_commands, self._worker_env)
+            with environment_lifecycle_gate(self.environment_manager, self.name):
+                with self._lock:
+                    if self._shutdown_event.is_set() or any(worker.index == index for worker in self._workers):
+                        return
+                worker = self._launch_worker(index, self._worker_env)
+                with self._lock:
+                    if self._shutdown_event.is_set() or any(existing.index == index for existing in self._workers):
+                        terminated = self._cleanup_failed_worker_launch(
+                            worker.process,
+                            worker.connection,
+                        )  # type: ignore[arg-type]
+                        if terminated:
+                            try:
+                                runtime_state.remove_worker(
+                                    self.environment_manager.wetlands_instance_path,
+                                    self.name,
+                                    worker.index,
+                                    self._pool_id,
+                                )
+                            except Exception as cleanup_error:
+                                worker._retired = True
+                                self._workers.append(worker)
+                                raise WorkerStartError(
+                                    self.name,
+                                    "replacement became unnecessary and terminated, "
+                                    "but its durable ownership record could not be removed",
+                                    worker_index=index,
+                                    phase="replace",
+                                    cleanup_errors=(str(cleanup_error),),
+                                ) from cleanup_error
+                        else:
+                            worker._retired = True
+                            self._workers.append(worker)
+                            raise WorkerStartError(
+                                self.name,
+                                "replacement became unnecessary but its process tree "
+                                "could not be verified as terminated",
+                                worker_index=index,
+                                phase="replace",
+                                cleanup_errors=("durable worker ownership record retained for retry",),
+                            )
+                        return
+                    self._workers.append(worker)
+                self._dispatch_or_idle(worker)
+                logger.info(f"Replacement worker {index} launched successfully.")
+        except EnvironmentGenerationChangedError as error:
+            logger.error("Worker pool generation changed during replacement: %s", error)
             with self._lock:
-                self._workers.append(worker)
-            self._dispatch_or_idle(worker)
-            logger.info(f"Replacement worker {index} launched successfully.")
-        except Exception as e:
-            logger.error(f"Failed to launch replacement worker {index}: {e}")
+                self._fatal_error = error
+            self._exit()
+        except WorkerStartError as error:
+            logger.error("Failed to replace worker %s: %s", index, error)
+            with self._lock:
+                self._fatal_error = error
+        except Exception as error:
+            logger.error(f"Failed to launch replacement worker {index}: {error}")
+            replacement_error = WorkerStartError(
+                self.name,
+                str(error),
+                worker_index=index,
+                phase="replace",
+            )
+            with self._lock:
+                self._fatal_error = replacement_error
 
-    def _remove_dead_worker(self, worker: _Worker) -> None:
+    def _remove_dead_worker(self, worker: _Worker) -> bool:
         """Remove a dead worker from all pools and clean up its resources."""
         with self._lock:
-            if worker in self._workers:
-                self._workers.remove(worker)
+            if worker._retired:
+                return False
+            worker._retired = True
 
         try:
             if worker.connection and not worker.connection.closed:
@@ -640,10 +1380,12 @@ class ExternalEnvironment(Environment):
         except OSError:
             pass
 
-        if worker.process and worker.process.poll() is None:
-            CommandExecutor.kill_process(worker.process)
-        elif worker.process is None and worker.pid is not None and runtime_state.pid_exists(worker.pid):
-            CommandExecutor.kill_pid(worker.pid)
+        terminated = True
+        cleanup_failure: WorkerStartError | None = None
+        if worker.process is not None:
+            terminated = self._terminate_launched_worker(worker.process)
+        elif worker.pid is not None:
+            terminated = self._terminate_attached_worker(worker)
 
         if worker.process_logger is not None:
             worker.process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
@@ -659,25 +1401,111 @@ class ExternalEnvironment(Environment):
             except OSError:
                 pass
 
-        if worker.persistent:
-            runtime_state.remove_worker(self.environment_manager.wetlands_instance_path, self.name, worker.index)
+        if terminated:
+            try:
+                runtime_state.remove_worker(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                    worker.index,
+                    self._pool_id,
+                )
+            except Exception as error:
+                cleanup_failure = WorkerStartError(
+                    self.name,
+                    "worker terminated but its durable ownership record could not be removed",
+                    worker_index=worker.index,
+                    phase="cleanup",
+                    cleanup_errors=(str(error),),
+                )
+                with self._lock:
+                    if worker not in self._workers:
+                        self._workers.append(worker)
+                    self._fatal_error = cleanup_failure
+                terminated = False
+            else:
+                with self._lock:
+                    if worker in self._workers:
+                        self._workers.remove(worker)
+        if terminated:
+            try:
+                reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
+            except Exception as error:
+                logger.error(
+                    "Shared-memory lease reconciliation after worker retirement failed: %s",
+                    error,
+                )
+        else:
+            if cleanup_failure is None:
+                cleanup_failure = WorkerStartError(
+                    self.name,
+                    "worker process tree could not be verified as terminated",
+                    worker_index=worker.index,
+                    phase="cleanup",
+                    cleanup_errors=("durable worker ownership record retained for retry",),
+                )
+            with self._lock:
+                if worker not in self._workers:
+                    self._workers.append(worker)
+                self._fatal_error = cleanup_failure
 
-        logger.warning(f"Worker {worker.index} removed (dead). {len(self._workers)} worker(s) remaining.")
+        logger.warning(
+            "Worker %s cleanup %s. %s worker(s) remaining.",
+            worker.index,
+            "completed" if terminated else "is unverified",
+            len(self._workers),
+        )
+        return terminated
 
     def _dispatch_or_idle(self, worker: _Worker) -> None:
         """Try to dispatch the next queued task to this worker, or return it to idle pool."""
         if worker not in self._workers:
             return
-        try:
-            task = self._task_queue.get_nowait()
-            self._dispatch_to_worker(worker, task)
-        except queue.Empty:
-            self._idle_workers.put(worker)
+        while True:
+            try:
+                task = self._task_queue.get_nowait()
+            except queue.Empty:
+                self._idle_workers.put(worker)
+                return
+            if task.state.terminal:
+                self._cleanup_task_inputs(task)
+                continue
+            if self._dispatch_to_worker(worker, task):
+                return
 
-    def _dispatch_to_worker(self, worker: _Worker, task: Task[Any]) -> None:
+    def _dispatch_to_worker(self, worker: _Worker, task: ExecutionTask[Any]) -> bool:
         """Send a task's payload to a worker for execution."""
         payload = task._payload  # type: ignore[attr-defined]
         payload["task_id"] = task.id
+        if worker.pid is None or worker.process_started_at is None:
+            failure = TaskFailure.environment(
+                "Worker process identity is unavailable for durable result transport",
+                task_id=task.id,
+                call_target=self._task_call_target(task),
+            )
+            self._cleanup_task_inputs(task)
+            task._set_failed(failure)
+            return False
+        payload["output_lease_context"] = self._lease_context(
+            task.id,
+            direction="output",
+            creator_pid=worker.pid,
+            creator_started_at=worker.process_started_at,
+        )
+        raw_required = payload.get("codecs")
+        if worker.capabilities is not None and isinstance(raw_required, list):
+            required = {(item.get("id"), item.get("version")) for item in raw_required if isinstance(item, dict)}
+            available = {(codec.id, codec.version) for codec in worker.capabilities.codecs}
+            missing = required - available
+            if missing:
+                formatted = ", ".join(f"{codec}@{version}" for codec, version in sorted(missing))
+                failure = TaskFailure.environment(
+                    f"Worker environment is missing required task codecs: {formatted}",
+                    task_id=task.id,
+                    call_target=self._task_call_target(task),
+                )
+                self._cleanup_task_inputs(task)
+                task._set_failed(failure)
+                return False
         worker._current_task = task
         worker._last_activity = time.time()
         task._set_running()
@@ -689,26 +1517,34 @@ class ExternalEnvironment(Environment):
         try:
             worker.connection.send(payload)
         except (OSError, BrokenPipeError) as e:
-            task._set_failed(
-                self._worker_connection_failure(worker, task, f"Failed to send to worker {worker.index}: {e}")
+            failure = self._worker_connection_failure(
+                worker,
+                task,
+                f"Failed to send to worker {worker.index}: {e}",
             )
-            worker._current_task = None
-            self._remove_dead_worker(worker)
-            self._try_replace_worker(worker.index)
+            retired = self._cleanup_failed_task_worker(worker, task)
+            task._set_failed(failure)
+            if retired:
+                self._try_replace_worker(worker.index)
         except Exception as e:
-            task._set_failed(
-                TaskFailure.serialization(
-                    f"Failed to serialize task payload for worker {worker.index}: {e}",
-                    task_id=task.id,
-                    call_target=self._task_call_target(task),
-                    context="payload",
-                    worker=self._worker_info(worker),
-                )
+            failure = TaskFailure.serialization(
+                f"Failed to serialize task payload for worker {worker.index}: {e}",
+                task_id=task.id,
+                call_target=self._task_call_target(task),
+                context="payload",
+                worker=self._worker_info(worker),
             )
-            worker._current_task = None
-            self._dispatch_or_idle(worker)
+            retired = self._cleanup_failed_task_worker(worker, task)
+            task._set_failed(failure)
+            if retired:
+                self._try_replace_worker(worker.index)
+        return True
 
-    def _submit_task(self, task: Task[Any], start: bool) -> Task[Any]:
+    def _submit_task(
+        self,
+        task: ExecutionTask[Any],
+        start: bool,
+    ) -> ExecutionTask[Any]:
         """Wire up a task's start/cancel functions and optionally start it."""
 
         def _start() -> None:
@@ -721,7 +1557,9 @@ class ExternalEnvironment(Environment):
                 # Skip dead workers that are still in the idle queue
                 if worker not in self._workers:
                     continue
-                self._dispatch_to_worker(worker, task)
+                dispatched = self._dispatch_to_worker(worker, task)
+                if not dispatched and worker in self._workers:
+                    self._idle_workers.put(worker)
                 return
 
         def _cancel() -> None:
@@ -729,10 +1567,22 @@ class ExternalEnvironment(Environment):
             for w in self._workers:
                 if w._current_task is task:
                     try:
-                        w.connection.send({"action": "cancel", "task_id": task.id})
+                        w.connection.send(protocol_message("cancel", task.id))
                     except (OSError, BrokenPipeError):
-                        pass
+                        retired = self._cleanup_failed_task_worker(w, task)
+                        task._set_canceled()
+                        if retired:
+                            self._try_replace_worker(w.index)
+                        return
+                    threading.Thread(
+                        target=self._force_cancel_after_grace,
+                        args=(w, task),
+                        daemon=True,
+                        name=f"wetlands-cancel-{task.id[:8]}",
+                    ).start()
                     return
+            self._cleanup_task_inputs(task)
+            task._set_canceled()
 
         task._set_start_fn(_start)
         task._set_cancel_fn(_cancel)
@@ -740,134 +1590,150 @@ class ExternalEnvironment(Environment):
             task.start()
         return task
 
-    # --- Public Task API ---
+    def _force_cancel_after_grace(self, worker: _Worker, task: ExecutionTask[Any]) -> None:
+        grace = float(self.environment_manager.termination_grace)
+        if task._done_event.wait(timeout=grace):  # type: ignore[attr-defined]
+            return
+        if worker._current_task is not task:
+            return
+        retired = self._cleanup_failed_task_worker(worker, task)
+        task._set_canceled()
+        if retired:
+            self._try_replace_worker(worker.index)
 
-    def submit(
+    def _cleanup_failed_task_worker(
         self,
-        module_path: str | Path,
-        function: str,
-        args: tuple = (),
+        worker: _Worker,
+        task: ExecutionTask[Any],
+        *,
+        offered_names: Iterable[str] = (),
+    ) -> bool:
+        """Finish transport and worker cleanup before publishing task failure."""
+        task._terminal_cleanup_in_progress = True  # type: ignore[attr-defined]
+        worker._current_task = None
+        names = list(offered_names)
+        if names:
+            unlink_names(
+                names,
+                ledger_root=self.environment_manager.wetlands_instance_path,
+            )
+        self._cleanup_task_inputs(task)
+        return self._remove_dead_worker(worker)
+
+    def _cleanup_task_inputs(self, task: ExecutionTask[Any]) -> None:
+        with task._lock:  # type: ignore[attr-defined]
+            leases = getattr(task, "_input_leases", None)
+            if leases is None:
+                return
+            task._input_leases = None  # type: ignore[attr-defined]
+        dispose_leases(leases, unlink=True)
+
+    def _lease_context(
+        self,
+        task_id: str,
+        *,
+        direction: str,
+        creator_pid: int,
+        creator_started_at: float,
+    ) -> dict[str, Any]:
+        generation_id = self._expected_generation_id
+        if generation_id is None:
+            generation_id = str(self._ready_identity()["generation_id"])
+        if self._pool_id is None:
+            raise RuntimeError("Worker pool has no transport identity")
+        return {
+            "root": str(self.environment_manager.wetlands_instance_path),
+            "creator_pid": creator_pid,
+            "creator_started_at": creator_started_at,
+            "environment_name": self.name,
+            "generation_id": generation_id,
+            "pool_id": self._pool_id,
+            "task_id": task_id,
+            "direction": direction,
+        }
+
+    def submit_import(
+        self,
+        target: str,
+        *,
+        args: tuple[Any, ...] = (),
         kwargs: dict[str, Any] | None = None,
-        *,
-        start: bool = True,
-    ) -> Task[Any]:
-        """Submit a function for non-blocking execution in the remote environment.
-
-        Args:
-            module_path: Path to the module to import.
-            function: Name of the function to execute.
-            args: Positional arguments (must be picklable).
-            kwargs: Keyword arguments (must be picklable).
-            start: If True (default), dispatch immediately. If False, stays PENDING.
-
-        Returns:
-            A Task object.
-        """
-        kwargs = kwargs or {}
-        task: Task[Any] = Task()
-        module_name = Path(module_path).stem
-        task._payload = dict(  # type: ignore[attr-defined]
-            action="execute",
-            module_path=str(module_path),
-            function=function,
-            args=args,
-            kwargs=kwargs,
-            _call_target=f"{module_name}:{function}",
+        context_keyword: str | None = None,
+    ) -> ExecutionTask[Any]:
+        descriptor = import_target(target)
+        return self._submit_encoded(
+            descriptor,
+            target,
+            args,
+            kwargs or {},
+            context_keyword,
         )
-        return self._submit_task(task, start)
 
-    def submit_script(
+    def submit_path(
         self,
-        script_path: str | Path,
-        args: tuple = (),
-        run_name: str = "__main__",
+        path: str | Path,
+        qualname: str,
         *,
-        start: bool = True,
-    ) -> Task[None]:
-        """Submit a script for non-blocking execution.
-
-        Args:
-            script_path: Path to the Python script.
-            args: Command-line arguments.
-            run_name: Value for runpy.run_path(run_name=...).
-            start: If True (default), dispatch immediately.
-
-        Returns:
-            A Task[None].
-        """
-        task: Task[None] = Task()
-        script_name = Path(script_path).name
-        task._payload = dict(  # type: ignore[attr-defined]
-            action="run",
-            script_path=str(script_path),
-            args=args,
-            run_name=run_name,
-            _call_target=script_name,
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+        cache: bool = True,
+        context_keyword: str | None = None,
+    ) -> ExecutionTask[Any]:
+        descriptor = path_target(path, qualname, cache=cache)
+        canonical = Path(descriptor["path"])
+        return self._submit_encoded(
+            descriptor,
+            f"{canonical}:{qualname}",
+            args,
+            kwargs or {},
+            context_keyword,
         )
-        return self._submit_task(task, start)
 
-    def map(
+    def _submit_encoded(
         self,
-        module_path: str | Path,
-        function: str,
-        iterable: Iterable[Any],
-        *,
-        timeout: float | None = None,
-        ordered: bool = True,
-    ) -> Iterator[Any]:
-        """Execute function once for each item, distributing across workers.
-
-        Args:
-            module_path: Module containing the function.
-            function: Function name.
-            iterable: Items to process (one task per item).
-            timeout: Max seconds to wait for each result.
-            ordered: If True, yield in submission order. If False, yield as completed.
-
-        Returns:
-            Iterator of results.
-        """
-        tasks = self.map_tasks(module_path, function, iterable)
-        if ordered:
-            for task in tasks:
-                task.wait_for(timeout=timeout)
-                if task.status == TaskStatus.FAILED:
-                    raise task.exception  # type: ignore[misc]
-                yield task.result
-        else:
-            # Yield results as they complete
-            remaining = set(range(len(tasks)))
-            while remaining:
-                for i in list(remaining):
-                    t = tasks[i]
-                    try:
-                        t.wait_for(timeout=0.01)
-                    except TimeoutError:
-                        continue
-                    remaining.discard(i)
-                    if t.status == TaskStatus.FAILED:
-                        raise t.exception  # type: ignore[misc]
-                    yield t.result
-
-    def map_tasks(
-        self,
-        module_path: str | Path,
-        function: str,
-        iterable: Iterable[Any],
-    ) -> list[Task[Any]]:
-        """Submit one task per item, distributing across workers.
-
-        All tasks are started immediately.
-
-        Args:
-            module_path: Module containing the function.
-            function: Function name.
-            iterable: Items to process.
-
-        Returns:
-            List of Task objects.
-        """
-        return [self.submit(module_path, function, args=(item,)) for item in iterable]
+        target: dict[str, Any],
+        call_target: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        context_keyword: str | None,
+    ) -> ExecutionTask[Any]:
+        self._raise_if_failed()
+        task: ExecutionTask[Any] = ExecutionTask()
+        host_identity = capture_process_identity(os.getpid())
+        lease_context = self._lease_context(
+            task.id,
+            direction="input",
+            creator_pid=host_identity.pid,
+            creator_started_at=host_identity.started_at,
+        )
+        argument_leases = []
+        keyword_leases = []
+        try:
+            encoded_args, argument_leases = encode_value(
+                tuple(args),
+                path="args",
+                lease_context=lease_context,
+            )
+            encoded_kwargs, keyword_leases = encode_value(
+                dict(kwargs),
+                path="kwargs",
+                lease_context=lease_context,
+            )
+        except BaseException:
+            dispose_leases(argument_leases, unlink=True)
+            dispose_leases(keyword_leases, unlink=True)
+            raise
+        task._input_leases = [*argument_leases, *keyword_leases]  # type: ignore[attr-defined]
+        task._payload = execution_envelope(  # type: ignore[attr-defined]
+            task_id=task.id,
+            target=target,
+            args=encoded_args,
+            kwargs=encoded_kwargs,
+            codecs=descriptor_codecs(encoded_args, encoded_kwargs),
+            context_keyword=context_keyword,
+        )
+        task._payload["_call_target"] = call_target  # type: ignore[attr-defined]
+        return self._submit_task(task, True)
 
     def attach_workers(
         self,
@@ -879,47 +1745,138 @@ class ExternalEnvironment(Environment):
         self._persistent = True
         self._authkey = authkey
         self._shutdown_event.clear()
-        for entry in worker_entries:
-            worker_index = entry.get("worker_index", "<unknown>")
-            port = entry.get("port", "<unknown>")
+        reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
+        entries = tuple(worker_entries)
+        pool_ids = {entry.get("pool_id") for entry in entries}
+        if len(pool_ids) > 1:
+            raise WorkerStartError(
+                self.name,
+                "registered workers do not belong to one worker pool",
+                phase="attach",
+            )
+        if pool_ids:
+            pool_id = next(iter(pool_ids))
+            if not isinstance(pool_id, str) or not pool_id:
+                raise WorkerStartError(
+                    self.name,
+                    "registered workers have an invalid pool ID",
+                    phase="attach",
+                )
+            self._pool_id = pool_id
+        self._controller_id = uuid.uuid4().hex
+        try:
+            runtime_state.claim_controller(
+                self.environment_manager.wetlands_instance_path,
+                self.name,
+                self._controller_id,
+            )
+        except BaseException:
+            self._controller_id = None
+            raise
+        attached: list[_Worker] = []
+        try:
+            if not entries:
+                raise WorkerStartError(
+                    self.name,
+                    "no persistent workers are registered",
+                    phase="attach",
+                )
+            published = runtime_state.live_workers_for_env(
+                self.environment_manager.wetlands_instance_path,
+                self.name,
+            )
+            entry_identities = {
+                (
+                    entry.get("pool_id"),
+                    entry.get("worker_index"),
+                    entry.get("pid"),
+                    entry.get("port"),
+                )
+                for entry in entries
+            }
+            published_identities = {
+                (
+                    entry.get("pool_id"),
+                    entry.get("worker_index"),
+                    entry.get("pid"),
+                    entry.get("port"),
+                )
+                for entry in published
+            }
+            if (
+                not published
+                or len(entry_identities) != len(entries)
+                or len(published_identities) != len(published)
+                or entry_identities != published_identities
+            ):
+                raise WorkerStartError(
+                    self.name,
+                    "registered workers are not one complete commissioned pool",
+                    phase="attach",
+                )
+            for entry in entries:
+                attached.append(self._attach_worker(entry, authkey, timeout=timeout))
+        except BaseException as error:
+            cleanup_errors: list[str] = []
+            for worker in attached:
+                try:
+                    if not worker.connection.closed:
+                        worker.connection.send({"action": "detach", "protocol_version": EXECUTION_PROTOCOL_VERSION})
+                        worker.connection.close()
+                except Exception as cleanup_error:
+                    cleanup_errors.append(str(cleanup_error))
             try:
-                worker = self._attach_worker(entry, authkey, timeout=timeout)
-            except _AttachTimeout as e:
-                logger.warning(
-                    "Timed out attaching to persistent worker %s for environment '%s' on port %s: %s",
-                    worker_index,
-                    self.name,
-                    port,
-                    e,
-                    exc_info=True,
-                )
-                continue
-            except Exception as e:
-                logger.warning(
-                    "Discarding persistent worker %s for environment '%s' on port %s after attach failure: %s",
-                    worker_index,
-                    self.name,
-                    port,
-                    e,
-                    exc_info=True,
-                )
-                runtime_state.remove_worker(
+                runtime_state.release_controller(
                     self.environment_manager.wetlands_instance_path,
                     self.name,
-                    int(entry["worker_index"]),
+                    self._controller_id,
                 )
-                continue
-            self._workers.append(worker)
-            self._idle_workers.put(worker)
+            except Exception as cleanup_error:
+                cleanup_errors.append(str(cleanup_error))
+            self._controller_id = None
+            if isinstance(
+                error,
+                (EnvironmentGenerationChangedError, WorkerStartError),
+            ) or not isinstance(error, Exception):
+                raise
+            raise WorkerStartError(
+                self.name,
+                str(error),
+                phase="attach",
+                cleanup_errors=tuple(cleanup_errors),
+            ) from error
 
-        if not self._workers:
-            raise Exception(f"No live authenticated persistent workers found for environment '{self.name}'.")
+        try:
+            self._workers.extend(attached)
+            for worker in attached:
+                self._start_reader_thread(worker)
+                self._idle_workers.put(worker)
+            if not self._workers:
+                raise WorkerStartError(
+                    self.name,
+                    "no live authenticated persistent workers were found",
+                    phase="attach",
+                )
+        except BaseException:
+            self._workers.clear()
+            self._drain_idle_workers()
+            for worker in attached:
+                try:
+                    if not worker.connection.closed:
+                        worker.connection.send({"action": "detach", "protocol_version": EXECUTION_PROTOCOL_VERSION})
+                        worker.connection.close()
+                except Exception:
+                    pass
+            if self._controller_id is not None:
+                runtime_state.release_controller(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                    self._controller_id,
+                )
+                self._controller_id = None
+            raise
 
-        first = self._workers[0]
-        self.port = first.port
-        self.process = first.process
-        self.connection = first.connection
-        self._process_logger = first.process_logger
+        self._pool_commissioned = True
 
         self._health_thread = threading.Thread(
             target=self._health_monitor_loop,
@@ -934,7 +1891,21 @@ class ExternalEnvironment(Environment):
         authkey: bytes,
         timeout: float = ATTACH_CONNECT_TIMEOUT,
     ) -> _Worker:
-        connection = self._connect_worker(int(entry["port"]), authkey, timeout=timeout)
+        ready = self._ready_identity()
+        expected_identity = {
+            "pid": int(entry["pid"]),
+            "environment_path": str(Path(self.path).parent.resolve()),
+            "generation_id": str(ready["generation_id"]),
+            "recipe_hash": str(ready["recipe_hash"]),
+            "pool_id": entry.get("pool_id"),
+            "worker_index": int(entry["worker_index"]),
+        }
+        connection, capabilities = self._connect_worker(
+            int(entry["port"]),
+            authkey,
+            timeout=timeout,
+            expected_identity=expected_identity,
+        )
         worker = _Worker(
             int(entry["worker_index"]),
             None,
@@ -943,19 +1914,39 @@ class ExternalEnvironment(Environment):
             None,
             pid=int(entry["pid"]),
             persistent=True,
+            process_started_at=float(entry["process_started_at"]),
+            process_group_id=(int(entry["process_group_id"]) if entry.get("process_group_id") is not None else None),
+            session_id=int(entry["session_id"]) if entry.get("session_id") is not None else None,
+            capabilities=capabilities,
         )
-        self._start_reader_thread(worker)
         return worker
 
-    def _connect_worker(self, port: int, authkey: bytes, timeout: float | None = None) -> Connection:
+    def _connect_worker(
+        self,
+        port: int,
+        authkey: bytes,
+        timeout: float | None = None,
+        *,
+        expected_identity: dict[str, object],
+    ) -> tuple[Connection, Any]:
         if timeout is None:
-            return Client(("localhost", port), authkey=authkey)
+            connection = Client(("127.0.0.1", port), authkey=authkey)
+            try:
+                capabilities = self._receive_worker_hello(
+                    connection,
+                    timeout=ATTACH_CONNECT_TIMEOUT,
+                    expected_identity=expected_identity,
+                )
+            except BaseException:
+                connection.close()
+                raise
+            return connection, capabilities
 
         # Client() has no timeout parameter and can block during both socket
         # connect and the multiprocessing auth handshake. Persistent attach uses
         # this bounded equivalent so a busy or stale worker can produce an
         # actionable error instead of hanging the caller.
-        address = ("localhost", port)
+        address = ("127.0.0.1", port)
         sock = socket.socket(socket.AF_INET)
         try:
             sock.settimeout(timeout)
@@ -975,7 +1966,37 @@ class ExternalEnvironment(Environment):
         except Exception:
             connection.close()
             raise
-        return connection
+        try:
+            capabilities = self._receive_worker_hello(
+                connection,
+                timeout=timeout,
+                expected_identity=expected_identity,
+            )
+        except BaseException:
+            connection.close()
+            raise
+        return connection, capabilities
+
+    def _receive_worker_hello(
+        self,
+        connection: Connection,
+        *,
+        timeout: float,
+        expected_identity: dict[str, object],
+    ) -> Any:
+        if not mp_connection.wait([connection], timeout):
+            raise _AttachTimeout("Timed out waiting for worker capability handshake.")
+        try:
+            payload = connection.recv()
+        except (EOFError, OSError) as error:
+            raise _AttachTimeout("Worker connection closed before capability handshake.") from error
+        if not isinstance(payload, dict) or payload.get("action") != "hello":
+            raise RuntimeError("Worker did not send the required capability handshake")
+        return validate_worker_capabilities(
+            payload,
+            required_codecs=REQUIRED_WORKER_CODECS,
+            expected_identity=expected_identity,
+        )
 
     def _recv_bytes_with_timeout(self, connection: Connection, timeout: float, maxlength: int) -> bytes:
         if not mp_connection.wait([connection], timeout):
@@ -1036,115 +2057,25 @@ class ExternalEnvironment(Environment):
             raise AuthenticationError("digest received was wrong")
         connection.send_bytes(welcome)
 
-    def _ensure_debugpy_installed(self) -> None:
-        """Install debugpy in the environment if it is not already installed."""
-        installed_packages = self.environment_manager.get_installed_packages(self)
-        if any(pkg["name"] == "debugpy" for pkg in installed_packages):
-            return
-        logger.info(f"Installing debugpy in environment '{self.name}' for debug mode.")
-        self.environment_manager.install(self, {"conda": ["debugpy"]}, _mark_unmanaged=False)
-
-    def _send_and_wait(self, payload: dict) -> Any:
-        """Send a payload to the remote environment and wait for its response.
-        Used by the legacy blocking execute()/run_script() methods.
-        """
-        connection = self.connection
-        if connection is None or connection.closed:
-            raise ExecutionException(TaskFailure.environment("Connection not ready.", call_target=payload.get("_call_target")))
-
-        try:
-            connection.send(payload)
-        except BrokenPipeError as e:
-            logger.error(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
-            raise ExecutionException(
-                TaskFailure.worker_connection(
-                    f"Broken pipe. The peer process might have terminated. Exception: {e}.",
-                    call_target=payload.get("_call_target"),
-                )
-            ) from e
-        except OSError as e:
-            if e.errno == 9:
-                logger.error("Connection closed abruptly by the peer.")
-                raise ExecutionException(
-                    TaskFailure.worker_connection(
-                        "Connection closed abruptly by the peer.",
-                        call_target=payload.get("_call_target"),
-                    )
-                ) from e
-            raise
-        except Exception as e:
-            raise ExecutionException(
-                TaskFailure.serialization(
-                    f"Failed to serialize task payload: {e}",
-                    call_target=payload.get("_call_target"),
-                    context="payload",
-                )
-            ) from e
-
-        try:
-            while message := connection.recv():
-                action = message.get("action")
-                if action == "execution finished":
-                    logger.info(f"{payload.get('action')} finished")
-                    return message.get("result")
-                elif action == "error":
-                    failure = TaskFailure.from_payload(message, call_target=payload.get("_call_target"))
-                    self._log_task_failure(failure)
-                    raise ExecutionException(failure)
-                else:
-                    logger.warning(f"Got an unexpected message: {message}")
-
-        except EOFError:
-            logger.info("Connection closed gracefully by the peer.")
-            raise ExecutionException(
-                TaskFailure.worker_connection(
-                    "Connection closed gracefully by the peer.",
-                    call_target=payload.get("_call_target"),
-                )
-            )
-        except BrokenPipeError as e:
-            logger.error(f"Broken pipe. The peer process might have terminated. Exception: {e}.")
-            raise ExecutionException(
-                TaskFailure.worker_connection(
-                    f"Broken pipe. The peer process might have terminated. Exception: {e}.",
-                    call_target=payload.get("_call_target"),
-                )
-            ) from e
-        except OSError as e:
-            if e.errno == 9:  # Bad file descriptor
-                logger.error("Connection closed abruptly by the peer.")
-                raise ExecutionException(
-                    TaskFailure.worker_connection(
-                        "Connection closed abruptly by the peer.",
-                        call_target=payload.get("_call_target"),
-                    )
-                ) from e
-            else:
-                logger.error(f"Unexpected OSError: {e}")
-                raise e
-        return None
-
     def _log_task_failure(self, failure: TaskFailure) -> None:
-        level = logging.WARNING if failure.category == TaskFailureCategory.REMOTE_EXCEPTION else logging.ERROR
+        level = 30 if failure.category.value == "remote_exception" else 40
         logger.log(level, failure.summary())
 
     def _gracefully_stop_process(
         self,
         process: subprocess.Popen | None,
         process_logger: ProcessLogger | None,
-    ) -> None:
+    ) -> bool:
         if process is None:
-            return
+            return True
 
-        timed_out = False
         try:
             if process.poll() is None:
                 process.wait(timeout=WORKER_GRACEFUL_EXIT_TIMEOUT)
         except subprocess.TimeoutExpired:
-            timed_out = True
+            pass
 
-        if timed_out:
-            CommandExecutor.kill_process(process)
+        terminated = self._terminate_launched_worker(process)
 
         if process_logger is not None:
             process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
@@ -1159,105 +2090,12 @@ class ExternalEnvironment(Environment):
                 process.stderr.close()
             except OSError:
                 pass
-
-    @synchronized
-    def execute(self, module_path: str | Path, function: str, args: tuple = (), kwargs: dict[str, Any] = {}) -> Any:
-        """Executes a function in the given module and return the result.
-        Warning: all arguments (args and kwargs) must be picklable!
-
-        When workers are available, uses submit() internally for dispatch.
-        Falls back to legacy _send_and_wait when no worker pool is set up.
-
-        Args:
-            module_path: the path to the module to import
-            function: the name of the function to execute
-            args: the argument list for the function
-            kwargs: the keyword arguments for the function
-
-        Returns:
-            The result of the function.
-        Raises:
-            ExecutionException: on remote errors.
-        """
-        if self._workers:
-            # Use task-based dispatch through worker pool
-            task = self.submit(module_path, function, args=args, kwargs=kwargs)
-            task.wait_for()
-            if task.status == TaskStatus.FAILED:
-                raise task.exception  # type: ignore[misc]
-            return task.result
-
-        # Legacy path (no worker pool — direct connection)
-        module_name = Path(module_path).stem
-        call_target = f"{module_name}:{function}"
-        if self._process_logger:
-            self._process_logger.update_log_context({"call_target": call_target})
-
-        try:
-            payload = dict(
-                action="execute",
-                module_path=str(module_path),
-                function=function,
-                args=args,
-                kwargs=kwargs,
-                _call_target=call_target,
-            )
-            return self._send_and_wait(payload)
-        finally:
-            if self._process_logger:
-                self._process_logger.update_log_context({"call_target": MODULE_EXECUTOR_FILE})
-
-    @synchronized
-    def run_script(self, script_path: str | Path, args: tuple = (), run_name: str = "__main__") -> Any:
-        """Runs a Python script remotely using runpy.run_path().
-
-        Args:
-            script_path: Path to the script to execute.
-            args: List of arguments to pass.
-            run_name: Value for runpy.run_path(run_name=...).
-
-        Returns:
-            The resulting globals dict, or None on failure.
-        """
-        if self._workers:
-            task = self.submit_script(script_path, args=args, run_name=run_name)
-            task.wait_for()
-            if task.status == TaskStatus.FAILED:
-                raise task.exception  # type: ignore[misc]
-            return task.result
-
-        script_name = Path(script_path).name
-        if self._process_logger:
-            self._process_logger.update_log_context({"call_target": script_name})
-
-        try:
-            payload = dict(
-                action="run",
-                script_path=str(script_path),
-                args=args,
-                run_name=run_name,
-                _call_target=script_name,
-            )
-            return self._send_and_wait(payload)
-        finally:
-            if self._process_logger:
-                self._process_logger.update_log_context({"call_target": MODULE_EXECUTOR_FILE})
+        return terminated
 
     @synchronized
     def launched(self) -> bool:
-        """Return true if the environment server process is launched and the connection is open."""
-        if self._workers:
-            return any(
-                w.alive() and w.connection is not None and not w.connection.closed for w in self._workers
-            )
-        return (
-            self.process is not None
-            and self.process.poll() is None
-            and self.connection is not None
-            and not self.connection.closed
-            and self.connection.writable
-            and self.connection.readable
-        )
+        """Return whether this runtime currently controls at least one live worker."""
+        return any(worker.alive() and not worker.connection.closed for worker in self._workers)
 
     @property
     def worker_count(self) -> int:
@@ -1271,134 +2109,178 @@ class ExternalEnvironment(Environment):
         # Stop health monitor
         self._shutdown_event.set()
 
+        all_terminated = True
+        survivors: list[_Worker] = []
+        cleanup_errors: list[str] = []
         if self._workers:
-            for worker in self._workers:
-                if worker._current_task is not None and not worker._current_task.status.is_finished():
-                    worker._current_task._set_failed(
-                        TaskFailure.environment(
-                            "Environment is shutting down",
-                            task_id=worker._current_task.id,
-                            call_target=self._task_call_target(worker._current_task),
-                        )
+            for worker in list(self._workers):
+                active = worker._current_task is not None and not worker._current_task.state.terminal
+                active_task = worker._current_task if active else None
+                active_failure = None
+                if active:
+                    assert active_task is not None
+                    active_task._terminal_cleanup_in_progress = True  # type: ignore[attr-defined]
+                    active_failure = TaskFailure.environment(
+                        "Environment is shutting down",
+                        task_id=active_task.id,
+                        call_target=self._task_call_target(active_task),
                     )
+                if active:
+                    try:
+                        worker.connection.close()
+                    except OSError as error:
+                        cleanup_errors.append(f"worker {worker.index} connection close failed: {error}")
+                    if worker.process is not None:
+                        terminated = self._terminate_launched_worker(worker.process)
+                        if worker.process_logger is not None:
+                            worker.process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
+                    elif worker.pid is not None:
+                        terminated = self._terminate_attached_worker(worker)
+                    else:
+                        terminated = True
+                else:
+                    try:
+                        worker.connection.send({"action": "exit", "protocol_version": EXECUTION_PROTOCOL_VERSION})
+                    except OSError:
+                        pass
+                    try:
+                        worker.connection.close()
+                    except OSError as error:
+                        cleanup_errors.append(f"worker {worker.index} connection close failed: {error}")
+                    if worker.process is not None:
+                        terminated = self._gracefully_stop_process(
+                            worker.process,
+                            worker.process_logger,
+                        )
+                    elif worker.pid is not None:
+                        terminated = self._terminate_attached_worker(worker)
+                    else:
+                        terminated = True
+                if active_task is not None:
+                    self._cleanup_task_inputs(active_task)
                     worker._current_task = None
-                try:
-                    worker.connection.send(dict(action="exit"))
-                except OSError:
-                    pass
-                worker.connection.close()
-                if worker.process is not None:
-                    self._gracefully_stop_process(worker.process, worker.process_logger)
-                elif worker.pid is not None:
-                    CommandExecutor.kill_pid(worker.pid)
-                if worker.persistent:
-                    runtime_state.remove_worker(self.environment_manager.wetlands_instance_path, self.name, worker.index)
-            self._workers.clear()
-            while not self._idle_workers.empty():
-                try:
-                    self._idle_workers.get_nowait()
-                except queue.Empty:
-                    break
+                    assert active_failure is not None
+                    active_task._set_failed(active_failure)
+                all_terminated = all_terminated and terminated
+                if terminated:
+                    try:
+                        runtime_state.remove_worker(
+                            self.environment_manager.wetlands_instance_path,
+                            self.name,
+                            worker.index,
+                            self._pool_id,
+                        )
+                    except Exception as error:
+                        survivors.append(worker)
+                        cleanup_errors.append(
+                            f"worker {worker.index} terminated but its durable "
+                            f"ownership record could not be removed: {error}"
+                        )
+                else:
+                    survivors.append(worker)
+                    cleanup_errors.append(
+                        f"worker {worker.index} process-tree termination "
+                        "could not be verified; durable ownership record retained"
+                    )
+            self._workers[:] = survivors
+            self._drain_idle_workers()
 
-            # Fail any tasks still in the queue
-            while True:
-                try:
-                    task = self._task_queue.get_nowait()
-                    task._set_failed(TaskFailure.environment("Environment is shutting down", task_id=task.id))
-                except queue.Empty:
-                    break
+        try:
+            reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
+        except Exception as error:
+            cleanup_errors.append(f"shared-memory lease reconciliation failed: {error}")
 
-            self._process_logger = None
-            return
-
-        # Legacy single-process path
-        if self.connection is not None:
+        if self._persistent and self._pool_id is not None and all_terminated:
             try:
-                self.connection.send(dict(action="exit"))
-            except OSError as e:
-                if e.args[0] == "handle is closed":
-                    pass
-            self.connection.close()
+                discarded = runtime_state.discard_persistent_pool(
+                    self.environment_manager.wetlands_instance_path,
+                    env_name=self.name,
+                    pool_id=self._pool_id,
+                )
+            except Exception as error:
+                cleanup_errors.append(f"persistent pool journal cleanup failed: {error}")
+            else:
+                if not discarded:
+                    cleanup_errors.append("persistent pool journal retained because worker records remain")
 
-        process_logger = self._process_logger
-        self._gracefully_stop_process(self.process, process_logger)
-        self._process_logger = None
+        while True:
+            try:
+                task = self._task_queue.get_nowait()
+                failure = TaskFailure.environment(
+                    "Environment is shutting down",
+                    task_id=task.id,
+                )
+                self._cleanup_task_inputs(task)
+                task._set_failed(failure)
+            except queue.Empty:
+                break
+
+        if self._controller_id is not None and not survivors:
+            try:
+                runtime_state.release_controller(
+                    self.environment_manager.wetlands_instance_path,
+                    self.name,
+                    self._controller_id,
+                )
+            except Exception as error:
+                cleanup_errors.append(f"controller release failed: {error}")
+            else:
+                self._controller_id = None
+
+        if cleanup_errors:
+            close_error = WorkerStartError(
+                self.name,
+                "worker pool cleanup did not complete",
+                phase="close",
+                cleanup_errors=tuple(cleanup_errors),
+            )
+            with self._lock:
+                self._fatal_error = close_error
+            raise close_error
 
     @synchronized
     def detach(self) -> None:
         """Close local connections without stopping persistent worker processes."""
+        if not self._persistent:
+            raise RuntimeError("Only persistent worker pools can be detached")
+        if any(worker._current_task is not None for worker in self._workers) or not self._task_queue.empty():
+            raise RuntimeError("Cannot detach a worker pool with running or queued tasks")
         self._shutdown_event.set()
         for worker in list(self._workers):
             try:
                 if worker.connection and not worker.connection.closed:
                     if worker.persistent:
-                        worker.connection.send(dict(action="detach"))
+                        worker.connection.send({"action": "detach", "protocol_version": EXECUTION_PROTOCOL_VERSION})
                     worker.connection.close()
             except OSError:
                 pass
-            if worker._current_task is not None and not worker._current_task.status.is_finished():
-                worker._current_task._set_failed(
-                    TaskFailure.environment(
-                        "Environment is detaching",
-                        task_id=worker._current_task.id,
-                        call_target=self._task_call_target(worker._current_task),
-                    )
+            if worker._current_task is not None and not worker._current_task.state.terminal:
+                task = worker._current_task
+                failure = TaskFailure.environment(
+                    "Environment is detaching",
+                    task_id=task.id,
+                    call_target=self._task_call_target(task),
                 )
+                self._cleanup_task_inputs(task)
+                task._set_failed(failure)
             worker._current_task = None
         self._workers.clear()
-        while not self._idle_workers.empty():
-            try:
-                self._idle_workers.get_nowait()
-            except queue.Empty:
-                break
+        self._drain_idle_workers()
         while True:
             try:
                 task = self._task_queue.get_nowait()
-                task._set_failed(TaskFailure.environment("Environment is detaching", task_id=task.id))
+                failure = TaskFailure.environment(
+                    "Environment is detaching",
+                    task_id=task.id,
+                )
+                self._cleanup_task_inputs(task)
+                task._set_failed(failure)
             except queue.Empty:
                 break
-        self.connection = None
-        self.process = None
-        self.port = None
-        self._process_logger = None
-
-    @synchronized
-    def delete(self) -> None:
-        """Deletes this external environment and cleans up associated resources."""
-        if self.path is None:
-            raise Exception("Cannot delete an environment with no path.")
-
-        if not self.environment_manager.environment_exists(self.path):
-            raise Exception(f"The environment {self.name} does not exist.")
-
-        if self.launched():
-            self._exit()
-
-        if self.environment_manager.settings_manager.use_pixi:
-            send2trash(self.path.parent)
-        else:
-            send2trash(self.path)
-
-        if self.name in self.environment_manager.environments:
-            del self.environment_manager.environments[self.name]
-
-    @synchronized
-    def update(
-        self,
-        dependencies: Union[Dependencies, None] = None,
-        additional_install_commands: Commands | None = None,
-    ) -> "Environment":
-        """Updates this external environment by deleting it and recreating it."""
-        if not self.path:
-            raise Exception("Cannot update an environment with no path.")
-
-        if not self.environment_manager.environment_exists(self.path):
-            raise Exception(f"The environment {self.name} does not exist.")
-
-        self.delete()
-
-        return self.environment_manager.create(
-            str(self.name),
-            dependencies=dependencies,
-            additional_install_commands=additional_install_commands,
-        )
+        if self._controller_id is not None:
+            runtime_state.release_controller(
+                self.environment_manager.wetlands_instance_path,
+                self.name,
+                self._controller_id,
+            )
+            self._controller_id = None

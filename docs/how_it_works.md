@@ -1,93 +1,92 @@
-## 🎓 Step by Step
+# How Wetlands works
 
-Wetlands leverages **Pixi**, a package management tool for developers, or **Micromamba**, a fast, native reimplementation of the Conda package manager.
+Wetlands separates environment lifecycle operations from worker execution.
 
-1.  **Pixi or Micromamba Setup:** When `EnvironmentManager` is initialized, it checks for a `pixi` or `micromamba` executable at the specified path (e.g., `"micromamba/"`). If not found, it downloads a self-contained Pixi or Micromamba binary suitable for the current operating system and architecture into that directory. This means Wetlands doesn't require a pre-existing Conda/Mamba installation.
-2.  **Environment Creation:** `create(envName, dependencies)` uses Pixi or Micromamba commands (`pixi init /path/to/envName` or  `micromamba create -n envName -c channel package ...`) to build a new, isolated Conda environment within the Pixi or Micromamba prefix (e.g., `pixi/workspaces/envName/envs/default/` or `micromamba/envs/envName`). When using Pixi, Wetlands also creates a workspace for the environment (e.g. `pixi/workspace/envName/`). Wetlands stores a `.wetlands/environment.json` metadata file beside the managed environment and records a SHA-256 hash of the canonical creation recipe.
-3.  **Strict Same-Name Reuse:** A later `create(envName, dependencies)` call reuses the same-name environment only when its stored recipe hash matches the requested recipe. If the hash differs, metadata is missing, or the environment was marked unmanaged after a manual install, Wetlands raises an error by default. Use `replace_existing=True` to recreate the default managed environment, or `load(envName)` to intentionally load the existing default-path environment without recipe validation.
-4.  **Dependency Installation:** Dependencies (Conda packages, Pip packages) are installed into the target environment using `pixi add ...` or `micromamba install ...` and `pip install ...` (executed within the activated environment). Calling `env.install()` or `EnvironmentManager.install()` after creation marks the environment unmanaged because its actual contents no longer correspond exactly to the original creation recipe.
-5.  **Launching Workers (`launch`):**
-    *   `launch(max_workers=N)` starts one or more `module_executor` worker processes *within* the activated target environment using `subprocess.Popen`. All workers share the same Conda environment on disk — no duplication.
-    *   Before each worker starts, the manager opens a one-shot localhost startup callback socket and passes its address plus a random token to `module_executor`.
-    *   Each worker binds its own local TCP socket using `multiprocessing.connection.Listener` with port `0`, then reports the OS-assigned port back through the startup callback.
-    *   The main process connects to each worker using `multiprocessing.connection.Client`.
-    *   Worker connections are authenticated with the Wetlands root auth key stored at `wetlands/state/auth.key`.
-    *   A dedicated IPC reader daemon thread is started per worker to receive messages asynchronously.
-    *   A health monitor daemon thread is started to periodically check all workers for liveness and inactivity timeouts (see below).
-6.  **Execution (`submit`/`execute`/`import_module`):**
-    *   `submit(module, func, args)` creates a `Task[T]` object, dispatches the function call to an idle worker, and returns the `Task` immediately. If all workers are busy, the task is queued internally and dispatched when the next worker becomes available.
-    *   `execute(module, func, args)` is a blocking shortcut: it submits the call and waits for the result before returning.
-    *   `import_module(module)` creates a proxy object in the main process. When methods are called on this proxy, it triggers the `execute` mechanism described above.
-    *   Each worker imports the target module, executes the function with the provided arguments, and sends the result (or exception) back to the main process via its IPC connection.
-7.  **Task Lifecycle:**
-    *   A `Task` goes through states: `PENDING → RUNNING → COMPLETED` (or `FAILED` / `CANCELED`).
-    *   The worker sends typed IPC messages: `execution finished`, `error`, `update` (progress), and `canceled`.
-    *   The reader thread dispatches these messages to the `Task` object, which notifies registered listeners and resolves its internal `concurrent.futures.Future`.
-    *   When a worker finishes a task, it is returned to the idle pool and the next queued task (if any) is dispatched to it.
-8.  **Progress and Cancellation:**
-    *   Remote code can report progress by declaring a `task` parameter in the function signature. Wetlands detects it via `inspect.signature()` and injects a `RemoteTaskHandle` automatically.
-    *   The handle provides `task.update()` for progress, `task.set_output()` for intermediate results, `task.cancel_requested` for cooperative cancellation, and `task.log()` for remote logging.
-9.  **Worker Health Monitoring:**
-    *   A background daemon thread monitors all workers every few seconds.
-    *   If a worker process has exited (crash, OOM kill, etc.), the monitor fails the active task, removes the worker, and launches a replacement with the same configuration.
-    *   If `worker_timeout` is set and a worker has not sent any IPC message within that duration, it is treated as hung: the active task is failed, the worker is killed and replaced.
-    *   On `env.exit()`, the health monitor stops and any tasks still in the queue are failed with a descriptive error.
-10.  **Persistent Worker Reconnect:** [`EnvironmentManager.launch_or_attach()`][wetlands.environment_manager.EnvironmentManager.launch_or_attach] attaches to live persistent workers when possible and otherwise launches new persistent workers for an environment that the manager already knows. Wetlands records live worker metadata in `wetlands/state/workers.json` and keeps workers alive after [`env.detach()`][wetlands.environment.Environment.detach]. A later manager using the same `wetlands_instance_path` can call [`EnvironmentManager.attach(name)`][wetlands.environment_manager.EnvironmentManager.attach], or `launch_or_attach(name)` for name-only reconnect, to reconnect with the auth key. Attach makes one bounded connection attempt to each live worker; if a live worker is busy or cannot complete authentication, Wetlands raises an error with the worker PID, port, and recovery commands. [`env.exit()`][wetlands.environment.Environment.exit] remains the destructive shutdown path: it sends `"exit"`, stops workers, and removes registry entries.
-11.  **Direct Execution (`execute_commands`):** This method directly activates the target environment and runs the provided shell commands using `subprocess.Popen` (no worker processes involved here). The user is responsible for managing the launched process and any necessary communication.
-12.  **Isolation:** Each environment created by Wetlands is fully isolated, preventing dependency conflicts between different environments or with the main application's environment.
+## Manager construction
 
+`EnvironmentManager` resolves and validates configuration in memory.
+It does not prepare Pixi or materialize runtime state.
 
-## 🔀 Worker Pool Architecture
+## Pixi preparation
 
-When `max_workers > 1` is passed to `launch()`, Wetlands starts multiple `module_executor` processes, all activating the **same conda environment**. This provides true process-level parallelism without duplicating the environment on disk.
+`prepare()` returns an observable operation.
+The operation serializes preparation under a root-local lock, discovers or installs the registered Pixi release, verifies its version and artifact digest, and returns `PixiInfo`.
 
-```
-                                ┌─ module_executor (pid 1001) ─ port 5001
-env.launch(max_workers=4) ──────├─ module_executor (pid 1002) ─ port 5002
-  (one conda env on disk)       ├─ module_executor (pid 1003) ─ port 5003
-                                └─ module_executor (pid 1004) ─ port 5004
-```
+Concurrent managers targeting the same root coordinate through the same lock.
 
-Each worker holds its own subprocess, port, IPC connection, and a dedicated reader thread. Tasks are dispatched to idle workers from an internal pool; when all workers are busy, tasks queue and are dispatched as workers become available. A health monitor thread runs alongside the pool, detecting crashed or hung workers and replacing them transparently.
+## Provisioning
 
-Multi-process is preferred over multi-thread because Wetlands' primary use case is scientific computing (numpy, torch, cellpose, stardist). Separate processes provide true parallelism (no GIL), failure isolation (one crash doesn't kill other tasks), and separate `sys.path`/`sys.argv` per worker. The only cost is memory (~200–400 MB per worker for a typical scientific stack), controlled via `max_workers`.
+`provision(name, spec)` coordinates the full lifecycle of one physical environment.
 
-With `max_workers=1` (the default), the pool is a trivial pass-through: one worker, one connection, one reader thread. Behavior is identical to a single-worker setup.
+The ordered stages are:
 
-Persistent workers use the same worker pool model, but attached workers may not have a local `subprocess.Popen` handle in the new manager.
-For those workers, Wetlands uses the recorded PID for liveness checks and cleanup.
-If a manager disconnects while a persistent worker is idle, the worker returns to `accept()` and can authenticate a later manager.
-If the disconnect happens while a task is running, the worker waits for that task thread to finish before accepting more work; the detached manager does not receive the result.
-If a later attach attempt reaches a worker that is alive but still busy, the attach attempt is bounded and the registry entry is preserved so a future attach call can succeed.
-Persistent workers detach from the launching process streams after the startup callback succeeds and continue writing worker logs under the Wetlands instance path.
+1. acquire the environment lifecycle lock;
+2. prepare Pixi;
+3. inspect and remove incomplete state;
+4. materialize `pixi.toml` and an optional supplied `pixi.lock`;
+5. resolve or validate the lockfile;
+6. install Conda, PyPI, and local dependencies;
+7. run explicit post-install commands;
+8. validate the environment;
+9. publish ready metadata atomically.
 
-The authenticated local TCP transport is a trusted-local IPC mechanism.
-It does not turn `execute()` or `run_script()` into a sandboxed remote service; those APIs still execute arbitrary Python in the target environment.
+Provisioning and worker lifecycle operations share per-environment coordination.
+An environment is never published ready while provisioning is incomplete.
 
-## ⚙️ Under the Hood
+Failures and cancellation stop the active process tree and remove the incomplete target.
+If the host crashes before cleanup, the next provisioning attempt treats missing ready metadata as incomplete and rebuilds.
 
+## Workers
 
-Wetlands uses the `EnvironmentManager.execute_commands()` for different operations (to create environments, install dependencies, etc). 
-Behind the scenes, this method creates and executes a temporary script (a bash script on Linux and Mac, and a PowerShell script on Windows) which looks like the following:
+`ManagedEnvironment.start()` launches one or more warm Python worker processes from the Pixi project.
 
-```bash
-# Initialize Micromamba
-cd "/path/to/examples/micromamba"
-export MAMBA_ROOT_PREFIX="/path/to/examples/micromamba"
-eval "$(micromamba shell hook -s posix)"
+Each worker connects to the host through an authenticated local `multiprocessing.connection`.
+The control channel uses an OS-assigned loopback TCP port for consistent Linux, macOS, and Windows behavior.
 
-# Create the cellpose environment
-cd "/Users/amasson/Travail/wetlands/examples"
-micromamba --rc-file "/path/to/examples/micromamba/.mambarc" create -n cellpose python=3.12.7 -y
+Startup performs a capability handshake containing:
 
-# Activate the environment
-cd "/path/to/examples/"
-micromamba activate cellpose
+- execution-protocol version;
+- worker runtime version;
+- worker Python version;
+- supported codec IDs and versions;
+- managed environment identity.
 
-# Install the dependencies
-echo "Installing conda dependencies..."
-micromamba --rc-file "/path/to/examples/micromamba/.mambarc" install "cellpose==3.1.0" -y
+The pool rejects incompatible workers before accepting execution.
 
-# Execute optional custom commands
-python -u example_module.py
-```
+## Execution
+
+`submit_import()` creates a versioned execution envelope containing a task ID, qualified module target, encoded positional arguments, encoded keyword arguments, and codec requirements.
+
+The worker imports the requested module in its own environment, resolves the qualified callable, decodes ordinary values, invokes the function, and encodes its result.
+
+`submit_path()` carries a canonical path and qualified attribute instead.
+Path modules are cached by canonical path and content identity, preventing collisions between equal filename stems.
+
+The host has one reader per worker and routes messages to tasks by task ID.
+Queued work is dispatched to idle workers.
+Health monitoring fails affected tasks and replaces workers after a crash, disconnect, or configured inactivity timeout.
+
+## NumPy transfer
+
+NumPy payloads travel out of band in shared memory while descriptors travel in the execution envelope.
+
+Creator ownership is explicit.
+Inputs are created and unlinked by the host.
+Results are created and unlinked by the worker after a host acknowledgement.
+The host copies returned arrays before acknowledgement.
+
+Terminal cleanup is idempotent so competing completion, cancellation, disconnection, and worker-death paths cannot release a lease twice.
+
+## Async integration
+
+Wetlands uses threads and subprocesses internally, so synchronous applications do not need an event loop.
+
+Awaiting an operation or task adapts its completion to the caller's current `asyncio` loop.
+Async event streams use thread-safe loop callbacks.
+Wetlands never assumes ownership of the application's event loop.
+
+## Trust model
+
+Worker targets execute arbitrary Python with the current user's privileges.
+Authentication prevents accidental or unauthenticated connection to a local worker but does not make worker code safe.
+Use Wetlands only with trusted code and dependency sources.
