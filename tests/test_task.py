@@ -2,53 +2,71 @@
 
 import asyncio
 import threading
-from concurrent.futures import Future
 from unittest.mock import MagicMock
 
 import pytest
 
+from wetlands import ExecutionError, OperationCanceled
+from wetlands.diagnostics import ExecutionFailure, ExecutionFailureCategory, WorkerInfo
 from wetlands.task import (
+    ExecutionEvent,
+    ExecutionEventKind,
+    ExecutionState,
+    ExecutionTask,
     InvalidStateError,
     RemoteTaskHandle,
-    Task,
-    TaskEvent,
-    TaskEventType,
-    TaskFailure,
-    TaskFailureCategory,
-    TaskStatus,
-    WorkerInfo,
 )
 
 
-class TestTaskStatus:
-    def test_is_finished_terminal_states(self):
-        assert TaskStatus.COMPLETED.is_finished()
-        assert TaskStatus.FAILED.is_finished()
-        assert TaskStatus.CANCELED.is_finished()
+class TestExecutionState:
+    def test_terminal_states(self):
+        assert ExecutionState.COMPLETED.terminal
+        assert ExecutionState.FAILED.terminal
+        assert ExecutionState.CANCELED.terminal
 
-    def test_is_finished_non_terminal_states(self):
-        assert not TaskStatus.PENDING.is_finished()
-        assert not TaskStatus.RUNNING.is_finished()
+    def test_non_terminal_states(self):
+        assert not ExecutionState.PENDING.terminal
+        assert not ExecutionState.RUNNING.terminal
 
 
-class TestTaskEvent:
+class TestExecutionEvent:
     def test_frozen(self):
-        task = Task()
-        event = TaskEvent(task=task, type=TaskEventType.STARTED)
+        event = ExecutionEvent(
+            sequence=1,
+            timestamp=1.5,
+            task_id="execution-1",
+            kind=ExecutionEventKind.STARTED,
+            state=ExecutionState.RUNNING,
+            message="Execution started",
+        )
         with pytest.raises(AttributeError):
-            event.type = TaskEventType.COMPLETION  # type: ignore[misc]
+            event.kind = ExecutionEventKind.COMPLETION  # type: ignore[misc]
 
     def test_fields(self):
-        task = Task()
-        event = TaskEvent(task=task, type=TaskEventType.UPDATE)
-        assert event.task is task
-        assert event.type == TaskEventType.UPDATE
+        task = ExecutionTask("execution-1")
+        task._set_running()
+        task._set_update(message="Halfway", current=1, maximum=2)
+        event = task._events[-1]
+        assert event.task_id == task.id
+        assert event.kind is ExecutionEventKind.UPDATE
+        assert event.state is ExecutionState.RUNNING
+        assert event.message == "Halfway"
+        assert event.current == 1
+        assert event.maximum == 2
+        assert event.progress == pytest.approx(0.5)
 
 
 class TestTaskLifecycle:
+    def test_tasks_are_not_context_managers(self):
+        task = ExecutionTask()
+        assert not hasattr(task, "__enter__")
+        assert not hasattr(task, "__exit__")
+        assert not hasattr(task, "__aenter__")
+        assert not hasattr(task, "__aexit__")
+
     def test_initial_state(self):
-        task = Task()
-        assert task.status == TaskStatus.PENDING
+        task = ExecutionTask()
+        assert task.state == ExecutionState.PENDING
         assert task.message is None
         assert task.current is None
         assert task.maximum is None
@@ -59,80 +77,80 @@ class TestTaskLifecycle:
         assert task.exception is None
 
     def test_set_running(self):
-        task = Task()
+        task = ExecutionTask()
         events = []
         task.listen(lambda e: events.append(e))
         task._set_running()
-        assert task.status == TaskStatus.RUNNING
+        assert task.state == ExecutionState.RUNNING
         assert len(events) == 1
-        assert events[0].type == TaskEventType.STARTED
+        assert events[0].kind == ExecutionEventKind.STARTED
 
     def test_set_completed(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._set_completed(42)
-        assert task.status == TaskStatus.COMPLETED
+        assert task.state == ExecutionState.COMPLETED
         assert task.result == 42
-        assert task.future.result() == 42
 
     def test_result_raises_if_not_completed(self):
-        task = Task()
+        task = ExecutionTask()
         with pytest.raises(InvalidStateError):
             _ = task.result
 
     def test_set_failed(self):
-        task = Task()
+        task = ExecutionTask()
+        events = []
+        task.listen(events.append)
         task._set_running()
         task._set_failed("boom", ["line1", "line2"])
-        assert task.status == TaskStatus.FAILED
+        assert task.state == ExecutionState.FAILED
         assert task.error is not None
         assert task.error.message == "boom"
         assert task.traceback == "line1line2"
         assert task.exception is not None
         assert task.exception.failure is task.error
-        assert task.future.exception() is task.exception
-        with pytest.raises(Exception):
-            task.future.result()
+        assert events[-1].kind is ExecutionEventKind.FAILURE
+        assert events[-1].failure is task.error
+        assert events[-1].message == str(task.exception)
 
     def test_set_failed_with_structured_failure(self):
-        task = Task("task-1")
+        task = ExecutionTask("task-1")
         task._set_running()
-        failure = TaskFailure.worker_died(worker=WorkerInfo(environment="env", index=2, pid=123), returncode=-9)
+        failure = ExecutionFailure.worker_died(worker=WorkerInfo(environment="env", index=2, pid=123), returncode=-9)
 
         task._set_failed(failure)
 
-        assert task.status == TaskStatus.FAILED
+        assert task.state == ExecutionState.FAILED
         assert task.error is not None
-        assert task.error.category == TaskFailureCategory.WORKER_DIED
+        assert task.error.category == ExecutionFailureCategory.WORKER_DIED
         assert task.error.signal == 9
         assert task.error.worker is not None
         assert task.error.worker.index == 2
         assert str(task.exception) == "Worker 2 pid 123 died with signal 9"
 
     def test_set_canceled(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._set_canceled()
-        assert task.status == TaskStatus.CANCELED
-        assert task.future.cancelled()
+        assert task.state == ExecutionState.CANCELED
 
     def test_progress(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_update(current=3, maximum=10)
         assert task.progress == pytest.approx(0.3)
 
     def test_progress_none_when_missing(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_update(current=3)
         assert task.progress is None
 
     def test_progress_none_when_max_zero(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_update(current=0, maximum=0)
         assert task.progress is None
 
     def test_outputs_accumulate(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_update(outputs={"a": 1})
         task._set_update(outputs={"b": 2})
         assert task.outputs == {"a": 1, "b": 2}
@@ -140,20 +158,38 @@ class TestTaskLifecycle:
 
 class TestTaskWaitFor:
     def test_wait_for_completed(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._set_completed("done")
         result = task.wait_for(timeout=1)
-        assert result is task  # chaining
+        assert result == "done"
 
     def test_wait_for_timeout(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         with pytest.raises(TimeoutError):
             task.wait_for(timeout=0.01)
 
+    def test_wait_for_failed_raises_public_execution_error(self):
+        task = ExecutionTask()
+        task._set_running()
+        task._set_failed(RuntimeError("remote failure"))
+
+        with pytest.raises(ExecutionError) as captured:
+            task.wait_for()
+
+        assert captured.value.failure is task.error
+
+    def test_wait_for_canceled_raises_public_operation_canceled(self):
+        task = ExecutionTask()
+        task._set_running()
+        task._set_canceled()
+
+        with pytest.raises(OperationCanceled):
+            task.wait_for()
+
     def test_wait_for_from_thread(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
 
         def complete_later():
@@ -171,81 +207,123 @@ class TestTaskWaitFor:
 
 class TestTaskListeners:
     def test_multiple_listeners(self):
-        task = Task()
+        task = ExecutionTask()
         events1, events2 = [], []
-        task.listen(lambda e: events1.append(e.type))
-        task.listen(lambda e: events2.append(e.type))
+        task.listen(lambda e: events1.append(e.kind))
+        task.listen(lambda e: events2.append(e.kind))
         task._set_running()
-        assert events1 == [TaskEventType.STARTED]
-        assert events2 == [TaskEventType.STARTED]
+        assert events1 == [ExecutionEventKind.STARTED]
+        assert events2 == [ExecutionEventKind.STARTED]
 
-    def test_terminal_replay(self):
-        """Late listeners receive the terminal event."""
-        task = Task()
+    def test_bounded_history_is_replayed_to_late_listener(self):
+        task = ExecutionTask()
         task._set_running()
+        task._set_update(message="working")
         task._set_completed(99)
 
         events = []
-        task.listen(lambda e: events.append(e.type))
-        assert events == [TaskEventType.COMPLETION]
+        task.listen(lambda e: events.append(e.kind))
+        assert events == [
+            ExecutionEventKind.STARTED,
+            ExecutionEventKind.UPDATE,
+            ExecutionEventKind.COMPLETION,
+        ]
 
-    def test_update_not_replayed(self):
-        """UPDATE events are transient and not replayed."""
-        task = Task()
+    def test_replay_can_be_disabled(self):
+        task = ExecutionTask()
         task._set_running()
         task._set_update(message="progress")
 
         events = []
-        task.listen(lambda e: events.append(e.type))
+        task.listen(lambda e: events.append(e.kind), replay=False)
         assert events == []
 
+    def test_listener_is_not_retained_after_terminal_state(self):
+        task = ExecutionTask()
+        task._set_running()
+        task._set_completed("done")
+
+        def callback(event):
+            return None
+
+        task.listen(callback, replay=False)
+
+        assert callback not in task._listeners
+
     def test_remove_listener(self):
-        task = Task()
+        task = ExecutionTask()
         events = []
 
         def cb(e):
-            events.append(e.type)
+            events.append(e.kind)
 
         task.listen(cb)
         task._set_running()
         task.remove_listener(cb)
         task._set_completed(1)
-        assert events == [TaskEventType.STARTED]
+        assert events == [ExecutionEventKind.STARTED]
+
+    def test_events_are_snapshot_values_not_mutable_task_views(self):
+        task = ExecutionTask()
+        events = []
+        task.listen(events.append)
+        task._set_running()
+        task._set_update(message="first", current=1, maximum=4)
+        first_update = events[-1]
+        task._set_update(message="second", current=3, maximum=4)
+
+        assert first_update.message == "first"
+        assert first_update.current == 1
+        assert first_update.progress == pytest.approx(0.25)
+        assert not hasattr(first_update, "task")
+
+    def test_sequences_and_timestamps_are_monotonic(self):
+        task = ExecutionTask()
+        task._set_running()
+        task._set_update(current=1, maximum=2)
+        task._set_completed("done")
+
+        assert [event.sequence for event in task._events] == [1, 2, 3]
+        assert [event.timestamp for event in task._events] == sorted(event.timestamp for event in task._events)
 
 
 class TestTaskStart:
     def test_start_calls_start_fn(self):
-        task = Task()
+        task = ExecutionTask()
         called = []
         task._set_start_fn(lambda: called.append(True))
-        task.start()
+        task._start()
         assert called == [True]
 
     def test_start_noop_when_running(self):
-        task = Task()
+        task = ExecutionTask()
         called = []
         task._set_start_fn(lambda: called.append(True))
         task._set_running()
-        task.start()
+        task._start()
         assert called == []  # not called again
 
     def test_start_raises_without_start_fn(self):
-        task = Task()
+        task = ExecutionTask()
         with pytest.raises(InvalidStateError):
-            task.start()
+            task._start()
 
 
 class TestTaskCancel:
     def test_cancel_calls_cancel_fn(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         cancelled = []
+        events = []
+        task.listen(events.append, replay=False)
         task._set_cancel_fn(lambda: cancelled.append(True))
         task.cancel()
         assert cancelled == [True]
+        assert events[-1].kind is ExecutionEventKind.CANCELLATION_REQUESTED
+        assert events[-1].state is ExecutionState.RUNNING
 
     def test_cancel_noop_when_finished(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         cancelled = []
         task._set_cancel_fn(lambda: cancelled.append(True))
@@ -254,61 +332,25 @@ class TestTaskCancel:
         assert cancelled == []
 
 
-class TestTaskContextManager:
-    def test_context_manager_starts_and_cancels(self):
-        task = Task()
-        started = []
-        cancelled = []
-
-        def start() -> None:
-            started.append(True)
-            task._set_running()
-
-        def cancel() -> None:
-            cancelled.append(True)
-            task._set_canceled()
-
-        task._set_start_fn(start)
-        task._set_cancel_fn(cancel)
-
-        with task:
-            assert task.status == TaskStatus.RUNNING
-        # exit should have cancelled and waited
-        assert cancelled == [True]
-        assert task.status == TaskStatus.CANCELED
-
-    def test_context_manager_no_cancel_if_done(self):
-        task = Task()
-        task._set_start_fn(lambda: task._set_running())
-        cancelled = []
-        task._set_cancel_fn(lambda: cancelled.append(True))
-        task._set_running()
-        task._set_completed(42)
-
-        with task:
-            pass
-        assert cancelled == []
-
-
 class TestTaskOnMessage:
     def test_on_message_completion(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._on_message({"action": "execution finished", "result": [1, 2, 3]})
-        assert task.status == TaskStatus.COMPLETED
+        assert task.state == ExecutionState.COMPLETED
         assert task.result == [1, 2, 3]
 
     def test_on_message_error(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._on_message({"action": "error", "exception": "fail", "traceback": ["tb1"]})
-        assert task.status == TaskStatus.FAILED
+        assert task.state == ExecutionState.FAILED
         assert task.error is not None
         assert task.error.message == "fail"
         assert task.traceback == "tb1"
 
     def test_on_message_structured_error(self):
-        task = Task("task-structured")
+        task = ExecutionTask("task-structured")
         task._set_running()
         task._on_message(
             {
@@ -339,7 +381,7 @@ class TestTaskOnMessage:
         assert str(task.exception) == "Remote ValueError from sample_module: bad input"
 
     def test_on_message_update(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._on_message({"action": "update", "message": "working", "current": 5, "maximum": 10})
         assert task.message == "working"
@@ -347,40 +389,21 @@ class TestTaskOnMessage:
         assert task.maximum == 10
 
     def test_on_message_canceled(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._on_message({"action": "canceled"})
-        assert task.status == TaskStatus.CANCELED
+        assert task.state == ExecutionState.CANCELED
 
     def test_on_message_update_with_outputs(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._on_message({"action": "update", "outputs": {"key": "val"}})
         assert task.outputs == {"key": "val"}
 
 
-class TestTaskFuture:
-    def test_future_is_standard_future(self):
-        task = Task()
-        assert isinstance(task.future, Future)
-
-    def test_future_resolves_on_completion(self):
-        task = Task()
-        task._set_running()
-        task._set_completed("hello")
-        assert task.future.result(timeout=1) == "hello"
-
-    def test_future_raises_on_failure(self):
-        task = Task()
-        task._set_running()
-        task._set_failed("err")
-        with pytest.raises(Exception):
-            task.future.result(timeout=1)
-
-
 class TestTaskAsync:
     def test_await(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
 
         async def run():
@@ -398,7 +421,7 @@ class TestTaskAsync:
         assert result == 99
 
     def test_events_stream(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
 
         async def run():
@@ -415,51 +438,77 @@ class TestTaskAsync:
             threading.Thread(target=emit).start()
 
             async for event in task.events():
-                collected.append(event.type)
+                collected.append(event.kind)
 
             return collected
 
         types = asyncio.run(run())
-        assert TaskEventType.UPDATE in types
-        assert TaskEventType.COMPLETION in types
+        assert ExecutionEventKind.UPDATE in types
+        assert ExecutionEventKind.COMPLETION in types
+
+    def test_async_event_replay_is_bounded_and_keeps_terminal_event(self):
+        task = ExecutionTask()
+        task._set_running()
+        for index in range(task._EVENT_HISTORY_LIMIT + 100):
+            task._set_update(message=str(index), current=index)
+        task._set_completed("done")
+
+        async def collect():
+            return [event async for event in task.events()]
+
+        events = asyncio.run(collect())
+        assert len(events) == task._EVENT_HISTORY_LIMIT
+        assert events[-1].kind is ExecutionEventKind.COMPLETION
+        assert events[-1].state is ExecutionState.COMPLETED
+        assert [event.sequence for event in events] == sorted(event.sequence for event in events)
+
+    def test_terminal_stream_without_replay_finishes_immediately(self):
+        task = ExecutionTask()
+        task._set_running()
+        task._set_completed("done")
+
+        async def collect():
+            return [event async for event in task.events(replay=False)]
+
+        assert asyncio.run(collect()) == []
 
 
 class TestTerminalStateGuards:
     def test_set_failed_twice_no_exception(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._set_failed("first error")
         task._set_failed("second error")  # should be a no-op
-        assert task.status == TaskStatus.FAILED
+        assert task.state == ExecutionState.FAILED
         assert task.error is not None
         assert task.error.message == "first error"
 
     def test_set_completed_then_set_failed_no_exception(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._set_completed(42)
         task._set_failed("should be ignored")
-        assert task.status == TaskStatus.COMPLETED
+        assert task.state == ExecutionState.COMPLETED
         assert task.result == 42
 
     def test_set_failed_then_set_completed_no_exception(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._set_failed("error")
         task._set_completed(42)  # should be a no-op
-        assert task.status == TaskStatus.FAILED
+        assert task.state == ExecutionState.FAILED
         assert task.error is not None
         assert task.error.message == "error"
 
     def test_set_canceled_then_set_failed_no_exception(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         task._set_canceled()
         task._set_failed("should be ignored")
-        assert task.status == TaskStatus.CANCELED
+        assert task.state == ExecutionState.CANCELED
 
     def test_concurrent_set_failed_no_exception(self):
-        task = Task()
+        task = ExecutionTask()
         task._set_running()
         barrier = threading.Barrier(2)
         errors = []
@@ -478,12 +527,12 @@ class TestTerminalStateGuards:
         t1.join(timeout=5)
         t2.join(timeout=5)
         assert errors == []
-        assert task.status == TaskStatus.FAILED
+        assert task.state == ExecutionState.FAILED
         assert task.error is not None
         assert task.error.message in ("error1", "error2")
 
 
-class TestTaskFailureDiagnostics:
+class TestExecutionFailureDiagnostics:
     def test_exception_from_chained_exception_preserves_cause(self):
         try:
             try:
@@ -491,7 +540,7 @@ class TestTaskFailureDiagnostics:
             except KeyError as e:
                 raise ValueError("outer") from e
         except ValueError as e:
-            failure = TaskFailure.from_exception(e)
+            failure = ExecutionFailure.from_exception(e)
 
         assert failure.remote_exception is not None
         assert failure.remote_exception.type_name == "ValueError"
@@ -500,14 +549,14 @@ class TestTaskFailureDiagnostics:
         assert "The above exception was the direct cause" in (failure.traceback or "")
 
     def test_failure_payload_round_trips_worker_metadata(self):
-        failure = TaskFailure.worker_died(
+        failure = ExecutionFailure.worker_died(
             worker=WorkerInfo(environment="env", index=1, pid=111, port=5000, persistent=True),
             returncode=-15,
         )
 
-        round_tripped = TaskFailure.from_payload({"failure": failure.to_payload()})
+        round_tripped = ExecutionFailure.from_payload({"failure": failure.to_payload()})
 
-        assert round_tripped.category == TaskFailureCategory.WORKER_DIED
+        assert round_tripped.category == ExecutionFailureCategory.WORKER_DIED
         assert round_tripped.signal == 15
         assert round_tripped.worker is not None
         assert round_tripped.worker.port == 5000
@@ -545,14 +594,12 @@ class TestRemoteTaskHandle:
         assert msg["action"] == "update"
         assert msg["outputs"] == {"key": "value"}
 
-    def test_cancel_sends_canceled(self):
+    def test_cancel_is_local_and_does_not_emit_a_terminal_message(self):
         conn = MagicMock()
         handle = RemoteTaskHandle("t1", threading.Lock(), conn)
         handle.cancel()
-        conn.send.assert_called_once()
-        msg = conn.send.call_args[0][0]
-        assert msg["action"] == "canceled"
-        assert msg["task_id"] == "t1"
+        assert handle.cancel_requested
+        conn.send.assert_not_called()
 
     def test_log_sends_log_message(self):
         conn = MagicMock()

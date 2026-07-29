@@ -1,32 +1,37 @@
 """
-This script launches a server inside a specified conda environment. It listens on a dynamically assigned
+This script launches a server inside a managed Pixi environment. It listens on a dynamically assigned
 local port for incoming execution commands sent via a multiprocessing connection.
 
-Clients can send instructions to:
-- Dynamically import a Python module from a specified path and execute a function
-- Run a Python script via runpy.run_path()
-- Receive the result or any errors from the execution
+Clients send versioned execution envelopes for installed-module or explicit
+development-path targets and receive structured progress, results, or failures.
 
-Designed to be run within isolated environments for sandboxed execution of Python code modules.
+Designed to run Python call targets with isolated dependencies.
+This process boundary is not a security sandbox.
 """
 
 from __future__ import annotations
 
 import sys
 import json
+import contextlib
 import logging
 import threading
 import traceback
 import argparse
-import runpy
 import inspect
 import os
+import platform
 import socket
 from pathlib import Path
 import importlib
 import importlib.util
+import hashlib
+import types
+import uuid
+import time
 from multiprocessing.context import AuthenticationError
 from multiprocessing.connection import Listener, Connection
+from typing import Any, Callable, cast
 
 
 def import_from_path(name: str, file_path: str | Path):
@@ -37,38 +42,36 @@ def import_from_path(name: str, file_path: str | Path):
     module = importlib.util.module_from_spec(spec)
     if spec.loader is None:
         return None
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _raise_modern_annotation_error_if_needed(e: TypeError, path: str | Path) -> None:
-    if sys.version_info >= (3, 10) or "unsupported operand type(s) for |" not in str(e):
-        return
-    raise RuntimeError(
-        f"{path} failed under Python {sys.version_info.major}.{sys.version_info.minor} with a `|` type error. "
-        "This is often caused by Python 3.10 union annotation syntax such as `A | B`. "
-        "Add `from __future__ import annotations`, use `typing.Optional`/`typing.Union`, "
-        "or run this code in a Python 3.10+ environment."
-    ) from e
+_value_codec = import_from_path(
+    "wetlands_worker_value_codec",
+    Path(__file__).parent / "_internal" / "value_codec.py",
+)
+if _value_codec is None:
+    raise RuntimeError("Could not load the Wetlands worker value codecs")
+encode_value = _value_codec.encode_value
+decode_value = _value_codec.decode_value
+dispose_leases = _value_codec.dispose_leases
+descriptor_codecs = _value_codec.descriptor_codecs
+SUPPORTED_CODECS = _value_codec.SUPPORTED_CODECS
 
-
-def _import_execution_module(module_path: Path):
-    module_name = module_path.stem
-    sys.path.append(str(module_path.parent))
-    try:
-        return importlib.import_module(module_name)
-    except TypeError as e:
-        _raise_modern_annotation_error_if_needed(e, module_path)
-        raise
-
-
-try:
-    ndarray_mod = import_from_path("wetlands_ndarray", Path(__file__).parent / "ndarray.py")
-    if ndarray_mod is not None:
-        ndarray_mod.register_ndarray_pickle()
-except ImportError:
-    # Do not support ndarray if numpy is not installed
-    pass
+_protocol = import_from_path(
+    "wetlands_worker_protocol",
+    Path(__file__).parent / "protocol.py",
+)
+if _protocol is None:
+    raise RuntimeError("Could not load the Wetlands execution protocol")
+EXECUTION_PROTOCOL_VERSION = _protocol.EXECUTION_PROTOCOL_VERSION
+MANAGEMENT_PROTOCOL_VERSION = _protocol.MANAGEMENT_PROTOCOL_VERSION
+WORKER_RUNTIME_VERSION = _protocol.WORKER_RUNTIME_VERSION
+protocol_message = _protocol.protocol_message
+validate_task_message = _protocol.validate_task_message
+validate_target = _protocol.validate_target
+worker_hello = _protocol.worker_hello
 
 try:
     _task_file = Path(__file__).parent / "task.py"
@@ -90,10 +93,18 @@ port = 0
 logger = logging.getLogger("module_executor")
 _detached_stdio = False
 args: argparse.Namespace | None = None
-active_debug_port: int | None = None
 STARTUP_EVENT = "wetlands.worker.ready"
 STARTUP_SCHEMA_VERSION = 1
 STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
+_path_modules: dict[str, types.ModuleType] = {}
+_path_module_keys: dict[str, str] = {}
+_output_leases: dict[str, list[Any]] = {}
+_output_leases_lock = threading.RLock()
+_active_tasks_lock = threading.RLock()
+CONNECTION_LOSS_GRACE = 5.0
+UNCOMMISSIONED_EXIT_CODE = 70
+REMOTE_EXCEPTION_CHAIN_LIMIT = 32
+DEBUG_HOST = "127.0.0.1"
 
 
 class _MaxLevelFilter(logging.Filter):
@@ -120,9 +131,9 @@ def _create_split_stream_handlers(fmt: str) -> tuple[logging.StreamHandler, logg
     return stdout_handler, stderr_handler
 
 
-def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -> Path:
-    """Configure module executor logging under the Wetlands instance directory."""
-    log_path = Path(wetlands_instance_path).resolve() / "environments.log"
+def configure_logging(root: Path, level: int = logging.INFO) -> Path:
+    """Configure module executor logging under the Wetlands manager root."""
+    log_path = Path(root).resolve() / "environments.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     fmt = "%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s"
@@ -177,21 +188,29 @@ def _detach_standard_streams() -> None:
     _detached_stdio = True
 
 
+def _watch_launcher_commission(
+    commissioned: threading.Event,
+    timeout: float,
+    *,
+    exit_process=None,
+) -> None:
+    """Exit an uncommissioned persistent worker after launcher loss/deadline."""
+    if commissioned.wait(timeout=max(0.0, timeout)):
+        return
+    logger.error("Persistent worker was not commissioned before its startup deadline")
+    (exit_process or os._exit)(UNCOMMISSIONED_EXIT_CODE)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         "Wetlands module executor",
-        "Module executor is executed in a conda environment. It listens to a port and waits for execution orders. "
-        "When instructed, it can import a module and execute one of its functions or run a script with runpy.",
+        "Module executor runs in an isolated Pixi environment and accepts versioned execution envelopes.",
     )
     parser.add_argument("environment", help="The name of the execution environment.")
     parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
     parser.add_argument(
-        "-dp", "--debug_port", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int
-    )
-    parser.add_argument(
-        "-wip",
-        "--wetlands_instance_path",
-        help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.",
+        "--root",
+        help="Internal path to the Wetlands manager root containing worker state.",
         default=Path("wetlands"),
         type=Path,
     )
@@ -211,22 +230,21 @@ if __name__ == "__main__":
         default=None,
         type=int,
     )
+    parser.add_argument("--environment_path", default=None)
+    parser.add_argument("--generation_id", default=None)
+    parser.add_argument("--recipe_hash", default=None)
+    parser.add_argument("--pool_id", default=None)
+    parser.add_argument("--worker_index", default=None, type=int)
+    parser.add_argument("--worker_id", default=None)
+    parser.add_argument("--commission_timeout", default=None, type=float)
+    parser.add_argument("--commissioned", action="store_true")
     args = parser.parse_args()
     if (args.startup_host is None) != (args.startup_port is None):
         parser.error("--startup_host and --startup_port must be provided together")
     port = args.port
-    configure_logging(args.wetlands_instance_path)
+    configure_logging(args.root)
     logger = logging.getLogger(args.environment)
-    if args.debug_port is not None:
-        logger.setLevel(logging.DEBUG)
-        try:
-            import debugpy  # type: ignore[unused-import]
 
-            logger.debug(f"Starting {args.environment} with python {sys.version}")
-            _, active_debug_port = debugpy.listen(args.debug_port)
-        except ImportError as ie:
-            logger.error("debugpy is not installed in this environment. Debugging is not available.")
-            logger.error(str(ie))
 
 def send_message(lock: threading.Lock, connection: Connection, message: dict):
     """Thread-safe sending of messages."""
@@ -234,18 +252,46 @@ def send_message(lock: threading.Lock, connection: Connection, message: dict):
         connection.send(message)
 
 
-def _remote_exception_payload(e: BaseException) -> dict:
+def _remote_exception_payload(
+    e: BaseException,
+    *,
+    active: set[int] | None = None,
+    depth: int = 0,
+) -> dict:
     exc_type = type(e)
-    return {
-        "module": exc_type.__module__,
-        "type_name": exc_type.__name__,
-        "qualified_name": getattr(exc_type, "__qualname__", exc_type.__name__),
-        "message": str(e),
-        "traceback": "".join(traceback.format_exception(exc_type, e, e.__traceback__, chain=False)),
-        "cause": _remote_exception_payload(e.__cause__) if e.__cause__ is not None else None,
-        "context": _remote_exception_payload(e.__context__) if e.__context__ is not None else None,
-        "suppress_context": bool(getattr(e, "__suppress_context__", False)),
-    }
+    seen = active if active is not None else set()
+    identity = id(e)
+    recursive = identity in seen
+    if not recursive:
+        seen.add(identity)
+    try:
+        if recursive or depth >= REMOTE_EXCEPTION_CHAIN_LIMIT:
+            cause = None
+            context = None
+        else:
+            cause = (
+                _remote_exception_payload(e.__cause__, active=seen, depth=depth + 1)
+                if e.__cause__ is not None
+                else None
+            )
+            context = (
+                _remote_exception_payload(e.__context__, active=seen, depth=depth + 1)
+                if e.__context__ is not None
+                else None
+            )
+        return {
+            "module": exc_type.__module__,
+            "type_name": exc_type.__name__,
+            "qualified_name": getattr(exc_type, "__qualname__", exc_type.__name__),
+            "message": str(e),
+            "traceback": "".join(traceback.format_exception(exc_type, e, e.__traceback__, chain=False)),
+            "cause": cause,
+            "context": context,
+            "suppress_context": bool(getattr(e, "__suppress_context__", False)),
+        }
+    finally:
+        if not recursive:
+            seen.remove(identity)
 
 
 def _failure_payload(
@@ -278,7 +324,7 @@ def _failure_payload(
 def handle_execution_error(
     lock: threading.Lock,
     connection: Connection,
-    e: Exception,
+    e: BaseException,
     task_id: str | None = None,
     *,
     call_target: str | None = None,
@@ -303,6 +349,7 @@ def handle_execution_error(
     )
     if task_id is not None:
         msg["task_id"] = task_id
+        msg["protocol_version"] = EXECUTION_PROTOCOL_VERSION
     send_message(lock, connection, msg)
     logger.debug("Error sent")
 
@@ -323,108 +370,300 @@ def _log_execution_failure(failure: dict) -> None:
     logger.log(level, f"{prefix}: {message}")
 
 
-def execute_function(message: dict, lock: threading.Lock | None = None, connection: Connection | None = None):
-    """Import a module and execute one of its functions."""
-    module_path = Path(message["module_path"])
-    logger.debug(f"Import module {module_path}")
-    module = _import_execution_module(module_path)
-    if not hasattr(module, message["function"]):
-        raise Exception(f"Module {module_path} has no function {message['function']}.")
-    args = message.get("args", [])
-    kwargs = message.get("kwargs", {})
-    task_id = message.get("task_id")
+def _resolve_qualified_attribute(value: object, qualname: str) -> object:
+    current = value
+    for component in qualname.split("."):
+        current = getattr(current, component)
+    if not callable(current):
+        raise TypeError(f"Resolved target {qualname!r} is not callable")
+    return current
 
-    # Inject RemoteTaskHandle if the function accepts a 'task' parameter
-    if task_id is not None and RemoteTaskHandle is not None and lock is not None and connection is not None:
-        func = getattr(module, message["function"])
-        try:
-            sig = inspect.signature(func)
-            if "task" in sig.parameters:
-                handle = RemoteTaskHandle(task_id, lock, connection)
-                _active_tasks[task_id] = handle
-                kwargs = dict(kwargs)
-                kwargs["task"] = handle
-        except (ValueError, TypeError):
-            pass
 
-    logger.info(f"Execute {message['module_path']}:{message['function']}({args})")
+def _resolve_protocol_target(target: dict[str, Any]) -> Callable[..., Any]:
+    target = validate_target(target)
+    kind = target.get("kind")
+    qualname = target.get("qualname")
+    if not isinstance(qualname, str) or not qualname:
+        raise ValueError("Execution target has an invalid qualname")
+    if kind == "import":
+        module_name = target.get("module")
+        if not isinstance(module_name, str) or not module_name:
+            raise ValueError("Import target has an invalid module")
+        module = importlib.import_module(module_name)
+        return cast(Callable[..., Any], _resolve_qualified_attribute(module, qualname))
+    if kind == "path":
+        raw_path = target.get("path")
+        if not isinstance(raw_path, str):
+            raise ValueError("Path target has an invalid path")
+        path = Path(raw_path).resolve(strict=True)
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        content = path.read_bytes()
+        content_hash = hashlib.sha256(content).hexdigest()
+        path_hash = hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+        cache = bool(target.get("cache", True))
+        module_key = (
+            f"_wetlands_path_{path_hash}_{content_hash}"
+            if cache
+            else f"_wetlands_path_{path_hash}_{content_hash}_{uuid.uuid4().hex}"
+        )
+        path_module = _path_modules.get(module_key) if cache else None
+        if path_module is None:
+            path_module = types.ModuleType(module_key)
+            path_module.__file__ = str(path)
+            path_module.__loader__ = None
+            path_module.__package__ = ""
+            sys.modules[module_key] = path_module
+            try:
+                exec(compile(content, str(path), "exec"), path_module.__dict__)
+            except BaseException:
+                sys.modules.pop(module_key, None)
+                raise
+            if cache:
+                previous_key = _path_module_keys.get(str(path))
+                if previous_key is not None and previous_key != module_key:
+                    _path_modules.pop(previous_key, None)
+                    sys.modules.pop(previous_key, None)
+                _path_modules[module_key] = path_module
+                _path_module_keys[str(path)] = module_key
+            else:
+                sys.modules.pop(module_key, None)
+        return cast(Callable[..., Any], _resolve_qualified_attribute(path_module, qualname))
+    raise ValueError(f"Unsupported execution target kind: {kind!r}")
+
+
+def execute_protocol_envelope(message: dict[str, Any], lock: threading.Lock, connection: Connection) -> None:
+    action, task_id = validate_task_message(message)
+    if action != "execute":
+        raise ValueError(f"Expected an execute envelope, got {action!r}")
+    raw_codecs = message.get("codecs")
+    if not isinstance(raw_codecs, list) or any(
+        not isinstance(item, dict)
+        or set(item) != {"id", "version"}
+        or not isinstance(item.get("id"), str)
+        or type(item.get("version")) is not int
+        for item in raw_codecs
+    ):
+        raise ValueError("Execution envelope has invalid codec capabilities")
+    offered_codecs = {(item["id"], item["version"]) for item in raw_codecs}
+    if len(offered_codecs) != len(raw_codecs):
+        raise ValueError("Execution envelope contains duplicate codec capabilities")
+    required_codecs = set(descriptor_codecs(message.get("args"), message.get("kwargs")))
+    if offered_codecs != required_codecs:
+        raise ValueError("Execution envelope codec capabilities do not match its value descriptors")
+    unsupported_codecs = required_codecs - set(SUPPORTED_CODECS)
+    if unsupported_codecs:
+        formatted = ", ".join(f"{codec}@{version}" for codec, version in sorted(unsupported_codecs))
+        raise ValueError(f"Worker does not support required task codecs: {formatted}")
+    attachments: list[object] = []
+    handle = RemoteTaskHandle(task_id, lock, connection)
+    with _active_tasks_lock:
+        if task_id in _active_tasks:
+            raise ValueError(f"Task {task_id!r} is already active")
+        _active_tasks[task_id] = handle
+    canceled = False
     try:
-        result = getattr(module, message["function"])(*args, **kwargs)
-    except SystemExit as se:
-        raise Exception(f"Function raised SystemExit: {se}\n\n")
-    except TypeError as e:
-        _raise_modern_annotation_error_if_needed(e, module_path)
-        raise
+        args = decode_value(message.get("args"), copy_arrays=True, path="args", attachments=attachments)
+        kwargs = decode_value(message.get("kwargs"), copy_arrays=True, path="kwargs", attachments=attachments)
+        if not isinstance(args, tuple) or not isinstance(kwargs, dict):
+            raise ValueError("Execution arguments decoded to invalid container types")
+        dispose_leases(attachments, unlink=False)
+        attachments.clear()
+        send_message(lock, connection, protocol_message("accepted", task_id))
+        function = _resolve_protocol_target(message.get("target", {}))
+        context_keyword = message.get("context_keyword")
+        if context_keyword is not None:
+            if not isinstance(context_keyword, str) or not context_keyword.isidentifier():
+                raise ValueError("Execution context keyword is invalid")
+            if context_keyword in kwargs:
+                raise ValueError(f"Execution context keyword {context_keyword!r} conflicts with kwargs")
+            signature = inspect.signature(function)
+            parameter = signature.parameters.get(context_keyword)
+            accepts_kwargs = any(
+                candidate.kind is inspect.Parameter.VAR_KEYWORD for candidate in signature.parameters.values()
+            )
+            if parameter is not None and parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+                raise TypeError(f"Execution target accepts {context_keyword!r} only positionally")
+            if parameter is None and not accepts_kwargs:
+                raise TypeError(f"Execution target does not accept context keyword {context_keyword!r}")
+            kwargs = dict(kwargs)
+            kwargs[context_keyword] = handle
+        result = function(*args, **kwargs)
+        canceled = handle.cancel_requested
+        if not canceled:
+            encoded_result, output_leases = encode_value(
+                result,
+                path="result",
+                lease_context=message.get("output_lease_context"),
+            )
     finally:
-        if task_id is not None:
+        with _active_tasks_lock:
             _active_tasks.pop(task_id, None)
-    logger.info("Executed")
-    return result
-
-
-def run_script(message: dict):
-    """Run a Python script via runpy.run_path(), simulating 'python script.py args...'."""
-    script_path = message["script_path"]
-    args = message.get("args", [])
-    run_name = message.get("run_name", "__main__")
-
-    sys.argv = [script_path] + list(args)
-    logger.info(f"Running script {script_path} with args {args} and run_name={run_name}")
+        dispose_leases(attachments, unlink=False)
+        with contextlib.suppress(Exception):
+            send_message(lock, connection, protocol_message("input_released", task_id))
+    if canceled:
+        send_message(lock, connection, protocol_message("canceled", task_id))
+        return
+    with _output_leases_lock:
+        _output_leases[task_id] = output_leases
     try:
-        runpy.run_path(script_path, run_name=run_name)
-    except TypeError as e:
-        _raise_modern_annotation_error_if_needed(e, script_path)
+        send_message(lock, connection, protocol_message("result_offer", task_id, result=encoded_result))
+    except BaseException:
+        with _output_leases_lock:
+            leases = _output_leases.pop(task_id, [])
+        dispose_leases(leases, unlink=True)
         raise
-    logger.info("Script executed")
-    return None
 
 
 def execution_worker(lock: threading.Lock, connection: Connection, message: dict):
-    """
-    Worker function handling both 'execute' and 'run' actions.
-    """
+    """Execute one versioned task envelope and report a structured failure."""
     task_id = message.get("task_id")
-    call_target = message.get("_call_target")
+    target = message.get("target")
+    call_target = None
+    if isinstance(target, dict):
+        if target.get("kind") == "import":
+            call_target = f"{target.get('module')}:{target.get('qualname')}"
+        elif target.get("kind") == "path":
+            call_target = f"{target.get('path')}:{target.get('qualname')}"
     try:
-        action = message["action"]
-        if action == "execute":
-            result = execute_function(message, lock, connection)
-        elif action == "run":
-            result = run_script(message)
-        else:
-            raise Exception(f"Unknown action: {action}")
-
-        response = dict(
-            action="execution finished",
-            message=f"{action} completed",
-            result=result,
-        )
-        if task_id is not None:
-            response["task_id"] = task_id
-        try:
-            send_message(lock, connection, response)
-        except Exception as e:
-            handle_execution_error(
-                lock,
-                connection,
-                e,
-                task_id=task_id,
-                call_target=call_target,
-                category="serialization",
-                serialization_context="result",
-            )
-    except Exception as e:
+        execute_protocol_envelope(message, lock, connection)
+    except BaseException as e:
         handle_execution_error(lock, connection, e, task_id=task_id, call_target=call_target)
 
 
-def get_message(connection: Connection) -> dict:
+def get_message(connection: Connection) -> dict[str, Any]:
     logger.debug("Waiting for message...")
-    return connection.recv()
+    message = connection.recv()
+    if not isinstance(message, dict):
+        raise ValueError("Worker control message must be an object")
+    return message
 
 
-def load_root_authkey(wetlands_instance_path: Path) -> bytes:
+def _quiesce_task_threads(task_threads: list[threading.Thread], timeout: float) -> bool:
+    with _active_tasks_lock:
+        handles = tuple(_active_tasks.values())
+    for handle in handles:
+        if hasattr(handle, "_set_cancel_requested"):
+            handle._set_cancel_requested()
+    deadline = time.monotonic() + timeout
+    for thread in task_threads:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    quiesced = not any(thread.is_alive() for thread in task_threads)
+    task_threads.clear()
+    return quiesced
+
+
+def load_root_authkey(root: Path) -> bytes:
     """Read the root-local multiprocessing auth key."""
-    return (Path(wetlands_instance_path).resolve() / "state" / "auth.key").read_bytes()
+    return (Path(root).resolve() / "state" / "auth.key").read_bytes()
+
+
+class _DebuggerState:
+    """Serialize lazy debug-adapter startup for one worker process."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._port: int | None = None
+
+    def start(self) -> int:
+        with self._lock:
+            if self._port is not None:
+                return self._port
+            try:
+                import debugpy  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise RuntimeError("debugpy is unavailable in the managed worker runtime") from error
+            debugpy.configure(subProcess=False)
+            endpoint = debugpy.listen((DEBUG_HOST, 0))
+            host, port = endpoint
+            if host != DEBUG_HOST or type(port) is not int or not (0 < port <= 65535):
+                raise RuntimeError("debugpy returned an invalid loopback endpoint")
+            self._port = port
+            logger.info("Debug adapter started on %s:%s", DEBUG_HOST, port)
+            return port
+
+    @property
+    def port(self) -> int | None:
+        with self._lock:
+            return self._port
+
+
+def _serve_management(
+    listener: Listener,
+    debugger: _DebuggerState,
+    identity: dict[str, object],
+) -> None:
+    """Serve the deliberately small debugger-management protocol."""
+    while True:
+        try:
+            connection_context = listener.accept()
+        except (AuthenticationError, EOFError):
+            logger.warning("Rejected unauthenticated or abandoned management client")
+            continue
+        except OSError:
+            return
+        with connection_context as connection:
+            try:
+                connection.send(
+                    {
+                        "action": "management_hello",
+                        "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                        **identity,
+                    }
+                )
+                if not connection.poll(5.0):
+                    raise TimeoutError("Timed out waiting for management request")
+                message = connection.recv()
+                if not isinstance(message, dict):
+                    raise ValueError("Management request must be an object")
+                if message.get("management_protocol_version") != MANAGEMENT_PROTOCOL_VERSION:
+                    raise ValueError("Management protocol version is incompatible")
+                if message.get("worker_id") != identity["worker_id"]:
+                    raise ValueError("Management request used the wrong worker ID")
+                action = message.get("action")
+                if action == "status":
+                    port = debugger.port
+                    connection.send(
+                        {
+                            "action": "status",
+                            "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                            **identity,
+                            "debugger": (
+                                None
+                                if port is None
+                                else {
+                                    "adapter": "debugpy",
+                                    "host": DEBUG_HOST,
+                                    "port": port,
+                                }
+                            ),
+                        }
+                    )
+                elif action == "start_debugger":
+                    port = debugger.start()
+                    connection.send(
+                        {
+                            "action": "debugger_started",
+                            "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                            **identity,
+                            "adapter": "debugpy",
+                            "host": DEBUG_HOST,
+                            "port": port,
+                        }
+                    )
+                else:
+                    raise ValueError(f"Unknown management action: {action!r}")
+            except Exception as error:
+                with contextlib.suppress(OSError, EOFError):
+                    connection.send(
+                        {
+                            "action": "error",
+                            "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                            **identity,
+                            "message": str(error),
+                        }
+                    )
 
 
 def launch_listener(
@@ -434,15 +673,82 @@ def launch_listener(
     startup_host: str | None = None,
     startup_port: int | None = None,
     startup_token: str | None = None,
-    debug_port: int | None = None,
+    environment_path: str | None = None,
+    generation_id: str | None = None,
+    recipe_hash: str | None = None,
+    pool_id: str | None = None,
+    worker_index: int | None = None,
+    worker_id: str | None = None,
+    commission_timeout: float | None = None,
+    commissioned: bool = False,
 ):
     """
-    Launches a listener on a random available port on localhost.
-    Waits for client connections and handles 'execute', 'run', or 'exit' messages.
+    Launch an authenticated listener on a random ``127.0.0.1`` port.
+    Handle versioned execution and lifecycle control messages.
     """
+    for field, value in {
+        "environment_path": environment_path,
+        "generation_id": generation_id,
+        "recipe_hash": recipe_hash,
+    }.items():
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{field} is required for the worker handshake")
+    if not isinstance(worker_id, str) or not worker_id:
+        raise ValueError("worker_id is required for the management handshake")
+    if type(worker_index) is not int or worker_index < 0:
+        raise ValueError("worker_index is required for the management handshake")
+    if persistent:
+        if not isinstance(pool_id, str) or not pool_id:
+            raise ValueError("pool_id is required for a persistent worker")
+        if type(worker_index) is not int or worker_index < 0:
+            raise ValueError("worker_index is required for a persistent worker")
+        if not commissioned and (not isinstance(commission_timeout, (int, float)) or commission_timeout <= 0):
+            raise ValueError("commission_timeout must be positive for an uncommissioned persistent worker")
+    hello = worker_hello(
+        codecs=SUPPORTED_CODECS,
+        python_version=platform.python_version(),
+        pid=os.getpid(),
+        environment_path=environment_path,
+        generation_id=generation_id,
+        recipe_hash=recipe_hash,
+    )
+    if persistent:
+        hello.update({"pool_id": pool_id, "worker_index": worker_index})
     lock = threading.Lock()
-    with Listener(("localhost", port), authkey=authkey) as listener:
+    debugger = _DebuggerState()
+    management_identity = {
+        "worker_id": worker_id,
+        "pid": os.getpid(),
+        "environment_path": environment_path,
+        "generation_id": generation_id,
+        "recipe_hash": recipe_hash,
+        "worker_runtime_version": WORKER_RUNTIME_VERSION,
+        "execution_protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "pool_id": pool_id,
+        "worker_index": worker_index,
+    }
+    with (
+        Listener((DEBUG_HOST, 0), authkey=authkey) as management_listener,
+        Listener((DEBUG_HOST, port), authkey=authkey) as listener,
+    ):
+        threading.Thread(
+            target=_serve_management,
+            args=(management_listener, debugger, management_identity),
+            daemon=True,
+            name="wetlands-worker-management",
+        ).start()
         task_threads: list[threading.Thread] = []
+        commission_event = threading.Event()
+        if commissioned:
+            commission_event.set()
+        elif persistent:
+            assert commission_timeout is not None
+            threading.Thread(
+                target=_watch_launcher_commission,
+                args=(commission_event, float(commission_timeout)),
+                daemon=True,
+                name="wetlands-launcher-loss-watchdog",
+            ).start()
         if startup_host is not None or startup_port is not None:
             if startup_host is None or startup_port is None:
                 raise ValueError("startup_host and startup_port must be provided together")
@@ -453,12 +759,11 @@ def launch_listener(
                 startup_port,
                 startup_token,
                 {
+                    **hello,
                     "event": STARTUP_EVENT,
                     "schema_version": STARTUP_SCHEMA_VERSION,
-                    "token": startup_token,
-                    "pid": os.getpid(),
                     "port": listener.address[1],
-                    "debug_port": debug_port,
+                    "management_port": management_listener.address[1],
                 },
             )
         if persistent:
@@ -473,75 +778,165 @@ def launch_listener(
                 return
             with connection_context as connection:
                 logger.debug(f"Connection accepted {listener.address}")
-                message = ""
+                send_message(lock, connection, hello)
+                message: dict[str, Any] = {}
                 try:
                     while True:
                         try:
                             message = get_message(connection)
                         except (EOFError, OSError):
                             logger.debug("Client connection closed")
-                            if persistent:
-                                for thread in task_threads:
-                                    thread.join()
-                                task_threads.clear()
+                            if _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE) and persistent:
                                 break
                             return
                         if not message:
-                            if persistent:
-                                for thread in task_threads:
-                                    thread.join()
-                                task_threads.clear()
+                            if _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE) and persistent:
                                 break
                             return
 
-                        logger.debug(f"Got message: {message}")
+                        target = message.get("target") if isinstance(message, dict) else None
+                        target_kind = target.get("kind") if isinstance(target, dict) else None
+                        target_name = None
+                        if isinstance(target, dict):
+                            target_name = target.get("module") or Path(str(target.get("path", ""))).name
+                        logger.debug(
+                            "Got action=%r task_id=%r target_kind=%r target=%r",
+                            message.get("action") if isinstance(message, dict) else None,
+                            message.get("task_id") if isinstance(message, dict) else None,
+                            target_kind,
+                            target_name,
+                        )
 
-                        if message["action"] in ("execute", "run"):
+                        if message["action"] == "execute":
+                            task_threads[:] = [thread for thread in task_threads if thread.is_alive()]
+                            if task_threads:
+                                raise RuntimeError("Worker received a second task while one is still active")
+                            with _output_leases_lock:
+                                if _output_leases:
+                                    raise RuntimeError(
+                                        "Worker received a new task before the prior result was released"
+                                    )
+                            validate_task_message(message)
                             logger.debug(f"Launch thread for action {message['action']}")
                             thread = threading.Thread(
                                 target=execution_worker,
                                 args=(lock, connection, message),
+                                daemon=True,
                             )
                             thread.start()
                             task_threads.append(thread)
 
                         elif message["action"] == "cancel":
-                            cancel_task_id = message.get("task_id")
-                            if cancel_task_id and cancel_task_id in _active_tasks:
-                                handle = _active_tasks[cancel_task_id]
+                            _action, cancel_task_id = validate_task_message(message)
+                            with _active_tasks_lock:
+                                handle = _active_tasks.get(cancel_task_id)
+                            if handle is not None:
                                 if hasattr(handle, "_set_cancel_requested"):
                                     handle._set_cancel_requested()  # type: ignore[attr-defined]
                                 logger.debug(f"Cancel requested for task {cancel_task_id}")
                             else:
                                 logger.debug(f"Cancel requested for unknown task {cancel_task_id}")
 
+                        elif message["action"] == "release":
+                            _action, release_task_id = validate_task_message(message)
+                            with _output_leases_lock:
+                                leases = _output_leases.pop(release_task_id, [])
+                            expected_names = {lease.name for lease in leases}
+                            raw_names = message.get("names")
+                            if not isinstance(raw_names, list) or not all(isinstance(name, str) for name in raw_names):
+                                dispose_leases(leases, unlink=True)
+                                raise ValueError("Result release contained invalid shared-memory names")
+                            received_names = set(raw_names)
+                            if received_names != expected_names:
+                                dispose_leases(leases, unlink=True)
+                                raise ValueError(
+                                    f"Result release for task {release_task_id} did not match the worker lease table"
+                                )
+                            dispose_leases(leases, unlink=True)
+                            send_message(
+                                lock,
+                                connection,
+                                protocol_message(
+                                    "released",
+                                    release_task_id,
+                                    names=sorted(expected_names),
+                                ),
+                            )
+
                         elif message["action"] == "exit":
+                            if message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION:
+                                raise ValueError("Exit request used an incompatible protocol")
                             logger.info("exit")
-                            send_message(lock, connection, dict(action="exited"))
+                            send_message(
+                                lock,
+                                connection,
+                                {
+                                    "action": "exited",
+                                    "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                                },
+                            )
                             listener.close()
                             return
 
                         elif message["action"] == "detach":
+                            if message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION:
+                                raise ValueError("Detach request used an incompatible protocol")
                             logger.info("detach")
                             if persistent:
-                                for thread in task_threads:
-                                    thread.join()
-                                task_threads.clear()
+                                if not _quiesce_task_threads(task_threads, 0.0):
+                                    raise RuntimeError("Cannot detach a worker with an active task")
                                 break
                             return
+                        elif message["action"] == "commission":
+                            if not persistent:
+                                raise RuntimeError("Cannot commission a nonpersistent worker")
+                            if message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION:
+                                raise ValueError("Commission request used an incompatible protocol")
+                            if message.get("pool_id") != pool_id:
+                                raise ValueError("Commission request used the wrong pool ID")
+                            commission_event.set()
+                            send_message(
+                                lock,
+                                connection,
+                                {
+                                    "action": "commissioned",
+                                    "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                                    "pool_id": pool_id,
+                                },
+                            )
+                        else:
+                            raise ValueError(f"Unknown worker control action: {message['action']!r}")
                 except Exception as e:
+                    quiesced = _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE)
                     handle_execution_error(lock, connection, e)
+                    if not quiesced:
+                        return
+                finally:
+                    with _output_leases_lock:
+                        abandoned = list(_output_leases.values())
+                        _output_leases.clear()
+                    for leases in abandoned:
+                        dispose_leases(leases, unlink=True)
+                if not persistent:
+                    return
 
 
 if __name__ == "__main__":
     assert args is not None
     launch_listener(
-        authkey=load_root_authkey(args.wetlands_instance_path),
+        authkey=load_root_authkey(args.root),
         persistent=args.persistent,
         startup_host=args.startup_host,
         startup_port=args.startup_port,
         startup_token=os.environ.get(STARTUP_TOKEN_ENV),
-        debug_port=active_debug_port,
+        environment_path=args.environment_path,
+        generation_id=args.generation_id,
+        recipe_hash=args.recipe_hash,
+        pool_id=args.pool_id,
+        worker_index=args.worker_index,
+        worker_id=args.worker_id,
+        commission_timeout=args.commission_timeout,
+        commissioned=args.commissioned,
     )
 
 logger.debug("Exit")

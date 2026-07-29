@@ -1,418 +1,159 @@
-# Debugging Wetlands Environments
+# Debugging running workers
 
-Wetlands provides built-in debugging tools that allow you to attach a debugger to an isolated environment and step through code execution in real-time. This is essential for development and troubleshooting when running code in isolated Conda environments.
+You do not need to enable a special debug mode before starting your application.
+Wetlands workers include the debug adapter as part of their managed runtime, but they do not start a debug listener until you request one.
 
-## Overview
+This supports the usual debugging workflow: run the application normally, notice a problem, attach a debugger to its existing worker, and reproduce the task.
 
-The debugging system includes:
+## Find the worker
 
-- **IDE Integration**: Support for VS Code and PyCharm
-- **Remote Debugging**: Attach to running environment processes
-- **Environment Management**: List and kill running environments
-- **Port Allocation**: Automatic debug port assignment for each environment
+List the live workers for an environment:
 
-## Installation
-
-The debugging tools are part of the Wetlands package and are automatically installed with:
-
-```bash
-pip install wetlands
+```console
+wetlands workers --root ./wetlands --environment analysis
 ```
 
-## Usage Commands
+The command reports each worker's stable runtime ID, pool index, process ID, pool, persistence, and debugger status.
 
-### 1. `wetlands list` - View Running Environments
+If only one worker is live, start its adapter with:
 
-List all currently running Wetlands environments and their debug ports.
-
-```bash
-wetlands list [-wip PATH]
+```console
+wetlands debug --root ./wetlands --environment analysis
 ```
 
-**Arguments:**
+If several workers are live, select the worker that runs the task:
 
-- `-wip, --wetlands_instance_path PATH` (optional): Path to the Wetlands instance folder (default: `wetlands`)
-
-**Example:**
-
-```bash
-$ wetlands list
-Running wetlands environments (for all wetlands instance):
-
-Command line | Process ID | Parent process ID
----
-python /path/to/wetlands/module_executor.py env1 --wetlands_instance_path path/to/wetlands | 12345 | 12340
-python /path/to/wetlands/module_executor.py env2 --wetlands_instance_path path/to/wetlands | 12346 | 12340
-
-Environments of the wetlands instance path/to/wetlands:
-
-Environment | Debug Port | Path
----
-env1 | 5678 | /path/to/module_executor.py
-env2 | 5679 | /path/to/module_executor.py
+```console
+wetlands debug \
+  --root ./wetlands \
+  --environment analysis \
+  --worker WORKER_ID
 ```
 
-This command displays:
+The command prints the loopback host and port accepted by the worker's `debugpy` adapter.
+Starting the adapter is idempotent: running the command again reports the same endpoint while that worker remains alive.
 
-- **Running processes**: All active Wetlands environment processes with their PIDs
-- **Available debug ports**: The port number assigned to each environment for debugging
-- **Module executor paths**: Where the module executor is located for each environment
+## Open VS Code
 
-### 2. `wetlands debug` - Attach Debugger to an Environment
+Wetlands can generate a VS Code workspace containing an attach configuration:
 
-Attach VS Code or PyCharm to a running Wetlands environment for debugging.
-
-```bash
-wetlands debug -s SOURCE_PATH -n ENV_NAME [-ide {vscode,pycharm}] [-wip PATH] [-jmc]
+```console
+wetlands debug \
+  --root ./wetlands \
+  --environment analysis \
+  --worker WORKER_ID \
+  --editor vscode \
+  --source .
 ```
 
-**Arguments:**
+The generated `.code-workspace` file is stored below the Wetlands root at `state/debug/workspaces/`.
+Wetlands does not create or overwrite `.vscode/launch.json` in your project.
 
-- `-s, --sources SOURCE_PATH` (required): Path to the source code directory you want to debug
-- `-n, --name ENV_NAME` (required): Name of the environment to debug
-- `-ide, --ide {vscode,pycharm}` (optional): IDE to use (default: `vscode`)
-- `-wip, --wetlands_instance_path PATH` (optional): Path to the Wetlands instance folder (default: `pixi/wetlands`)
-- `-jmc, --just_my_code` (optional, VS Code only): Only debug your source files, not library code
+Use `--no-launch` to generate the workspace without invoking the `code` command:
 
-**Example - VS Code:**
-
-```bash
-wetlands debug -s /path/to/my/project -n my_env
+```console
+wetlands debug \
+  --root ./wetlands \
+  --environment analysis \
+  --worker WORKER_ID \
+  --editor vscode \
+  --source . \
+  --no-launch
 ```
 
-**Example - PyCharm:**
+After VS Code opens, select the generated **Attach to Wetlands worker** configuration and start debugging.
+Set breakpoints, then make the application submit the problematic task again.
 
-```bash
-wetlands debug -s /path/to/my/project -n my_env -ide pycharm
+## Use another debugger
+
+Without `--editor`, the command prints a generic Debug Adapter Protocol endpoint:
+
+```text
+Adapter: debugpy
+Host: 127.0.0.1
+Port: 43123
 ```
 
-**Example - VS Code with Just My Code:**
+Configure a `debugpy`-compatible editor to attach to that host and port.
+The debug adapter listens only on the local loopback interface.
+It is not itself authenticated, so another process running on the same machine may be able to attach and control the worker.
 
-```bash
-wetlands debug -s /path/to/my/project -n my_env -jmc
-```
+## Reconnect after detaching
 
-#### What Happens When You Run `wetlands debug`
+The adapter belongs to the worker, not to the CLI process or editor session.
+It remains active until the worker exits.
 
-1. **Configuration Detection**: Wetlands searches for running processes matching the environment name
-2. **Port Discovery**: The debug port for the environment is read from `debug_ports.json` in the Wetlands instance directory
-3. **IDE Configuration**:
-   - **VS Code**: Creates/updates `.vscode/launch.json` with remote attach configuration
-   - **PyCharm**: Creates `.idea/runConfigurations/Remote_Attach_Wetlands.xml` with remote debugging configuration
-4. **IDE Launch**: Opens the specified IDE with the source directory
-5. **Debugger Connection**: The IDE connects to the remote debugger running in the isolated environment
+If the editor disconnects, run `wetlands debug` again and attach to the reported endpoint.
+Debugger access is independent of execution-controller ownership, so this works while the original application remains connected to the pool and continues dispatching tasks.
 
-### 3. `wetlands kill` - Stop an Environment
+A debugger cannot restore a Python stack that has already failed and unwound.
+After attaching, rerun or otherwise reproduce the failed operation.
+A currently blocked or long-running Python task can be inspected after attachment when the debugger can pause that thread.
 
-Terminate a running Wetlands environment and all its child processes.
+## Source files and warm workers
 
-```bash
-wetlands kill -n ENV_NAME [-wip PATH]
-```
-
-**Arguments:**
-
-- `-n, --name ENV_NAME` (required): Name of the environment to kill
-- `-wip, --wetlands_instance_path PATH` (optional): Path to the Wetlands instance folder (default: `pixi/wetlands`)
-
-**Example:**
-
-```bash
-wetlands kill -n my_env
-```
-
-## Debugging with VS Code
-
-### Setup and Debugging
-
-1. **Start your Wetlands environment** in your Python script:
+An editable local package is convenient during development because the source open in the editor has the same path as the module loaded in the Pixi environment:
 
 ```python
-from wetlands.environment_manager import EnvironmentManager
-
-env_manager = EnvironmentManager()
-env = env_manager.create("my_env", {"pip": ["numpy", "pandas"]})
-env.launch()
-
-# Your code here
-```
-
-2. **List available environments** to verify it's running:
-
-```bash
-wetlands list
-```
-
-3. **Attach the debugger** with VS Code:
-
-```bash
-wetlands debug -s /path/to/my/project -n my_env
-```
-
-4. **Set breakpoints** in VS Code and interact with your environment code
-
-5. **Stop debugging** when finished:
-
-```bash
-wetlands kill -n my_env
-```
-
-### Configuration Details
-
-The `launch.json` file created by Wetlands for VS Code contains:
-
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Python Debugger: Remote Attach Wetlands",
-      "type": "debugpy",
-      "request": "attach",
-      "just_my_code": false,
-      "connect": {
-        "host": "localhost",
-        "port": 5678
-      },
-      "pathMappings": [
-        {
-          "localRoot": "/path/to/module/executor",
-          "remoteRoot": "/path/to/module/executor"
-        }
-      ]
-    }
-  ]
-}
-```
-
-- **type**: Uses `debugpy` for Python debugging
-- **connect**: Specifies `localhost` and the assigned debug port
-- **just_my_code**: Set to `true` if you used the `-jmc` flag
-- **pathMappings**: Maps local source paths to remote paths in the environment
-
-## Debugging with PyCharm
-
-### Setup and Debugging
-
-1. **Start your Wetlands environment** in your Python script (same as VS Code)
-
-2. **Attach the debugger** with PyCharm:
-
-```bash
-wetlands debug -s /path/to/my/project -n my_env -ide pycharm
-```
-
-3. **Select the run configuration** in PyCharm:
-   - Look for "Remote_Attach_Wetlands" in the run configurations dropdown
-   - Click the Debug button
-
-4. **Set breakpoints** in PyCharm and interact with your environment code
-
-5. **Stop debugging** when finished:
-
-```bash
-wetlands kill -n my_env
-```
-
-### Configuration Details
-
-The XML configuration file created in `.idea/runConfigurations/Remote_Attach_Wetlands.xml` contains:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<component name="ProjectRunConfigurationManager">
-  <configuration name="Remote Attach Wetlands" type="Python"
-                 factoryName="Python" show_console_on_std_err="false"
-                 show_console_on_std_out="false">
-    <module name="$PROJECT_NAME" />
-    <option name="PATH_MAPPINGS">
-      <list>
-        <item index="0" itemvalue="/path/to/module/executor:/path/to/module/executor" />
-      </list>
-    </option>
-  </configuration>
-</component>
-```
-
-- Creates a Python remote debugging configuration
-- Path mappings ensure source code paths are correctly resolved
-
-## Workflow Example
-
-Here's a complete workflow for debugging a Wetlands environment:
-
-### 1. Create Your Project Structure
-
-```
-my_project/
-├── main.py              # Main script
-├── module_to_debug.py   # Code to debug
-└── requirements.txt     # Dependencies
-```
-
-### 2. Create the Main Script
-
-```python
-# main.py
 from pathlib import Path
-from wetlands.environment_manager import EnvironmentManager
 
-env_manager = EnvironmentManager("pixi/")
-env = env_manager.create(
-    "my_debug_env",
-    {"pip": ["requests", "numpy"]}
+from wetlands import EnvironmentSpec, LocalPackage
+
+spec = EnvironmentSpec(
+    python="3.12.*",
+    local=(LocalPackage(Path("."), editable=True),),
 )
-env.launch()
-
-# Import module and call function
-my_module = env.import_module("module_to_debug.py")
-result = my_module.process_data([1, 2, 3, 4, 5])
-
-print(f"Result: {result}")
-env.exit()
 ```
 
-### 3. Create the Module to Debug
+Editable installation is not required to start the debugger.
+For a non-editable package, open the source installed in the managed environment or configure the editor's local-to-remote source mapping.
+
+Normal Python import caching still applies in warm workers.
+Restart the worker pool after changing an installed module, or use `submit_path(..., cache=False)` for source files that should be reloaded on every call.
+
+With several workers, a reproduced task may run on a worker other than the one carrying the breakpoint.
+Use one worker while investigating routing-sensitive problems, or attach to each relevant worker separately.
+
+## Diagnose failures without an interactive debugger
+
+Provisioning operations expose their failed stage, sanitized command, return code, and bounded output tails:
 
 ```python
-# module_to_debug.py
-import numpy as np
+from wetlands import ProvisioningError
 
-def process_data(data):
-    """Process data with numpy"""
-    arr = np.array(data)
-    result = np.sum(arr) * 2
-    return int(result)  # Breakpoint here to inspect values
+operation = manager.provision("analysis", spec, replace_existing=True)
+
+try:
+    environment = operation.wait_for()
+except ProvisioningError as error:
+    print(error.failure.stage)
+    print(error.failure.command)
+    print(*error.failure.stderr_tail, sep="\n")
 ```
 
-### 4. Start Your Application
+Attach a listener before waiting to see live Pixi output:
 
-```bash
-python main.py
+```python
+operation.listen(lambda event: print(event.stage, event.message))
 ```
 
-### 5. Launch the Environment
+Execution failures retain the remote traceback and task context:
 
-Keep the main script running, and in another terminal:
-
-```bash
-wetlands list
+```python
+try:
+    result = task.wait_for()
+except Exception:
+    print(task.error)
+    print(task.traceback)
+    raise
 ```
 
-You'll see `my_debug_env` listed.
+A worker crash or protocol mismatch is reported separately from an exception raised by the target callable.
+Unhealthy workers are removed and replaced by the pool.
 
-### 6. Attach the Debugger
+## Trust model
 
-```bash
-# For VS Code:
-wetlands debug -s /path/to/my_project -n my_debug_env
-
-# Or for PyCharm:
-wetlands debug -s /path/to/my_project -n my_debug_env -ide pycharm
-```
-
-### 7. Debug Your Code
-
-- Set breakpoints in `module_to_debug.py`
-- Call functions from your main script
-- Step through code and inspect variables
-- VS Code/PyCharm will break at your breakpoints
-
-### 8. Clean Up
-
-When finished:
-
-```bash
-wetlands kill -n my_debug_env
-```
-
-## Troubleshooting
-
-### "Debug ports file does not exist"
-
-**Cause**: The Wetlands instance hasn't created the `debug_ports.json` file yet.
-
-**Solution**: Make sure your environment has been launched with `env.launch()` before running the debug command.
-
-### "Debug port not found for environment"
-
-**Cause**: The environment name doesn't exist or is spelled incorrectly.
-
-**Solution**:
-- Verify the environment is running: `wetlands list`
-- Check the exact environment name
-- Make sure you're using the correct `-wip` path if you have multiple Wetlands instances
-
-### "No wetlands process with environment name found"
-
-**Cause**: The specified environment is not currently running.
-
-**Solution**:
-- Start your Python script that creates and launches the environment
-- Keep the script running while debugging
-- Verify with `wetlands list`
-
-### Debugger doesn't break at breakpoints
-
-**Cause**: The source code path mapping might be incorrect.
-
-**Solution**:
-- Ensure the source path you provide to `wetlands debug` matches your actual source code location
-- Check the path mappings in the generated configuration file
-- Verify that the line numbers haven't changed since you set the breakpoint
-
-### "Kill environment: no process found"
-
-**Cause**: The environment is not currently running.
-
-**Solution**: This is usually not a problem. Verify with `wetlands list` that the environment isn't running, and proceed.
-
-## Advanced Usage
-
-### Debugging Multiple Environments
-
-You can debug multiple environments simultaneously by:
-
-1. Opening multiple IDE windows
-2. Using `wetlands debug` with different environment names
-3. Each environment gets its own debug port
-
-```bash
-# Terminal 1
-wetlands debug -s /project1 -n env1
-
-# Terminal 2
-wetlands debug -s /project2 -n env2
-```
-
-### Debugging with Custom Wetlands Instances
-
-If you have multiple Wetlands instances, specify the instance path:
-
-```bash
-wetlands debug -s /path/to/project -n my_env -wip /custom/wetlands/path
-```
-
-### VS Code Only: Just My Code Mode
-
-Debug only your code, skipping library internals:
-
-```bash
-wetlands debug -s /path/to/project -n my_env -jmc
-```
-
-This sets `just_my_code: true` in the VS Code launch configuration, which speeds up debugging by not stepping into library code.
-
-## How It Works Under the Hood
-
-1. **Process Detection**: Wetlands uses `psutil` to find running processes matching your environment
-2. **Port Assignment**: Each module executor reports its debug port during the Wetlands startup callback, and Wetlands stores that port in `debug_ports.json`
-3. **Debugpy Integration**: The environment's module executor runs `debugpy` in socket mode
-4. **IDE Configuration**: Wetlands generates IDE-specific configuration files for remote attach
-5. **Network Connection**: Your IDE connects via localhost to the debug port in the isolated environment
-
-## See Also
-
-- [Getting Started](getting_started.md) - Basic Wetlands usage
-- [Manual communication](manual_communication.md) - Low-level control over environment processes
-- [How It Works](how_it_works.md) - Internal architecture
+Debugger attachment allows inspection and modification of code running with the current user's privileges.
+The worker management request is authenticated, but the resulting debug adapter is a loopback service for trusted local use.
+Another local process may be able to attach to that adapter and control the worker.
+Do not expose its port outside the local machine or use it on a machine where other users or processes are not trusted.

@@ -1,193 +1,90 @@
-# Sharing memory among processes
+# Values and NumPy arrays
 
-The Python [`multiprocessing.shared_memory`](https://docs.python.org/3/library/multiprocessing.shared_memory.html) module enables to share memory among processes.
-The `shared_memory_standalone.py` script below demonstrates this.
+Wetlands transports NumPy arrays automatically through its value codec protocol.
+Application and worker code exchange normal `numpy.ndarray` objects and never manage shared-memory handles.
 
-Wetlands provides [NDArray][wetlands.ndarray.NDArray] to automatically convert numpy arrays to shared memory objects and send them between environments. 
-This requires to install Wetlands in the external environment. The `shared_memory_return_ndarray.py` and `shared_memory_provide_ndarrays.py` scripts below demonstrate this.
-
-In short:
-```python
-
-import numpy as np
-from wetlands.environment_manager import EnvironmentManager
-from wetlands.ndarray import NDArray
-
-environment_manager = EnvironmentManager()
-
-env = environment_manager.create("numpy", {"pip":["wetlands>=0.4.8", "numpy==2.2.4"]})
-env.launch()
-
-minimal_module = env.import_module("minimal_module.py")
-
-# Create the shared_memory.SharedMemory shm from the numpy array
-array = NDArray(np.array([1,2,3]))
-result = minimal_module.sum(array)
-
-print(f"Sum of {array} is {result}.")
-
-# Release the shared memory: calls shm.unlink(), shm.close() (optionally unregisters it)
-array.dispose()
-env.exit()
-```
-
-with `example_module.py` as follow:
+## Example
 
 ```python
-def sum(x):
-    import numpy as np
-    result = int(np.sum(x.array))
-    return result
-```
-
-
-!!! note
-    You can find more shared memory helpers in the [`ndarray` module][wetlands.ndarray] module.
-
-## Standalone example
-
-Fist, let see the use of shared memory without the Wetlands NDArray helper. No need to install wetlands in the external environment.
-
-!!! note
-
-    You need to install `numpy` to run this example, since it is used to save the resulting masks stored in the shared memory.
-
-It will use `shared_memory_standalone_module.py` to create the segmentation and the shared memory holding the resulting masks.
-
-This module defines two functions:
-
-- a `segment` function which uses the `segment` function of `example_module.py` and creates a NumPy array backed by a shared memory to store the resulting masks,
-
-- a `clean` function to clean up, free and release the shared memory block.
-
-```python
-{% include "../examples/shared_memory_standalone_module.py" %}
-```
-
-The `shared_memory_standalone.py` script creates an environment using the initialization function from `getting_started.py`.
-
-`shared_memory_standalone.py`
-```python
-from multiprocessing import shared_memory
 import numpy as np
 
-import getting_started
+image = np.arange(256, dtype=np.float32).reshape(16, 16)
 
-# Create a Conda environment from getting_started.py
-image_path, env = getting_started.initialize()
+with environment.start() as pool:
+    masks = pool.execute_import(
+        "worker_package.segmentation:segment",
+        kwargs={"image": image, "threshold": 0.5},
+    )
+
+assert isinstance(masks, np.ndarray)
 ```
 
-Then, it imports `shared_memory_standalone_module.py` to perform a `cellpose` segmentation, and creates a shared memory for the resulting masks.
+Worker code is ordinary Python:
 
 ```python
-
-# Import shared_memory_module in the environment
-shared_memory_module = env.import_module("shared_memory_standalone_module.py")
-# run env.execute(module_name, function_name, args)
-masks_shape, masks_dtype, shm_name = shared_memory_module.segment(image_path)
+def segment(image: "numpy.ndarray", threshold: float) -> "numpy.ndarray":
+    image[...] = image / image.max()
+    return image > threshold
 ```
 
-This shared memory can now be used in the main process, for example to save the masks as a numpy binary file:
-Note that the created numpy array uses the shared memory buffer, so it will be freed when the shared memory will be unlinked.
-Accessing the array once the shared memory is unlinked will cause a segmentation fault.
+Worker mutation does not modify the caller's original array.
+The result returned to the host is independently owned and remains valid after task and pool cleanup.
 
-```python
+## Supported values
 
-# Save the segmentation from the shared memory
-shm = shared_memory.SharedMemory(name=shm_name)
-# Unregister since it will be unlinked in the shm.close() call
-try:
-    resource_tracker.unregister(shm._name, "shared_memory")  # type: ignore
-except Exception:
-    pass  # Silently ignore if unregister fails
+The core codec supports:
 
-# Or use track=False with python>3.13
-# shm = shared_memory.SharedMemory(name=shm_name, track=False)
+- `None`;
+- booleans;
+- integers;
+- floats;
+- strings;
+- bytes;
+- nested lists, tuples, and dictionaries;
+- NumPy arrays.
 
-# This create a numpy array from the shared memory buffer (no data copy)
-masks = np.ndarray(masks_shape, dtype=masks_dtype, buffer=shm.buf)
-segmentation_path = image_path.parent / f"{image_path.stem}_segmentation.bin"
-masks.tofile(segmentation_path)
+Dictionary keys must be simple scalar values.
+Cyclic containers are rejected.
+Unsupported objects raise `ValueEncodingError` and identify the path to the unsupported value.
 
-# Clean up the shared memory in this process
-shm.close()
+## NumPy rules
 
-# Clean up the shared memory in the other process
-shared_memory_module.clean()
-# Warning: now masks is free, so print(masks[0]) creates a segmentation fault!
+- Object-dtype arrays are rejected.
+- Non-contiguous arrays are converted to C-contiguous transport storage.
+- Structured dtypes are preserved.
+- Empty arrays do not allocate shared memory.
+- Workers receive writable, private C-contiguous copies detached from input transport storage.
+- Host results are copied before the output transport resource is released.
 
-# Clean up and exit the environment
-env.exit()
-```
+Install NumPy in both the host environment and any worker environment that exchanges arrays.
 
-!!! note
+## Ownership
 
-    When a process attaches to an existing SharedMemory object on Python versions before 3.13, the multiprocessing resource_tracker incorrectly registers the shared-memory name as if the process had created it. When the process exits, the tracker will then try to unlink the shared memory, even though it does not own it. This can cause premature deletion, warnings about leaked resources, and FileNotFoundError in the real owner.
+For an input array:
 
-    Calling: 
+1. the host allocates and owns shared memory;
+2. the worker attaches to it and closes its view after execution;
+3. the host unlinks it when the task becomes terminal.
 
-        `resource_tracker.unregister(shm._name, "shared_memory")`
+For a result array:
 
+1. the worker allocates and owns shared memory;
+2. the host attaches, copies the array, and acknowledges receipt;
+3. the worker unlinks the segment and acknowledges release.
 
-    removes the child’s false registration so it will not attempt to unlink the shared memory at shutdown.
-    On Python 3.13+, this is no longer necessary because you can use:
+The same lease cleanup paths cover dispatch failure, cancellation, timeout, disconnection, and worker death.
+Wetlands handles Python resource-tracker behavior internally, including the different attachment API available in newer Python releases.
 
-        `SharedMemory(name=..., track=False)`
+## Intermediate values
 
+Progress metadata and named intermediate outputs should remain small simple values.
+Array-valued intermediate outputs are not supported in Wetlands 2 because their lifetime is not tied to a single terminal result acknowledgement.
 
-    which prevents the resource from being tracked in the first place.
+## Extensibility
 
-!!! note
+The execution envelope identifies codecs by ID and version.
+Worker startup reports its supported codec capabilities and execution-protocol version.
+The host fails before dispatch when required capabilities are unavailable.
 
-    Changes to the shared memory made by one process will be refelcted in the other process. You can update the memory from both processes and perform more sofisticated operations.
-
-## NDArray examples
-
-This requires to install Wetlands in the external environment.
-
-NDArray is a helper class that:
-
-- Stores a NumPy array backed by a SharedMemory block.
-- On pickling, becomes a small JSON-serializable dict `{"name": shm.name, "shape": ..., "dtype": ...}`.
-- On unpickling, automatically recreates the NDArray instance and re-attaches to the shared memory buffer.
-- It can also be initialized with a shape and a dtype, in which case the underlying numpy array will be created on demand (when accessing the `NDArray.array` property) but not initialized!
-
-!!! warning "Always initialize the values!"
-
-    When initialized with a shape and a dtype, the values of the numpy array will be UNDEFINED!
-    you MUST set `array.fill(0)` or `array[:] = otherArray` before using it.
-
-!!! warning "Copy the array before unlinking!"
-
-    When initialized with a shape and a dtype, or when unpickled, the numpy array is made from the shared memory buffer!
-    This means that the numpy array is freed when the shared memory is unlinked; accessing it will cause a segmentation fault!
-
-### Return the shared memory
-
-The equivalent example with the NDArray helper is pretty straight-forward:
-
-`shared_memory_return_ndarray.py`:
-```python
-{% include "../examples/shared_memory_return_ndarray.py" %}
-```
-
-And `shared_memory_return_ndarray_module.py`:
-```python
-{% include "../examples/shared_memory_return_ndarray_module.py" %}
-```
-
-### Provide the shared memory
-
-You can also provide the shared memory objects, which can be a bit easier:
-
-`shared_memory_provide_ndarrays.py`:
-```python
-{% include "../examples/shared_memory_provide_ndarrays.py" %}
-```
-
-And `shared_memory_provide_ndarrays_module.py`:
-```python
-{% include "../examples/shared_memory_provide_ndarrays_module.py" %}
-```
-
-Note that the memory is allocated in the parent process and filled in the child process. There is no duplication of data for the segmentation.
+The initial codec boundary is intentionally small.
+Additional array or storage technologies can be introduced later without changing task semantics.

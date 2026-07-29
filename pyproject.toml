@@ -1,18 +1,16 @@
 [project]
 name = "wetlands"
-version = "1.1.6"
-description = "Wetlands is a lightweight library to create conda environment and execute code inside them."
+version = "2.0.0"
+description = "Create isolated Pixi environments and run Python functions without dependency conflicts."
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "tomli>=2.0; python_version < '3.11'",
     "typing-extensions>=4.0; python_version < '3.11'",
-    "tomli>=1.0; python_version < '3.11'",
     "psutil>=6.1.0",
-    "pyyaml>=6.0.2",
-    "send2trash>=1.8.3",
-    "json5>=0.12.1",
     "packaging>=24.2",
 ]
 classifiers = [
@@ -22,10 +20,21 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
 ]
 
+[project.urls]
+Homepage = "https://arthursw.github.io/wetlands/latest/"
+Documentation = "https://arthursw.github.io/wetlands/latest/"
+Repository = "https://github.com/arthursw/wetlands"
+Issues = "https://github.com/arthursw/wetlands/issues"
+Changelog = "https://github.com/arthursw/wetlands/blob/main/CHANGELOG.md"
+
 [project.scripts]
-wetlands = "wetlands.main:main"
+wetlands = "wetlands.cli:main"
 
 [build-system]
 build-backend = "hatchling.build"
@@ -33,9 +42,31 @@ requires = ["hatchling"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wetlands"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/examples",
+    "/scripts",
+    "/tools",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/README.md",
+    "/SECURITY.md",
+    "/Wetland.png",
+    "/mkdocs.yml",
+    "/pyproject.toml",
+    "/uv.lock",
+]
 exclude = [
+    "/site",
+    "/dist",
+    "/.vscode",
     "/.venv",
     "/.venv-*",
+    "/.worktrees",
 ]
 
 [project.optional-dependencies]
@@ -50,11 +81,8 @@ docs = [
 ]
 
 shared-memory = [
-    "numpy>=1.26",
-]
-debug = [
-    "debugpy>=1.8.17",
-    "json5>=0.12.1"
+    "numpy>=1.26; python_version < '3.14'",
+    "numpy>=2.3.3; python_version >= '3.14'",
 ]
 
 [dependency-groups]
@@ -65,7 +93,9 @@ dev = [
     "pytest-mock>=3.14.0",
     "ruff>=0.16.0",
     "types-psutil>=6.1.0.20241221",
-    "types-pyyaml>=6.0.12.20241230",
+]
+release = [
+    "twine>=6.1.0",
 ]
 
 [tool.ruff]
@@ -79,12 +109,11 @@ ignore = ["E701", "F541"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "integration: real external environments, pixi/micromamba commands, worker processes, or package installs",
+    "integration: real Pixi environments, worker processes, or package installs",
     "agent_integration: representative integration subset suitable for agent validation after broad changes",
     "compat: cross-Python compatibility tests, especially Python 3.9 subprocess runs",
     "manual: complete, expensive, or flaky-by-nature tests for local/manual/scheduled runs",
     "slow: non-manual tests expected to take noticeably longer than unit tests",
-    "micromamba: mark test as micromamba-specific",
 ]
 log_cli = true
 log_cli_level = "DEBUG"

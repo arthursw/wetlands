@@ -1,4 +1,2 @@
-def sum(x):
-    import numpy as np  # type: ignore
-
-    return int(np.sum(x))
+def sum_values(values: list[int]) -> int:
+    return sum(values)

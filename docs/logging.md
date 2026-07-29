@@ -1,348 +1,97 @@
-# Wetlands Logging Guide
+# Events and logging
 
-Wetlands provides a comprehensive logging system that tracks operations across environments with rich context metadata. This guide shows you how to integrate and customize logging in your applications.
+Wetlands exposes lifecycle and execution activity through operation events, task events, and standard Python logging.
 
-## Table of Contents
+Applications should use structured events for user-facing activity and logging for diagnostics.
 
-- [Overview](#overview)
-- [Log Context](#log-context)
-- [Basic Usage](#basic-usage)
-- [Advanced Examples](#advanced-examples)
-  - [Filtering Logs by Context](#filtering-logs-by-context)
-  - [Per-Execution Log Files](#per-execution-log-files)
-  - [GUI Integration](#gui-integration)
-
----
-
-## Overview
-
-Wetlands automatically logs all operations (environment creation, installation, execution) with rich context metadata:
-
-- By default, manager logs are written to `"wetlands/wetlands.log"` when using `EnvironmentManager`
-- Worker process logs are written to `"wetlands/environments.log"`
-- Relative log paths are resolved inside the `wetlands_instance_path`; absolute log paths are used as provided
-- Use `wetlands.logger.enable_console_logging()` to enable console output with `DEBUG`/`INFO` on stdout and `WARNING`/`ERROR`/`CRITICAL` on stderr
-- Most logs include context fields (environment name, operation type, etc.)
-- ProcessLogger reads subprocess stdout and stderr in background threads. Stdout lines are emitted as `INFO` progress logs and follow the stdout path; stderr lines are emitted as `ERROR` logs and follow the stderr path.
-
-!!! note
-    By default, `execute_commands()` functions read process stdout and stderr in background threads via ProcessLogger. If you need to read stdout manually, pass `log=False` to disable automatic logging; in that mode the default subprocess stderr stream remains merged into stdout unless you pass custom `popen_kwargs`.
-
-## Log Context
-
-Every log record in Wetlands includes metadata that helps track operations. This metadata is stored in the LogRecord's attributes and can be accessed via custom handlers and filters.
-
-1. **Global** - General application operations
-   ```python
-   {
-       "log_source": "global",
-       "stage": None
-   }
-   ```
-
-2. **Environment** - Environment creation, installation, launching
-   ```python
-   {
-       "log_source": "environment",
-       "env_name": "cellpose",           # Environment name
-       "stage": "create"                 # One of: "create", "install", "launch"
-   }
-   ```
-
-3. **Execution** - Function/script execution within environments
-   ```python
-   {
-       "log_source": "execution",
-       "env_name": "cellpose",
-       "call_target": "segment:detect",  # Format: "module:function" or "script.py"
-       "stream": "stdout"                # Present on ProcessLogger records; "stdout" or "stderr"
-   }
-   ```
-
-## Basic Usage
-
-### Default Behavior
-
-By default, when you create an `EnvironmentManager`, it automatically enables logging to `"wetlands/wetlands.log"`. Worker processes launched with `env.launch()` also write their own log stream to `"wetlands/environments.log"`:
+## Provisioning activity
 
 ```python
-from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import enable_console_logging
+from wetlands import OperationEventKind
 
 
-# To enable console logging: routine progress goes to stdout, warnings/errors go to stderr
-enable_console_logging()
+def report(event) -> None:
+    if event.kind is OperationEventKind.OUTPUT:
+        print(f"[{event.stage}:{event.stream}] {event.line}")
+    else:
+        print(f"[{event.kind.value}] {event.message}")
 
 
-# Logs are automatically written to "wetlands/wetlands.log"
-env_manager = EnvironmentManager()
-# Change log path with:
-# env_manager = EnvironmentManager(log_file_path=Path("my_logs/operation.log"))
-# Disable file logging with:
-# env_manager = EnvironmentManager(log_file_path=None)
-env = env_manager.create("cellpose", {"conda": ["cellpose==3.1.0"]})
-env.launch()
-
-# Manager logs are written to wetlands/wetlands.log
-# Worker logs are written to wetlands/environments.log, including both stdout and stderr paths
+operation = manager.provision("analysis", spec)
+operation.listen(report)
+environment = operation.wait_for()
 ```
 
-## Advanced Examples
+Each event includes its operation ID, sequence, timestamp, state, kind, and message.
+Provisioning events may also identify a logical stage, step, stream, output line, or progress position.
 
-### Per-Execution Log Files
+Listener callbacks may run on Wetlands background threads.
+GUI applications must forward them through their toolkit's thread-safe signaling mechanism.
 
-Capture logs from individual function/script executions to separate files. Here's a simple context manager that routes all logs during execution to a file:
+## Async activity
 
 ```python
-from pathlib import Path
-from contextlib import contextmanager
-from wetlands.environment_manager import EnvironmentManager
-import logging
+operation = manager.provision("analysis", spec)
 
-@contextmanager
-def capture_execution_logs(output_file: Path):
-    """Context manager to capture all logs during execution to a file."""
-    logger = logging.getLogger("wetlands")
-    handler = logging.FileHandler(output_file)
-    handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-    logger.addHandler(handler)
+async for event in operation.events():
+    activity_model.update(event)
 
-    try:
-        yield
-    finally:
-        logger.removeHandler(handler)
-        handler.close()
-
-# Usage: route logs from different executions to different files
-env_manager = EnvironmentManager()
-env = env_manager.create("analysis", {"conda": ["pandas", "scikit-learn"]})
-env.launch()
-
-with capture_execution_logs(Path("preprocess.log")):
-    env.execute("analysis.py", "preprocess", args=("data.csv",))
-
-with capture_execution_logs(Path("train.log")):
-    env.execute("analysis.py", "train_model", args=(50,))
-
-with capture_execution_logs(Path("evaluate.log")):
-    env.execute("analysis.py", "evaluate")
+environment = await operation
 ```
 
-You can also use Wetlands ProcessLogger:
+The stream replays available operation history by default and closes after its terminal event.
+
+## Execution task events
 
 ```python
+task = pool.submit_import("analysis_package.pipeline:run", args=(data,))
 
-# Retrieve the ProcessLogger that was created by execute_commands
-process_logger = self.environment_manager.get_process_logger(env.process)
 
-# Subscribe to the process output
-def check_output(line: str, _context: dict) -> None:
-    if "Special message" in line:
-        print(line)
+def on_task_event(event) -> None:
+    print(event.kind.value, event.message, event.progress)
 
-# Be aware of the include_history arg to apply the callback on the entire log history, or only the futur logs
-process_logger.subscribe(check_output, include_history=False)
 
-# Wait for a custom application log line with timeout
-def ready_predicate(line: str) -> bool:
-    return "Custom server ready" in line
-
-ready_line = process_logger.wait_for_line(ready_predicate, timeout=30)
-
-if ready_line:
-    print(ready_line)
-
+task.listen(on_task_event)
+result = task.wait_for()
 ```
 
-If you want to capture only logs from a specific execution (filtering by `call_target`), use a filter:
+Worker code can publish progress through an explicitly requested runtime context:
 
 ```python
-@contextmanager
-def capture_execution_logs_filtered(env_name: str, call_target: str, output_file: Path):
-    """Context manager that captures only logs from a specific execution."""
-    logger = logging.getLogger("wetlands")
-    handler = logging.FileHandler(output_file)
-    handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-
-    def filter_execution(record):
-        return (getattr(record, "log_source") == "execution" and
-            getattr(record, "env_name") == env_name and
-            getattr(record, "call_target") == call_target
-        )
-
-    handler.addFilter(filter_execution)
-    logger.addHandler(handler)
-
-    try:
-        yield
-    finally:
-        logger.removeHandler(handler)
-        handler.close()
-
-# Usage with filtering
-with capture_execution_logs_filtered("analysis", "preprocess:run", Path("preprocess.log")):
-    env.execute("preprocess.py", "run", args=("data.csv",))
+def run(items, task=None):
+    for index, item in enumerate(items):
+        process(item)
+        if task is not None:
+            task.update(
+                "Processing",
+                current=index + 1,
+                maximum=len(items),
+            )
 ```
 
-### Filtering Logs by Context
+Pass `context_keyword="task"` to `submit_import()` or `submit_path()` to request this injection.
 
-Route different log types to separate files:
+## Python logging
+
+Wetlands uses the `wetlands` logger hierarchy.
+The host application decides which handlers, formatters, and destinations to install.
 
 ```python
 import logging
-from pathlib import Path
-from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import enable_file_logging
 
-# Enable main log file
-enable_file_logging(Path("wetlands.log"))
-
-# Get the wetlands logger
-logger = logging.getLogger("wetlands")
-
-# Create separate handlers for different log sources
-env_handler = logging.FileHandler("environment.log")
-exec_handler = logging.FileHandler("execution.log")
-
-# Create filters
-def filter_environment(record):
-    return getattr(record, "log_source", None) == "environment"
-
-def filter_execution(record):
-    return getattr(record, "log_source", None) == "execution"
-
-# Add filters and attach handlers
-env_handler.addFilter(filter_environment)
-exec_handler.addFilter(filter_execution)
-
-logger.addHandler(env_handler)
-logger.addHandler(exec_handler)
-
-# Now operations are routed to appropriate files
-env_manager = EnvironmentManager()
-env = env_manager.create("analysis", {"conda": ["numpy", "pandas"]})  # → environment.log
-env.launch()                                                            # → environment.log
-result = env.execute("process.py", "analyze", args=("data.csv",))     # → execution.log
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logging.getLogger("wetlands").setLevel(logging.DEBUG)
 ```
 
-**Result:**
-```
-wetlands.log      # All logs (environment + execution)
-environment.log   # Only environment operations
-execution.log     # Only function/script executions
-```
+Do not attach handlers that assume they run on the application's UI thread.
 
-### GUI Integration
+## Sensitive values
 
-Display real-time logs in a GUI. **Important:** Log callbacks run in background threads, so use thread-safe mechanisms.
+Provisioning events and structured failures use sanitized command displays.
+Common credentials in URLs, tokens, passwords, authorization values, and proxies are redacted from captured commands and subprocess output.
 
-**Tkinter Example:**
-```python
-import tkinter as tk
-from tkinter.scrolledtext import ScrolledText
-from queue import Queue
-import threading
-
-from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import attach_log_handler
-
-class LogViewer:
-    def __init__(self, root):
-        self.root = root
-        self.log_queue = Queue()  # Thread-safe queue
-
-        self.log_text = ScrolledText(root, height=20, width=80)
-        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # Attach logging handler - runs in background thread
-        attach_log_handler(self.on_log)
-
-        # Poll queue from main thread
-        self.poll_queue()
-
-    def on_log(self, message):
-        """Called from ProcessLogger thread - queue the message."""
-        self.log_queue.put(message)
-
-    def poll_queue(self):
-        """Process queued messages on main thread."""
-        try:
-            while True:
-                message = self.log_queue.get_nowait()
-                self.log_text.insert("end", f"{message}\n")
-                self.log_text.see("end")
-        except:
-            pass
-        # Poll again after 100ms
-        self.root.after(100, self.poll_queue)
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    root.title("Wetlands Operations")
-    viewer = LogViewer(root)
-
-    # Run operations in background thread
-    def run_ops():
-        env_mgr = EnvironmentManager()
-        env = env_mgr.create("demo", {"conda": ["numpy"]})
-        env.launch()
-        env.execute("script.py", "main")
-
-    threading.Thread(target=run_ops, daemon=True).start()
-    root.mainloop()
-```
-
-**PyQt6 Example:**
-```python
-from PyQt6.QtWidgets import QApplication, QMainWindow, QTextEdit
-from PyQt6.QtCore import pyqtSignal, QObject
-import threading
-
-from wetlands.environment_manager import EnvironmentManager
-from wetlands.logger import attach_log_handler
-
-class LogSignals(QObject):
-    log_signal = pyqtSignal(str)  # Signal for thread-safe communication
-
-class LogViewer(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.signals = LogSignals()
-        self.text_edit = QTextEdit()
-        self.setCentralWidget(self.text_edit)
-        self.setWindowTitle("Wetlands Operations")
-        self.setGeometry(100, 100, 800, 600)
-
-        # Connect signal to slot (main thread)
-        self.signals.log_signal.connect(self.append_log)
-
-        # Attach handler - runs in background thread
-        attach_log_handler(self.on_log)
-
-    def on_log(self, message):
-        """Called from ProcessLogger thread - emit signal."""
-        self.signals.log_signal.emit(message)
-
-    def append_log(self, message):
-        """Called on main thread (slot)."""
-        self.text_edit.append(message)
-
-if __name__ == "__main__":
-    app = QApplication([])
-    viewer = LogViewer()
-    viewer.show()
-
-    # Run operations in background
-    def run_ops():
-        env_mgr = EnvironmentManager()
-        env = env_mgr.create("demo", {"conda": ["numpy"]})
-        env.launch()
-        env.execute("script.py", "main")
-
-    threading.Thread(target=run_ops, daemon=True).start()
-    app.exec()
-```
-
-## Tips & Tricks
-
-4. **Be thread-safe** when updating UI from log callbacks - use queues or signals
+Applications must still avoid printing arbitrary secrets from their own post-install commands or worker functions.
+Use a `PostInstallCommand.display` value whenever a shell command contains sensitive expansion.

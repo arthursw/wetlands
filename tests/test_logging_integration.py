@@ -13,7 +13,6 @@ from wetlands.logger import (
     LOG_SOURCE_GLOBAL,
 )
 from wetlands._internal.process_logger import ProcessLogger
-from wetlands._internal.command_executor import CommandExecutor
 
 
 class TestLoggerConvenienceMethods:
@@ -338,110 +337,6 @@ class TestProcessLogger:
             base_logger.propagate = previous_propagate
 
 
-class TestCommandExecutor:
-    """Test CommandExecutor with logging integration."""
-
-    def test_command_executor_with_log_context(self):
-        """Test that CommandExecutor passes log context to ProcessLogger."""
-        executor = CommandExecutor()
-
-        records = []
-
-        class TestHandler(logging.Handler):
-            def emit(self, record):
-                records.append(record)
-
-        handler = TestHandler()
-        logger.logger.addHandler(handler)
-
-        try:
-            log_context = {"log_source": LOG_SOURCE_ENVIRONMENT, "env_name": "test_env", "stage": "install"}
-
-            # Execute simple command
-            process = executor.execute_commands(["echo 'test'"], log_context=log_context, wait=True)
-
-            # Wait for logging to complete
-            time.sleep(0.1)
-            if process.pid in executor._process_loggers:
-                process_logger = executor._process_loggers[process.pid]
-                if process_logger._reader_thread and process_logger._reader_thread.is_alive():
-                    process_logger._reader_thread.join(timeout=2)
-
-            # Verify context was propagated
-            if records:
-                for record in records:
-                    if getattr(record, "log_source", None) == LOG_SOURCE_ENVIRONMENT:
-                        assert getattr(record, "env_name", None) == "test_env"
-                        assert getattr(record, "stage", None) == "install"
-                # At minimum, verify we got output records
-                assert len(records) > 0
-        finally:
-            logger.logger.removeHandler(handler)
-
-    def test_command_executor_process_logger_splits_subprocess_stdout_and_stderr(self, capsys):
-        """Test command subprocess stdout and successful stderr logs both follow INFO/stdout."""
-        executor = CommandExecutor()
-        base_logger = logger.logger
-        previous_handlers = list(base_logger.handlers)
-        previous_level = base_logger.level
-        previous_propagate = base_logger.propagate
-        for handler in previous_handlers:
-            base_logger.removeHandler(handler)
-
-        try:
-            enable_console_logging(level=logging.INFO)
-            process = executor.execute_commands(
-                [
-                    "echo 'command progress'",
-                    "python -c \"import sys; print('command failure', file=sys.stderr)\"",
-                ],
-                wait=True,
-            )
-            process_logger = executor._get_complete_process_logger(process)
-            assert process_logger is not None
-
-            captured = capsys.readouterr()
-            assert "command progress" in captured.out
-            assert "command progress" not in captured.err
-            assert "command failure" in captured.out
-            assert "command failure" not in captured.err
-            assert "command progress" in process_logger.get_stdout_output()
-            assert "command failure" in process_logger.get_stderr_output()
-        finally:
-            for handler in list(base_logger.handlers):
-                base_logger.removeHandler(handler)
-                handler.close()
-            for handler in previous_handlers:
-                base_logger.addHandler(handler)
-            base_logger.setLevel(previous_level)
-            base_logger.propagate = previous_propagate
-
-    def test_command_executor_get_output(self):
-        """Test CommandExecutor.execute_commands_and_get_output() captures output correctly."""
-        executor = CommandExecutor()
-
-        output = executor.execute_commands_and_get_output(["echo 'line1'", "echo 'line2'"])
-
-        assert "line1" in output
-        assert "line2" in output
-
-    def test_command_executor_get_json_output(self):
-        """Test CommandExecutor.execute_commands_and_get_json_output() parses JSON."""
-        executor = CommandExecutor()
-
-        import json
-
-        test_data = {"key": "value", "number": 42}
-        json_str = json.dumps(test_data)
-
-        output = executor.execute_commands_and_get_json_output([f"echo '{json_str}'"])
-
-        # output is parsed JSON (could be dict or list depending on input)
-        assert isinstance(output, dict)
-        assert output["key"] == "value"  # type: ignore
-        assert output["number"] == 42  # type: ignore
-
-
 class TestFileLogging:
     """Test file logging functionality."""
 
@@ -470,47 +365,3 @@ class TestFileLogging:
 
         # File should exist and be writable
         assert log_file.exists()
-
-
-class TestLogContextPropagation:
-    """Test that log context is properly propagated through the system."""
-
-    def test_context_isolation_between_processes(self):
-        """Test that different processes have isolated log contexts."""
-        executor = CommandExecutor()
-
-        records_by_env = {"env1": [], "env2": []}
-
-        class ContextHandler(logging.Handler):
-            def emit(self, record):
-                env_name = getattr(record, "env_name", "unknown")
-                if env_name in records_by_env:
-                    records_by_env[env_name].append(record)
-
-        handler = ContextHandler()
-        logger.logger.addHandler(handler)
-
-        try:
-            # Execute commands in different contexts
-            process1 = executor.execute_commands(
-                ["python -c \"print('env1_output')\""], log_context={"env_name": "env1"}, wait=True
-            )
-
-            process2 = executor.execute_commands(
-                ["python -c \"print('env2_output')\""], log_context={"env_name": "env2"}, wait=True
-            )
-
-            time.sleep(0.2)
-
-            # Wait for reader threads
-            for pid in [process1.pid, process2.pid]:
-                if pid in executor._process_loggers:
-                    process_logger = executor._process_loggers[pid]
-                    if process_logger._reader_thread and process_logger._reader_thread.is_alive():
-                        process_logger._reader_thread.join(timeout=2)
-
-            # Verify contexts were maintained
-            assert len(records_by_env["env1"]) > 0
-            assert len(records_by_env["env2"]) > 0
-        finally:
-            logger.logger.removeHandler(handler)

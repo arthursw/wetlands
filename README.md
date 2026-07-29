@@ -3,297 +3,268 @@
 # Wetlands
 
 [![Wetlands tests](https://github.com/arthursw/wetlands/actions/workflows/ci.yml/badge.svg?event=push&branch=main)](https://github.com/arthursw/wetlands/actions/)
-[![Wetlands pypi](https://img.shields.io/pypi/v/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
-[![Wetlands python versions](https://img.shields.io/pypi/pyversions/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
+[![Wetlands PyPI](https://img.shields.io/pypi/v/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
+[![Wetlands Python versions](https://img.shields.io/pypi/pyversions/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
 
-**Wetlands** is a lightweight Python library for managing **Conda** environments.
+Wetlands is a Python library for creating isolated environments with [Pixi](https://pixi.sh/) and running Python functions inside them.
 
-**Wetlands** can create Conda environments on demand, install dependencies, and execute arbitrary code within them. This makes it easy to build *plugin systems* or integrate external modules into an application without dependency conflicts, as each environment remains isolated.
+This lets an application use libraries with incompatible dependencies at the same time.
+For example, [Cellpose](https://www.cellpose.org/) and [StarDist](https://github.com/stardist/stardist) can each run in their own environment while exchanging ordinary Python values and NumPy arrays with the main application.
 
-For example, if your application needs to use both [Stardist](https://github.com/stardist/stardist) and [Cellpose](https://www.cellpose.org/), installing them in the same environment may not work due to conflicting dependencies. With Wetlands, you can create a dedicated environment for each library and run them both as needed from your main script.
+Wetlands creates these environments when needed, installs their dependencies, keeps worker processes ready for repeated calls, and cleans up their resources automatically.
+It can be used in desktop applications, servers, and plugin systems.
 
-The name ***Wetlands*** comes from the tropical *environments* where anacondas thrive.
+> Wetlands is intended for code you trust.
+> Isolated environments prevent dependency conflicts, but they do not restrict what code can access on your computer.
 
-[Appose Python](https://github.com/apposed/appose-python) is a great alternative to Wetlands. It even provides the ability to run Java environments (see [Appose Java](https://github.com/apposed/appose-java)) and share memory between the Python world and the Java world.
-There are other minor differences between the two libraries. For example, Wetlands provides integrated debugging tools to attach VS Code or PyCharm to isolated environments for step-through debugging with breakpoints. See the [Debugging guide](https://arthursw.github.io/wetlands/latest/debugging/) for more information.
+Wetlands 2 provides:
 
----
+- side-effect-light manager construction;
+- observable and cancellable preparation and provisioning operations;
+- reproducible Pixi projects and `pixi.lock` files;
+- managed-environment discovery and safe asynchronous removal;
+- warm worker pools;
+- qualified installed-package targets and path targets for local development;
+- automatic transport of ordinary Python values and NumPy arrays;
+- blocking, callback-based, and `asyncio`-friendly execution.
 
-**Documentation:** https://arthursw.github.io/wetlands/latest/
+The first preparation may download a verified Pixi executable, and the first provisioning of an environment downloads its declared packages.
+These operations require network access and can take several minutes.
+Wetlands stores Pixi, managed environments, locks, and runtime state below the manager root you choose.
 
-**Source Code:** https://github.com/arthursw/wetlands/
-
----
-
-## ✨ Features
-
-- **Automatic Environment Management**: Create and configure environments on demand.
-- **Dependency Isolation**: Install dependencies without conflicts.
-- **Embedded Execution**: Run Python functions or scripts inside isolated environments, with both blocking and non-blocking (task-based) APIs.
-- **Task API**: Execute code asynchronously with progress reporting, cancellation, and event-driven callbacks.
-- **Parallel Execution**: Launch multiple worker processes sharing a single Conda environment and distribute work.
-- **Persistent Workers**: Keep trusted local workers alive and reconnect to them from a later `EnvironmentManager`.
-- **Integrated Debugging**: Debug code running in isolated environments using VS Code or PyCharm with breakpoints and step-through execution.
-- **Scoped Logs**: Keep manager and worker log files under the Wetlands instance directory by default.
-- **Pixi & Micromamba**: Wetlands uses either a self-contained `pixi` or `micromamba` for fast and lightweight Conda environment handling.
-
-## 📦 Installation
-
-To install **Wetlands**, simply use `pip`:
+## Installation
 
 ```sh
 pip install wetlands
 ```
 
-## 🚀 Usage Example
-
-Wetlands downloads its registered Pixi or Micromamba release when the configured installation is absent.
-When a Wetlands update changes that registered release, creating an `EnvironmentManager` detects the installed executable version and safely migrates it before use.
-Existing environments and manifests are preserved.
-The first start after such an update requires network access; if the verified replacement cannot be installed, Wetlands leaves the previous executable intact and refuses to use the mismatched version.
-
-```python
-from wetlands.environment_manager import EnvironmentManager
-
-# Initialize the environment manager
-environment_manager = EnvironmentManager()
-# Logs are stored under wetlands/ by default:
-# wetlands.log for manager operations and environments.log for worker processes.
-
-# Create and launch an isolated Conda environment named "numpy"
-env = environment_manager.create("numpy", {"pip": ["numpy==2.2.4"]})
-env.launch()
-
-# Import a module proxy and call functions in the environment
-minimal_module = env.import_module("minimal_module.py")
-result = minimal_module.sum([1, 2, 3])
-print(f"Result: {result}")
-
-# Or use execute() for a direct blocking call
-result = env.execute("minimal_module.py", "sum", args=([1, 2, 3],))
-
-# Clean up
-env.exit()
-```
-
-Wetlands records a hash of each environment's creation recipe.
-Calling `create()` again with the same name reuses the existing environment only when the stored recipe hash matches the requested dependencies, backend, platform, and creation commands and the installed direct Conda and Python packages still satisfy the declared version constraints.
-Compatibility is checked against the declared ranges; exact version pins are not required.
-Local editable dependencies are covered by the recipe comparison because their source paths, rather than their installed package metadata, define them.
-Use `replace_existing=True` to recreate a same-name environment with a different recipe, or `load(name)` to intentionally load the existing default-path environment without recipe validation.
-
-with `minimal_module.py`:
-
-```python
-def sum(x):
-    import numpy as np
-    return int(np.sum(x))
-```
-
-### Non-blocking execution with tasks
-
-`submit()` returns a `Task` object immediately, letting you monitor progress, cancel, or wait for the result:
-
-```python
-# Submit a function for non-blocking execution
-task = env.submit("compute.py", "heavy_computation", args=(data,))
-
-# Do other work while the task runs...
-print(f"Status: {task.status}")
-
-# Block for the result when ready
-task.wait_for()
-print(f"Result: {task.result}")
-```
-
-### Parallel execution with multiple workers
-
-Launch multiple worker processes sharing the same Conda environment:
-
-```python
-env.launch(max_workers=4)
-
-# Distribute work across workers
-results = list(env.map("segment.py", "segment", images))
-
-# Or get individual Task objects for full control
-tasks = env.map_tasks("segment.py", "segment", images)
-```
-
-Workers that crash or hang are detected and replaced automatically. Set `worker_timeout` to fail tasks when a worker stops responding:
-
-```python
-env.launch(max_workers=4, worker_timeout=300)  # 5-minute inactivity timeout
-```
-
-### Persistent workers
-
-By default, `env.exit()` stops workers when you are done.
-For trusted local workflows that need to reconnect from a later manager process, launch persistent workers directly with `persistent=True` or use `launch_or_attach()` to attach to existing persistent workers and launch them when needed:
-
-```python
-env = manager.create("cellpose", deps)
-env = manager.launch_or_attach(env, max_workers=2)
-env.detach()  # close local connections, keep workers alive
-
-new_manager = EnvironmentManager()
-env = new_manager.launch_or_attach("cellpose")
-result = env.execute("minimal_module.py", "sum", args=([1, 2, 3],))
-env.exit()  # stop persistent workers and remove their registry entries
-```
-
-`launch_or_attach()` first tries to attach to live persistent workers, then launches new persistent workers only when the manager already knows the environment and no live workers remain.
-Passing only a name is reconnect-only unless the manager has already created or loaded that environment.
-Use plain `env.launch()` for non-persistent workers.
-Persistent workers use authenticated local TCP connections with a root-local auth key stored under `wetlands/state/auth.key`.
-Attach makes one bounded connection attempt to each live worker.
-If a live worker is busy or cannot complete authentication, Wetlands raises an error with the worker PID, port, and commands to stop it through Wetlands or the operating system.
-The API still executes arbitrary Python in the target environment, so it is intended for trusted local use.
-
-See the `examples/` folder and the [documentation](https://arthursw.github.io/wetlands/latest/) for more detailed examples.
-
-## 🐛 Debugging
-
-Wetlands includes tools to debug code running in isolated environments using VS Code or PyCharm. You can set breakpoints, step through code, and inspect variables in real-time.
-
-### Quick Debugging Example
-
-```bash
-# List all running environments and their debug ports
-wetlands list
-
-# Attach VS Code to an environment for debugging
-wetlands debug -s /path/to/my/project -n my_env
-
-# Or use PyCharm instead
-wetlands debug -s /path/to/my/project -n my_env -ide pycharm
-
-# Kill an environment when done
-wetlands kill -n my_env
-```
-
-For detailed debugging instructions and workflows, see the [Debugging guide](https://arthursw.github.io/wetlands/latest/debugging/).
-
-## 🔗 Related Projects
-
-- [Conda](https://anaconda.org/)
-- [Pixi](https://pixi.sh/)
-- [Micromamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html)
-
-## 🤖 Development
-
-Use [uv](https://docs.astral.sh/uv/) to easily manage the project.
-The committed `uv.lock` keeps CI and developer tooling reproducible.
-Use `uv sync --frozen --group dev` to install the locked development environment, and update tool constraints deliberately in `pyproject.toml` before regenerating the lockfile.
-
-### Update external artifacts
-
-Wetlands embeds the expected hashes for one exact Pixi release, one exact Micromamba release, and the configured Microsoft Visual C++ Redistributable in `src/wetlands/_internal/artifact_registry.py`.
-Embedding these small trusted constants keeps runtime verification compatible with PyInstaller, cx_Freeze, Nuitka, and zip imports without freezer-specific package-data hooks.
-Runtime code never downloads expected checksums: fetching a checksum beside a binary at application runtime would not provide the same pinning property.
-
-Regenerate and revalidate the complete registry deliberately with:
+Install the optional host-side NumPy dependency when arrays cross the execution boundary:
 
 ```sh
-uv run python tools/update_artifact_registry.py \
-    --pixi-version v0.48.2 \
-    --micromamba-version 2.3.0-1
+pip install "wetlands[shared-memory]"
 ```
 
-Pass `--vc-redist-url URL` only when intentionally replacing the Microsoft download URL.
-Without it, the updater preserves and revalidates the currently registered URL.
-The updater requires exact release tags, verifies the complete platform allowlists against upstream checksum sidecars and locally calculated hashes, validates GitHub release digests and immutable-release metadata when available, and writes only after every artifact succeeds.
-If the installed GitHub CLI supports immutable release verification, the updater also uses it for releases GitHub marks immutable.
-Review and commit each version and its full hash mapping as one atomic source change.
+## Quick start
 
-To intentionally update both tools to GitHub's latest stable releases, use:
+The manager constructor only validates and stores configuration.
+Downloading or inspecting Pixi begins when `prepare()` or `provision()` is called.
+
+```python
+import numpy as np
+
+from wetlands import EnvironmentManager, EnvironmentSpec
+
+manager = EnvironmentManager(root="wetlands")
+
+preparation = manager.prepare()
+preparation.listen(lambda event: print(event.stage, event.message))
+pixi = preparation.wait_for()
+
+spec = EnvironmentSpec(
+    python="3.12.*",
+    conda=("numpy>=2",),
+)
+environment = manager.provision("numpy-example", spec).wait_for()
+
+with environment.start(workers=1) as workers:
+    image = np.arange(9, dtype=np.float32).reshape(3, 3)
+    task = workers.submit_import(
+        "numpy:negative",
+        args=(image,),
+    )
+    result = task.wait_for()
+
+np.testing.assert_array_equal(result, -image)
+manager.close()
+```
+
+This example is self-contained: Pixi installs NumPy in the worker environment, and the qualified target imports NumPy inside that environment.
+Your own worker package exposes ordinary Python functions, is declared in `EnvironmentSpec`, and is called by its installed `module:qualified.callable` name in the same way.
+
+Wetlands owns the shared-memory details.
+Inputs use copy-in semantics and returned arrays are independently owned by the caller.
+The repository also contains a [complete local worker-package example](https://github.com/arthursw/wetlands/blob/main/examples/getting_started.py).
+
+## Async applications
+
+Preparation, provisioning, and execution objects are awaitable.
+Their `events()` methods expose async event streams while the caller retains ownership of its event loop.
+
+```python
+import asyncio
+
+from wetlands import EnvironmentManager, EnvironmentSpec
+
+
+async def main() -> None:
+    manager = EnvironmentManager(root="wetlands")
+    try:
+        preparation = manager.prepare()
+        async for event in preparation.events():
+            print(event.kind.value, event.message)
+        await preparation
+
+        environment = await manager.provision(
+            "analysis",
+            EnvironmentSpec(python="3.12.*", conda=("numpy",)),
+        )
+
+        workers = await asyncio.to_thread(environment.start, workers=2)
+        try:
+            task = workers.submit_import(
+                "numpy:negative",
+                args=([1.0, 2.0, 3.0],),
+            )
+            result = await task
+            print(result)
+        finally:
+            await asyncio.to_thread(workers.close)
+    finally:
+        await asyncio.to_thread(manager.close)
+
+
+asyncio.run(main())
+```
+
+Starting, attaching, detaching, and closing worker pools, and closing a manager, are blocking lifecycle calls.
+Async applications should run those calls with `asyncio.to_thread()` as shown above.
+
+Cancel an operation or execution task with `cancel()`.
+A canceled provisioning operation becomes terminal only after its active process tree has stopped and its incomplete environment has been cleaned up.
+For a running worker task, Wetlands first requests cooperative cancellation.
+If the worker does not finish during the configured grace period, Wetlands terminates its process tree and starts a replacement worker.
+
+## Pixi projects and lockfiles
+
+`EnvironmentSpec` is the complete managed recipe:
+
+```python
+from pathlib import Path
+
+from wetlands import EnvironmentSpec, LocalPackage, PostInstallCommand
+
+spec = EnvironmentSpec(
+    python="3.12.*",
+    conda=("numpy>=2", "scikit-image", "pip"),
+    pypi=("example-pypi-package==1.2.0",),
+    channels=("conda-forge",),
+    local=(LocalPackage(Path("../worker-package"), editable=True),),
+    post_install=(PostInstallCommand(("python", "-m", "worker_package.prepare_assets")),),
+    pixi_lock=Path("pixi.lock"),
+)
+```
+
+When `pixi_lock` is supplied, Wetlands provisions from those exact locked dependencies.
+If the recipe contains local packages, the supplied lockfile must already resolve those same local sources and editable settings.
+It must also include Wetlands' exact managed worker-runtime dependencies, including its `debugpy` pin.
+Without one, Pixi resolves the generated project and Wetlands preserves the resulting lockfile in the managed environment.
+
+Wetlands owns the managed `debugpy` version, so applications must not declare it in `EnvironmentSpec`.
+The managed runtime pin participates in recipe identity and causes environments to rebuild when it changes.
+
+An environment is ready only after every installation and validation step succeeds and Wetlands atomically publishes its ready metadata.
+Failed, canceled, or crash-interrupted provisioning is rebuilt on the next attempt rather than resumed.
+The returned `ManagedEnvironment` exposes its canonical project and lockfile paths, Pixi executable and version, recipe hash, lockfile hash, and generation ID.
+
+## Worker targets
+
+Installed packages use a qualified target:
+
+```python
+task = workers.submit_import(
+    "package.module:ClassName.method",
+    args=(value,),
+)
+```
+
+The module is imported inside the isolated worker.
+
+Local development can use an explicit source path:
+
+```python
+task = workers.submit_path(
+    "worker_code.py",
+    "segment",
+    kwargs={"image": image},
+    cache=False,
+)
+```
+
+Path targets are keyed by canonical path and content, so equal filename stems do not collide.
+
+## Debug running workers
+
+Wetlands can start a debugger after an application and its workers are already running.
+No debug flag or debugger call is required in application or worker code.
 
 ```sh
-uv run python tools/update_artifact_registry.py --latest
+wetlands workers --root ./wetlands --environment numpy-example
+wetlands debug --root ./wetlands --environment numpy-example --worker WORKER_ID --editor vscode --source .
 ```
 
-The developer-only `latest` alias is resolved to exact release tags before any registry is generated.
-The generated registry always contains concrete versions, and Wetlands runtime installation continues to reject `latest`.
-You can also pass `latest` to one version option and an exact tag to the other when updating only one tool.
+The debug adapter remains available for reconnection until its worker exits.
+See [Debugging running workers](docs/debugging.md) and [Persistent workers and reconnection](docs/persistent_workers.md).
 
-Use `--check` to perform the same network-backed validation without writing and fail if the committed registry is stale:
+## Supported values
+
+Execution arguments and results may contain:
+
+- `None`, booleans, integers, floats, strings, and bytes;
+- nested lists, tuples, and dictionaries with simple keys;
+- NumPy arrays without object dtype.
+
+Unsupported objects fail explicitly at the boundary.
+Non-contiguous arrays are transported as contiguous arrays.
+Intermediate task outputs are limited to simple values in Wetlands 2.
+
+## Migration from Wetlands 1
+
+Wetlands 2 is a major release with a deliberately smaller public API.
+Applications should migrate explicitly instead of relying on compatibility shims.
+
+See the [Wetlands 2 migration guide](docs/migration_v2.md).
+
+## Development
+
+Install the development environment with:
 
 ```sh
-uv run python tools/update_artifact_registry.py \
-    --pixi-version v0.48.2 \
-    --micromamba-version 2.3.0-1 \
-    --check
+uv sync --frozen --group dev --extra shared-memory
 ```
 
-### Check & Format
+Run the fast test suite with:
 
-Check for code errors with `uv run ruff check` and format the code with `uv run ruff format`.
+```sh
+uv run --extra shared-memory pytest -m "not integration and not compat and not manual"
+```
 
-### Tests
+Run the representative real-Pixi integration suite with:
 
-Wetlands uses pytest markers to keep routine checks fast while preserving real environment coverage.
+```sh
+UV_PROJECT_ENVIRONMENT=.venv-py314 uv run --python 3.14 --extra shared-memory pytest tests/test_v2_pixi_integration.py
+```
 
-Fast unit tests skip real external environments, cross-Python subprocess checks, and manual-only tests:
+Run linting with:
 
-`uv run pytest -m "not integration and not compat and not manual"`
+```sh
+uv run ruff check
+uv run ruff format --check
+uv run mypy src/wetlands
+```
 
-Compatibility tests exercise cross-Python behavior, especially Python 3.9:
+Build the package with:
 
-`UV_PROJECT_ENVIRONMENT=.venv-py39 uv run --python 3.9 pytest -m compat`
+```sh
+uv build
+```
 
-Agent integration runs a small representative set of real pixi environment and worker tests:
+## Documentation
 
-`UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --python 3.13 pytest -m "not manual and not compat and (not integration or agent_integration)" --backend=pixi`
+The complete documentation is available at [arthursw.github.io/wetlands](https://arthursw.github.io/wetlands/latest/).
+Contributor-facing architecture and codec boundaries are described in the [developer guide](docs/developer/architecture.md).
 
-Manual full suite:
+## License
 
-`uv run pytest`
+Wetlands is licensed under the [MIT License](LICENSE).
 
-Manual full suite for one backend:
-
-`uv run pytest --backend=pixi`
-
-`uv run pytest --backend=micromamba`
-
-Marker categories:
-
-- `integration`: tests that use real external environments, real pixi/micromamba commands, worker processes in external environments, or real package installs.
-- `agent_integration`: a small representative integration subset agents may run after broad environment or executor changes.
-- `compat`: cross-Python compatibility tests, especially tests invoking Python 3.9.
-- `manual`: complete, expensive, or flaky-by-nature tests intended for local manual or scheduled CI runs.
-- `slow`: non-manual tests expected to take noticeably longer than normal unit tests.
-
-Agents should normally run the fast unit tests, add `compat` only when Python-version behavior changes, and run agent integration after broad environment, dependency, worker, or executor changes.
-
-For debugging with `ipdb`: `uv run pytest tests/ --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb`
-
-Use `--last-failed` to only re-run the failures: `uv run pytest tests/ --last-failed`
-
-### Build and Publish
-
-Build with `uv build`
-Publish with `uv publish dist/wetlands-VERSION_NAME*`
-
-### Generate documentation
-
-The Wetlands documentation is generated with [`mkdocs-material`](https://squidfunk.github.io/mkdocs-material/), [`mkdocstrings`](https://mkdocstrings.github.io/), [`mike`](https://github.com/jimporter/mike) and others.
-
-Install the doc tools with `uv pip install  ".[docs]"`.
-
-MkDocs includes a live preview server, so you can preview your changes as you write your documentation. The server will automatically rebuild the site upon saving. Start it with: `uv run mkdocs serve`.
-
-[`mike`](https://github.com/jimporter/mike) is used to generate multiple versions of the docs. To create a new version, `mike deploy [version]` is used by Github Actions, just update `.github/workflows/ci.yml`.
-
-The doc is automatically generated by [Github Actions](https://squidfunk.github.io/mkdocs-material/publishing-your-site/#with-github-actions-material-for-mkdocs) (see `.github/workflows/ci.yml`).
-
-The script `scripts/gen_ref_pages.py` is used by mkdocs to generate the API reference automatically (see [mkdocstrings recipes](https://mkdocstrings.github.io/recipes/)).
-
-## 📋 Todo
-
-- Use Pixi features and environment instead of creating one workspace per environment.
-
-## 📜 License
-
-This project was made by the [SAIRPICO team](https://www.inria.fr/en/sairpico) at Inria in Rennes (Centre Inria de l'Université de Rennes) and is licensed under the MIT License.
-
-The logo Wetland was made by [Dan Hetteix](https://thenounproject.com/creator/DHETTEIX/) from Noun Project (CC BY 3.0).
+See the [security policy](SECURITY.md) before executing third-party worker code or post-install commands.

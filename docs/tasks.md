@@ -1,462 +1,214 @@
+# Operations and execution tasks
 
+Wetlands uses observable asynchronous objects for both host-side lifecycle work and worker execution.
 
-### Tasks and Parallel Execution
+`PreparationOperation[T]` and `ProvisioningOperation[T]` represent host-side work.
+`ExecutionTask[T]` represents one worker call.
 
-Wetlands provides a task-based API for non-blocking execution, progress reporting, cancellation, and parallel processing across multiple worker processes.
+All three support callbacks, blocking waits, cancellation, awaiting, and async event streams.
+No running event loop is required for synchronous use.
 
-Every call to [`env.submit()`][wetlands.environment.Environment.submit] or [`env.submit_script()`][wetlands.environment.Environment.submit_script] returns a [`Task[T]`][wetlands.task.Task] object that you can monitor, cancel, or wait on.
-
-#### Task lifecycle
-
-```
-PENDING ──(start)──> RUNNING ──(success)──> COMPLETED
-                        │
-                        ├──(error)──────> FAILED
-                        │
-                        └──(cancel)──> CANCELED
-```
-
-By default, `submit()` starts the task immediately (`start=True`). With `start=False`, the task stays `PENDING` until `task.start()` is called — useful for attaching listeners before execution begins.
-
-You can check whether a task has reached a terminal state with `task.status.is_finished()`.
-
-#### Basic usage
+## Preparation and provisioning operations
 
 ```python
-# Submit a function for non-blocking execution
-task = env.submit("compute.py", "heavy_computation", args=(data,))
+operation = manager.provision("analysis", spec)
 
-# Do other work while the task runs...
-print(f"Status: {task.status}")
-
-# Block for the result when ready
-task.wait_for()
-print(f"Result: {task.result}")
+operation.listen(lambda event: print(event.message))
+environment = operation.wait_for(timeout=600)
 ```
 
-You can also submit scripts:
+Operation states are:
+
+- `PENDING`;
+- `RUNNING`;
+- `COMPLETED`;
+- `FAILED`;
+- `CANCELED`.
+
+Events include a monotonically increasing sequence, timestamp, operation ID, kind, current state, human-readable message, and optional stage, step, stream, output line, or progress fields.
 
 ```python
-task = env.submit_script("train.py", args=("--epochs", "10"))
-task.wait_for()
+from wetlands import OperationEventKind
+
+
+def on_event(event) -> None:
+    if event.kind is OperationEventKind.OUTPUT:
+        print(f"[{event.stage}:{event.stream}] {event.line}")
+
+
+operation.listen(on_event)
 ```
 
----
+Listeners may run on Wetlands background threads.
+GUI applications must marshal UI mutations onto their own UI thread.
+Do not call `EnvironmentManager.close()` directly from an operation listener; schedule shutdown on another thread so the operation can finish.
 
-### Task properties
+## Structured failure
 
-Once a task is created, you can inspect its state through these read-only properties:
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `id` | `str` | Unique identifier (UUID4) |
-| `status` | [`TaskStatus`][wetlands.task.TaskStatus] | Current lifecycle state (`PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELED`) |
-| `result` | `T` | Return value of the remote function. Raises `InvalidStateError` if the task is not `COMPLETED`. |
-| `error` | `TaskFailure \| None` | Structured failure diagnostics when `FAILED`, otherwise `None` |
-| `exception` | [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] `\| None` | Exception wrapping `error`. `None` unless the task has failed. |
-| `traceback` | `str \| None` | Full formatted traceback text when available, otherwise `None` |
-| `message` | `str \| None` | Latest progress message from `update()` |
-| `current` | `int \| None` | Current progress counter from `update()` |
-| `maximum` | `int \| None` | Maximum progress counter from `update()` |
-| `progress` | `float \| None` | Computed as `current / maximum` (a float in [0, 1]). `None` if either value is missing or `maximum` is 0. |
-| `outputs` | `dict[str, Any]` | Accumulated named intermediate outputs from `set_output()` |
-| `future` | `Future[T]` | Standard `concurrent.futures.Future` — see [interop section](#concurrentfutures-interop) |
-
-!!! note "`result` does not block"
-
-    Unlike `future.result()`, accessing `task.result` never blocks. It returns the value immediately if the task is completed, or raises `InvalidStateError` otherwise. Use `task.wait_for()` or `await task` to wait first.
-
----
-
-### Progress Reporting
-
-Remote code can report progress by declaring a `task` parameter in the function signature. Wetlands detects it via `inspect.signature()` and injects a [`RemoteTaskHandle`][wetlands.task.RemoteTaskHandle] automatically.
+Failed operations raise a specialized `OperationError`.
+Its `failure` value identifies the operation, stage, safe command display, return code, bounded output tails, environment name, and any cleanup failure.
 
 ```python
-# remote_module.py — runs inside the isolated environment
-def long_computation(data, *, task=None):
+from wetlands import ProvisioningError
+
+try:
+    environment = operation.wait_for()
+except ProvisioningError as error:
+    print(error.failure.stage)
+    print(error.failure.command)
+    print(error.failure.stderr_tail)
+```
+
+Wetlands sanitizes command displays and captured output before publishing them.
+
+## Provisioning cancellation
+
+```python
+operation = manager.provision("analysis", spec)
+operation.cancel()
+
+try:
+    operation.wait_for()
+except OperationCanceled:
+    pass
+```
+
+`cancel()` requests cancellation and returns immediately.
+It is idempotent and returns `False` after a terminal state.
+
+The operation reaches `CANCELED` only after the active subprocess tree has terminated and cleanup has completed.
+Wetlands first requests graceful termination, waits for the configured grace period, then forcibly terminates surviving processes.
+
+## Execution tasks
+
+```python
+task = pool.submit_import(
+    "analysis_package.pipeline:run",
+    kwargs={"input_data": data},
+)
+
+task.listen(
+    lambda event: print(
+        event.sequence,
+        event.kind.value,
+        event.state.value,
+        event.message,
+        event.progress,
+    )
+)
+result = task.wait_for()
+```
+
+Execution task states are `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, and `CANCELED`.
+
+Execution events are immutable snapshots containing a monotonically increasing sequence, timestamp, task ID, kind, state, message, and progress fields.
+Listeners replay the bounded event history by default; pass `replay=False` to observe only future events.
+
+`wait_for(timeout)` does not cancel the task when its timeout expires.
+Call `cancel()` explicitly when the work should stop.
+
+Remote failures retain the remote exception identity, traceback, task ID, call target, and worker diagnostics.
+
+## Progress and cooperative cancellation
+
+A worker callable may optionally accept a runtime-context keyword chosen by the submitter.
+Wetlands never infers injection from a callable signature.
+
+```python
+def process(items, task=None):
     results = []
-    for i, item in enumerate(data):
-        if task and task.cancel_requested:
-            task.cancel()  # acknowledge cancellation
+
+    for index, item in enumerate(items):
+        if task is not None and task.cancel_requested:
+            task.cancel()
             return None
-        if task:
-            task.update(f"Processing item {i}", current=i, maximum=len(data))
-        results.append(expensive_operation(item))
+
+        results.append(process_one(item))
+
+        if task is not None:
+            task.update(
+                f"Processed {index + 1} items",
+                current=index + 1,
+                maximum=len(items),
+            )
+
     return results
 ```
 
-The [`RemoteTaskHandle`][wetlands.task.RemoteTaskHandle] provides:
-
-- `task.update(message, current=, maximum=)` — report progress
-- `task.set_output(key, value)` — publish named intermediate outputs (available via `task.outputs[key]` on the caller side)
-- `task.cancel_requested` — check if cancellation was requested
-- `task.cancel()` — acknowledge cancellation (transitions the task to `CANCELED`)
-- `task.log(message, level=)` — send log messages to the caller's logging system
-
-!!! note "Functions without a `task` parameter work exactly as before"
-
-    The `task` parameter is optional. Functions that don't declare it receive no injection and behave identically to a plain `execute()` call.
-
----
-
-### Event Listeners
-
-On the caller side, you can observe task events by registering a listener:
+Request the injection explicitly when submitting:
 
 ```python
-from wetlands.task import TaskEventType
-
-def on_event(event):
-    match event.type:
-        case TaskEventType.UPDATE:
-            t = event.task
-            print(f"[{t.progress:.0%}] {t.message}")
-        case TaskEventType.COMPLETION:
-            print(f"Done: {event.task.result}")
-        case TaskEventType.FAILURE:
-            print(f"Failed: {event.task.error.message}")
-
-# start=False to register listener before dispatch
-task = env.submit("remote_module.py", "long_computation",
-                  args=(dataset,), start=False)
-task.listen(on_event).start()
-task.wait_for()
+task = pool.submit_import(
+    "analysis_package.pipeline:process",
+    args=(items,),
+    context_keyword="task",
+)
 ```
 
-Terminal events (`COMPLETION`, `FAILURE`, `CANCELATION`) are replayed to late listeners, so attaching a listener after the task finishes still delivers the final outcome. Progress updates are transient and not replayed.
+Progress messages and intermediate outputs are initially limited to simple supported values.
+NumPy arrays should be returned as the terminal result rather than published as intermediate output.
 
-A listener can be removed with `task.remove_listener(callback)`.
+Cancellation starts cooperatively for running Python code.
+The worker observes `task.cancel_requested` and may acknowledge it with `task.cancel()`.
+If it does not finish during the manager's configured termination grace period, Wetlands terminates that worker's process tree and starts a replacement.
+The task reaches `CANCELED` only after this cleanup has completed.
+If a worker becomes unhealthy or disconnects, Wetlands fails its assigned task and replaces the worker.
 
-Each [`TaskEvent`][wetlands.task.TaskEvent] has two fields:
+## Async use
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `task` | `Task` | The task that emitted the event |
-| `type` | `TaskEventType` | The kind of event |
-
-Event types:
-
-| Event | Meaning |
-|-------|---------|
-| `STARTED` | Task has been dispatched to a worker |
-| `UPDATE` | Progress or intermediate output from the remote side |
-| `COMPLETION` | Task finished successfully |
-| `FAILURE` | Task raised an exception |
-| `CANCELATION` | Task was canceled cooperatively |
-
----
-
-### Cancellation
-
-Cancellation is cooperative: requesting cancellation sets a flag that the remote code checks via `task.cancel_requested`. The remote function must acknowledge cancellation by calling `task.cancel()`.
-
-```python
-task = env.submit("simulation.py", "run_simulation", args=(params,))
-
-# ... later ...
-task.cancel()
-task.wait_for()
-print(f"Final status: {task.status.name}")  # COMPLETED or CANCELED
-```
-
-If the remote function returns normally after a cancel request without acknowledging, the result is delivered as a normal `COMPLETION`.
-
----
-
-### Waiting and Timeouts
-
-`task.wait_for()` blocks until the task reaches a terminal state. An optional `timeout` (in seconds) raises `TimeoutError` if exceeded — but does **not** cancel the task:
-
-```python
-try:
-    task.wait_for(timeout=30)
-except TimeoutError:
-    print("Still running — deciding whether to cancel...")
-    task.cancel()
-    task.wait_for()
-```
-
----
-
-### Error Handling
-
-When a task fails, you can inspect the error in several ways:
-
-```python
-task.wait_for()
-
-if task.status == TaskStatus.FAILED:
-    print(task.error.message)       # short failure message
-    print(task.error.category)      # remote_exception, serialization, worker_died, ...
-    print(task.traceback)           # full formatted traceback string
-    print(task.exception)           # concise human-readable ExecutionException
-
-    # Or via the underlying Future:
-    print(task.future.exception())  # same ExecutionException
-```
-
-The `exception` property returns an [`ExecutionException`][wetlands._internal.exceptions.ExecutionException] whose canonical structured payload is `task.exception.failure`.
-For failed tasks, `task.error is task.exception.failure`, and `task.future.exception() is task.exception`.
-
-`TaskFailure` preserves programmatic diagnostics where available, including the original remote exception module and type, message, full traceback, cause/context chain, worker index/pid/port, process exit code or signal, timeout details, and serialization context.
-`str(task.exception)` is designed for humans, for example `Remote ValueError from my_module: bad input` or `Worker 0 pid 123 died with signal 9`.
-
-Cancellation is a lifecycle state, not a failure.
-When remote code acknowledges cancellation with `task.cancel()`, the task becomes `TaskStatus.CANCELED`, and `task.error`, `task.exception`, and `task.traceback` remain `None`.
-
----
-
-### Context Managers
-
-Tasks can be used as context managers for automatic cancellation on early exit:
-
-```python
-with env.submit("training.py", "train_model", args=(config,)) as task:
-    task.wait_for(timeout=300)
-# If we exit the block early (exception, timeout, etc.),
-# the task is automatically canceled and awaited.
-```
-
-Entering the context auto-starts a `PENDING` task. Exiting cancels and waits if the task is still running.
-
-Async context managers are also supported:
-
-```python
-async with env.submit("training.py", "train_model", args=(config,)) as task:
-    result = await task
-```
-
----
-
-### `concurrent.futures` Interop
-
-Each task wraps a standard `concurrent.futures.Future[T]`, making it easy to integrate with existing concurrent code:
-
-```python
-import concurrent.futures
-
-t1 = env_a.submit("segment.py", "segment", args=(image,))
-t2 = env_b.submit("segment.py", "segment", args=(image,))
-
-concurrent.futures.wait([t1.future, t2.future])
-print(t1.result, t2.result)
-```
-
-One-liner via Future:
-
-```python
-result = env.submit("compute.py", "fib", args=(50,)).future.result(timeout=60)
-```
-
----
-
-### Async/Await
-
-Tasks are natively awaitable:
+Operations and tasks can be awaited directly:
 
 ```python
 import asyncio
 
-async def main():
-    result = await env.submit("compute.py", "fibonacci", args=(50,))
-    print(f"Result: {result}")
 
-asyncio.run(main())
+environment = await manager.provision("analysis", spec)
+
+pool = await asyncio.to_thread(environment.start)
+try:
+    result = await pool.submit_import(
+        "analysis_package.pipeline:run",
+        kwargs={"input_data": data},
+    )
+finally:
+    await asyncio.to_thread(pool.close)
 ```
 
-You can also iterate over events asynchronously:
+Starting, attaching, detaching, and closing pools are blocking lifecycle operations.
+Async applications should move them to a thread as shown above.
+
+Events are available through an async iterator:
 
 ```python
-async def monitor(task):
-    async for event in task.events():
-        match event.type:
-            case TaskEventType.UPDATE:
-                print(f"Progress: {event.task.progress:.0%}")
-            case TaskEventType.COMPLETION:
-                print(f"Result: {event.task.result}")
+operation = manager.provision("analysis", spec)
 
-task = env.submit("compute.py", "long_work", args=(data,))
-await monitor(task)
+async for event in operation.events():
+    render_activity(event)
+
+environment = await operation
 ```
 
----
+The terminal event closes the stream.
+The event adapter safely moves notifications from Wetlands threads to the caller's event loop.
 
-### Parallel Execution
+Canceling an awaiting coroutine requests cancellation of the underlying operation or task and waits for mandatory cleanup before propagating `asyncio.CancelledError`.
 
-When `max_workers > 1` is passed to `launch()`, Wetlands starts multiple worker processes all sharing the **same Conda environment on disk**. This provides true process-level parallelism with no environment duplication.
-
-```
-                                ┌─ worker 0 (pid 1001) ─ port 5001
-env.launch(max_workers=4) ──────├─ worker 1 (pid 1002) ─ port 5002
-  (one conda env on disk)       ├─ worker 2 (pid 1003) ─ port 5003
-                                └─ worker 3 (pid 1004) ─ port 5004
-```
-
-Tasks are dispatched to idle workers automatically. When all workers are busy, tasks queue internally and are dispatched as workers become available. The user never sees or manages individual workers.
-
-You can assign specific environment variables per worker, for example to assign GPUs:
+## Worker pools
 
 ```python
-env.launch(
-    max_workers=4,
-    worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)}
-)
+with environment.start(workers=4, worker_timeout=300) as pool:
+    tasks = [pool.submit_import("analysis_package.pipeline:run", args=(item,)) for item in items]
+    results = [task.wait_for() for task in tasks]
 ```
 
-To detect hung workers that stop responding, set an inactivity timeout (in seconds):
+Workers are warm and process tasks from the pool queue.
+Health monitoring detects disconnects and inactivity.
+A replacement worker is started when a pool worker fails.
+`worker_timeout` is an inactivity timeout that resets whenever the worker sends an IPC message.
+It detects an unresponsive worker; it is not a wall-clock limit on task execution.
 
-```python
-env.launch(
-    max_workers=4,
-    worker_timeout=300,  # fail tasks if a worker is silent for 5 minutes
-)
-```
+`persistent=True` keeps trusted local workers alive when a controller detaches.
+Persistent pools use authenticated loopback connections and exclusive controller ownership.
+They do not change Wetlands' trusted-local execution model.
 
-You can check how many workers are currently alive with the `worker_count` property:
-
-```python
-print(f"Active workers: {env.worker_count}")
-```
-
-#### Persistent workers and reconnect
-
-By default, workers are tied to the current `EnvironmentManager` connection and [`env.exit()`][wetlands.environment.Environment.exit] stops them.
-For trusted local workflows where workers should remain alive after the current manager disconnects, launch persistent workers directly with `persistent=True` or use [`EnvironmentManager.launch_or_attach()`][wetlands.environment_manager.EnvironmentManager.launch_or_attach] to attach to existing persistent workers and launch them when needed:
-
-```python
-env = manager.create("cellpose", deps)
-env = manager.launch_or_attach(env, max_workers=2)
-```
-
-If you only want to launch new persistent workers and do not need attach-first behavior, call `launch()` directly:
-
-```python
-env = manager.create("cellpose", deps)
-env.launch(max_workers=2, persistent=True)
-```
-
-Wetlands records persistent worker metadata in `wetlands/state/workers.json` and authenticates local TCP connections with a root-local key stored in `wetlands/state/auth.key`.
-No secret is stored in `workers.json`.
-`launch_or_attach()` first tries to attach to existing live persistent workers for that environment name.
-If no live workers remain and the manager already knows the environment, it launches new persistent workers with the supplied launch options.
-Name-only use is reconnect-only unless the manager has already created or loaded that environment; pass an [`Environment`][wetlands.environment.Environment] object or call [`create()`][wetlands.environment_manager.EnvironmentManager.create] or [`load()`][wetlands.environment_manager.EnvironmentManager.load] first when a launch fallback is needed.
-Use plain [`env.launch()`][wetlands.environment.Environment.launch] for non-persistent workers.
-
-Use [`env.detach()`][wetlands.environment.Environment.detach] to close the current manager's client connections without sending `"exit"` to the workers:
-
-```python
-env.detach()
-```
-
-A later manager using the same `wetlands_instance_path` can reconnect by environment name:
-
-```python
-from wetlands.environment_manager import EnvironmentManager
-
-manager = EnvironmentManager()
-env = manager.launch_or_attach("cellpose")
-result = env.execute("segment.py", "segment", args=(image_path,))
-```
-
-If all recorded workers are dead, refuse authentication, or cannot be reached, `attach()` raises a clear error and removes stale registry entries.
-If a worker is alive but still finishing work from a previous disconnected client, stuck, or unable to complete authentication, `attach()` makes one bounded attempt and then raises an error with the worker PID, port, and recovery commands.
-Timed-out live worker records are left in place so a later attach can succeed.
-`launch_or_attach()` will not launch duplicate persistent workers while live records remain.
-Launching another persistent environment with the same name while live persistent workers are already recorded is refused; attach to the existing workers or stop them with `env.exit()` first.
-
-`detach()` fails any local queued or active `Task` objects because the current manager can no longer receive their results.
-If a client disconnects while a worker task is running, the worker lets that task finish before accepting a new connection; the result is lost to the detached manager.
-Use `env.exit()` when you want to stop persistent workers and remove their registry entries.
-
-Persistent workers still execute arbitrary Python functions and scripts through `execute()`, `submit()`, `map()`, and `run_script()`.
-The authenticated TCP transport is intended for trusted local use, not as a remote multi-user service boundary.
-
-#### `map()` — batch execution
-
-[`env.map()`][wetlands.environment.Environment.map] distributes work across workers and yields results, similar to `concurrent.futures.Executor.map()`:
-
-```python
-env.launch(max_workers=4)
-
-images = load_images("data/")
-results = list(env.map("segment.py", "segment", images))
-print(f"Segmented {len(results)} images")
-```
-
-Use `ordered=False` to yield results as they complete (faster when items have varying processing times):
-
-```python
-for result in env.map("analysis.py", "analyze", datasets, ordered=False):
-    save_result(result)
-```
-
-#### `map_tasks()` — batch execution with full Task control
-
-[`env.map_tasks()`][wetlands.environment.Environment.map_tasks] returns a list of `Task` objects for when you need progress reporting or cancellation on individual items:
-
-```python
-tasks = env.map_tasks("segment.py", "segment", images)
-
-for task in tasks:
-    task.listen(lambda e: print(f"[{e.task.progress:.0%}] {e.task.message}"))
-
-for task in tasks:
-    task.wait_for()
-```
-
----
-
-### Worker Health Monitoring
-
-Wetlands runs a background health monitor thread for each launched environment. Every few seconds, the monitor checks each worker that has an active task:
-
-- **Dead worker detection**: If a worker process has exited unexpectedly (segfault, OOM kill, etc.), the monitor fails the active task, removes the worker from the pool, and launches a replacement.
-- **Inactivity timeout**: If `worker_timeout` is set and a worker has not sent any IPC message (result, progress update, log) within that duration, it is treated as hung. The monitor fails the active task, kills and removes the worker, and launches a replacement.
-
-Replacement workers are started transparently with the same configuration (environment variables, activation commands) as the original. Queued tasks waiting for a worker are dispatched to the replacement as soon as it is ready.
-
-```python
-env.launch(
-    max_workers=4,
-    worker_env=lambda i: {"CUDA_VISIBLE_DEVICES": str(i)},
-    worker_timeout=600,  # 10-minute inactivity timeout
-)
-
-# Workers that crash or hang are replaced automatically.
-# The failed task receives a FAILED status with a descriptive error message.
-results = list(env.map("process.py", "run", items))
-```
-
-The health monitor stops when `env.exit()` is called. Any tasks still queued at shutdown are failed with a descriptive error message.
-
----
-
-### GUI Integration
-
-Tasks integrate naturally with GUI frameworks. Since task events are delivered from background threads, use thread-safe mechanisms to update the UI:
-
-```python
-from PyQt6.QtCore import pyqtSignal, QObject
-
-class TaskBridge(QObject):
-    progress = pyqtSignal(float, str)
-    completed = pyqtSignal(object)
-    failed = pyqtSignal(str)
-
-bridge = TaskBridge()
-bridge.progress.connect(progress_bar.setValue)
-bridge.completed.connect(on_result)
-
-def on_event(event):
-    match event.type:
-        case TaskEventType.UPDATE:
-            bridge.progress.emit(event.task.progress or 0.0, event.task.message or "")
-        case TaskEventType.COMPLETION:
-            bridge.completed.emit(event.task.result)
-        case TaskEventType.FAILURE:
-            bridge.failed.emit(event.task.error.message if event.task.error else "Unknown error")
-
-task = env.submit("segment.py", "segment_image", args=(image,), start=False)
-task.listen(on_event).start()
-```
+See [Persistent workers and reconnection](persistent_workers.md) for complete controller lifecycle, attachment validation, crash behavior, and debugger reconnection.
