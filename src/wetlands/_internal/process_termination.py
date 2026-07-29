@@ -301,7 +301,7 @@ def _terminate_windows_tree(
         parent = psutil.Process(pid)
         started_at = parent.create_time()
     except psutil.NoSuchProcess:
-        if job_handle is not None and close_windows_job is not None:
+        if process is not None and job_handle is not None and close_windows_job is not None:
             close_windows_job(process)
         _reap(process)
         return
@@ -316,7 +316,7 @@ def _terminate_windows_tree(
         raise ProcessTerminationError(f"Cannot enumerate worker process tree for PID {pid}") from error
     targets = [*descendants, parent]
 
-    if job_handle is not None and close_windows_job is not None:
+    if process is not None and job_handle is not None and close_windows_job is not None:
         close_windows_job(process)
     else:
         for target in targets:

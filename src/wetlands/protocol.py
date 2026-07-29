@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 EXECUTION_PROTOCOL_VERSION = 1
 MANAGEMENT_PROTOCOL_VERSION = 1
@@ -374,11 +374,11 @@ def validate_worker_capabilities(
         protocol_version=protocol_version,
         codecs=tuple(codecs),
         runtime_version=runtime_version,
-        python_version=python_version,
+        python_version=cast(str, python_version),
         pid=pid,
-        environment_path=environment_path,
-        generation_id=generation_id,
-        recipe_hash=recipe_hash,
+        environment_path=cast(str, environment_path),
+        generation_id=cast(str, generation_id),
+        recipe_hash=cast(str, recipe_hash),
     )
 
 

@@ -11,14 +11,14 @@ import psutil
 import pytest
 
 from wetlands._internal.process_termination import ProcessTerminationError
-from wetlands._internal.provisioning import ProcessTreeRunner
+from wetlands._internal.provisioning import ProcessTreeRunner, ProvisioningStep
 from wetlands.operation import (
     OperationCanceled,
     OperationState,
     ProvisioningError,
     ProvisioningOperation,
 )
-from wetlands.specs import ProvisioningStage, ProvisioningStep
+from wetlands.specs import ProvisioningStage
 
 
 def _wait_for_pid(path: Path, timeout: float = 5.0) -> int:

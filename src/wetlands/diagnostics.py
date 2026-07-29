@@ -1,3 +1,5 @@
+"""Structured public diagnostics for failed worker executions."""
+
 from __future__ import annotations
 
 import enum
@@ -6,7 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-class TaskFailureCategory(str, enum.Enum):
+class ExecutionFailureCategory(str, enum.Enum):
+    """Stable categories for failures observed at the execution boundary."""
+
     REMOTE_EXCEPTION = "remote_exception"
     INTERNAL_EXCEPTION = "internal_exception"
     SERIALIZATION = "serialization"
@@ -19,6 +23,8 @@ class TaskFailureCategory(str, enum.Enum):
 
 @dataclass(frozen=True)
 class RemoteExceptionInfo:
+    """Serializable identity and traceback information for a remote exception."""
+
     module: str | None = None
     type_name: str | None = None
     qualified_name: str | None = None
@@ -72,6 +78,8 @@ class RemoteExceptionInfo:
 
 @dataclass(frozen=True)
 class WorkerInfo:
+    """Worker identity attached to an execution failure."""
+
     environment: str | None = None
     index: int | None = None
     pid: int | None = None
@@ -101,8 +109,10 @@ class WorkerInfo:
 
 
 @dataclass(frozen=True)
-class TaskFailure:
-    category: TaskFailureCategory
+class ExecutionFailure:
+    """Structured details for a failed worker execution."""
+
+    category: ExecutionFailureCategory
     message: str
     task_id: str | None = None
     call_target: str | None = None
@@ -120,13 +130,13 @@ class TaskFailure:
     @classmethod
     def normalize(
         cls,
-        value: "TaskFailure | dict[str, Any] | BaseException | str",
+        value: "ExecutionFailure | dict[str, Any] | BaseException | str",
         *,
         traceback: list[str] | str | None = None,
         task_id: str | None = None,
         call_target: str | None = None,
-    ) -> "TaskFailure":
-        if isinstance(value, TaskFailure):
+    ) -> "ExecutionFailure":
+        if isinstance(value, ExecutionFailure):
             return value.with_defaults(task_id=task_id, call_target=call_target)
         if isinstance(value, BaseException):
             return cls.from_exception(value, task_id=task_id, call_target=call_target)
@@ -134,7 +144,7 @@ class TaskFailure:
             return cls.from_payload(value, task_id=task_id, call_target=call_target)
         traceback_string = _traceback_to_string(traceback)
         return cls(
-            category=TaskFailureCategory.UNKNOWN,
+            category=ExecutionFailureCategory.UNKNOWN,
             message=str(value),
             task_id=task_id,
             call_target=call_target,
@@ -147,11 +157,11 @@ class TaskFailure:
         cls,
         exc: BaseException,
         *,
-        category: TaskFailureCategory = TaskFailureCategory.REMOTE_EXCEPTION,
+        category: ExecutionFailureCategory = ExecutionFailureCategory.REMOTE_EXCEPTION,
         task_id: str | None = None,
         call_target: str | None = None,
         serialization_context: str | None = None,
-    ) -> "TaskFailure":
+    ) -> "ExecutionFailure":
         exc_type = type(exc)
         return cls(
             category=category,
@@ -171,7 +181,7 @@ class TaskFailure:
         *,
         task_id: str | None = None,
         call_target: str | None = None,
-    ) -> "TaskFailure":
+    ) -> "ExecutionFailure":
         failure_payload = payload.get("failure") if "failure" in payload else payload
         if not isinstance(failure_payload, dict):
             return cls.normalize(str(failure_payload), task_id=task_id, call_target=call_target)
@@ -180,12 +190,12 @@ class TaskFailure:
         category_value = failure_payload.get("category")
         try:
             category = (
-                TaskFailureCategory(category_value)
+                ExecutionFailureCategory(category_value)
                 if category_value is not None
-                else TaskFailureCategory.REMOTE_EXCEPTION
+                else ExecutionFailureCategory.REMOTE_EXCEPTION
             )
         except ValueError:
-            category = TaskFailureCategory.UNKNOWN
+            category = ExecutionFailureCategory.UNKNOWN
 
         remote_exception = RemoteExceptionInfo.from_payload(failure_payload.get("remote_exception"))
         message = failure_payload.get("message")
@@ -220,8 +230,8 @@ class TaskFailure:
         *,
         task_id: str | None = None,
         call_target: str | None = None,
-    ) -> "TaskFailure":
-        return cls(TaskFailureCategory.ENVIRONMENT, message, task_id=task_id, call_target=call_target)
+    ) -> "ExecutionFailure":
+        return cls(ExecutionFailureCategory.ENVIRONMENT, message, task_id=task_id, call_target=call_target)
 
     @classmethod
     def serialization(
@@ -232,9 +242,9 @@ class TaskFailure:
         call_target: str | None = None,
         context: str | None = None,
         worker: WorkerInfo | None = None,
-    ) -> "TaskFailure":
+    ) -> "ExecutionFailure":
         return cls(
-            TaskFailureCategory.SERIALIZATION,
+            ExecutionFailureCategory.SERIALIZATION,
             message,
             task_id=task_id,
             call_target=call_target,
@@ -250,9 +260,9 @@ class TaskFailure:
         task_id: str | None = None,
         call_target: str | None = None,
         worker: WorkerInfo | None = None,
-    ) -> "TaskFailure":
+    ) -> "ExecutionFailure":
         return cls(
-            TaskFailureCategory.WORKER_CONNECTION,
+            ExecutionFailureCategory.WORKER_CONNECTION,
             message,
             task_id=task_id,
             call_target=call_target,
@@ -267,7 +277,7 @@ class TaskFailure:
         call_target: str | None = None,
         worker: WorkerInfo | None = None,
         returncode: int | None = None,
-    ) -> "TaskFailure":
+    ) -> "ExecutionFailure":
         exit_code = returncode if returncode is not None and returncode >= 0 else None
         signal = -returncode if returncode is not None and returncode < 0 else None
         if signal is not None:
@@ -277,7 +287,7 @@ class TaskFailure:
         else:
             message = "Worker process died"
         return cls(
-            TaskFailureCategory.WORKER_DIED,
+            ExecutionFailureCategory.WORKER_DIED,
             message,
             task_id=task_id,
             call_target=call_target,
@@ -295,14 +305,14 @@ class TaskFailure:
         worker: WorkerInfo | None = None,
         timeout: float | None = None,
         elapsed: float | None = None,
-    ) -> "TaskFailure":
+    ) -> "ExecutionFailure":
         message = (
             f"Task timed out after {elapsed:.1f}s without worker activity"
             if elapsed is not None
             else "Task timed out without worker activity"
         )
         return cls(
-            TaskFailureCategory.TIMEOUT,
+            ExecutionFailureCategory.TIMEOUT,
             message,
             task_id=task_id,
             call_target=call_target,
@@ -311,10 +321,10 @@ class TaskFailure:
             elapsed=elapsed,
         )
 
-    def with_defaults(self, *, task_id: str | None = None, call_target: str | None = None) -> "TaskFailure":
+    def with_defaults(self, *, task_id: str | None = None, call_target: str | None = None) -> "ExecutionFailure":
         if (task_id is None or self.task_id is not None) and (call_target is None or self.call_target is not None):
             return self
-        return TaskFailure(
+        return ExecutionFailure(
             category=self.category,
             message=self.message,
             task_id=self.task_id or task_id,
@@ -349,25 +359,28 @@ class TaskFailure:
         }
 
     def summary(self) -> str:
-        if self.category in (TaskFailureCategory.REMOTE_EXCEPTION, TaskFailureCategory.INTERNAL_EXCEPTION):
-            prefix = "Remote" if self.category == TaskFailureCategory.REMOTE_EXCEPTION else "Local"
+        if self.category in (
+            ExecutionFailureCategory.REMOTE_EXCEPTION,
+            ExecutionFailureCategory.INTERNAL_EXCEPTION,
+        ):
+            prefix = "Remote" if self.category == ExecutionFailureCategory.REMOTE_EXCEPTION else "Local"
             if self.remote_exception is not None:
                 exc_name = self.remote_exception.qualified_name or self.remote_exception.type_name or "Exception"
                 module = self.remote_exception.module
                 source = f" from {module}" if module else ""
                 message = self.remote_exception.message or self.message
                 return f"{prefix} {exc_name}{source}: {message}"
-        if self.category == TaskFailureCategory.WORKER_DIED:
+        if self.category == ExecutionFailureCategory.WORKER_DIED:
             worker = _worker_label(self.worker)
             if self.signal is not None:
                 return f"{worker}died with signal {self.signal}"
             if self.exit_code is not None:
                 return f"{worker}died with exit code {self.exit_code}"
-        if self.category == TaskFailureCategory.TIMEOUT:
+        if self.category == ExecutionFailureCategory.TIMEOUT:
             if self.elapsed is not None:
                 return f"Task timed out after {self.elapsed:.1f}s without worker activity"
             return "Task timed out without worker activity"
-        if self.category == TaskFailureCategory.SERIALIZATION:
+        if self.category == ExecutionFailureCategory.SERIALIZATION:
             context = f" while serializing {self.serialization_context}" if self.serialization_context else ""
             return f"Task serialization failure{context}: {self.message}"
         return self.message
@@ -398,3 +411,11 @@ def _worker_label(worker: WorkerInfo | None) -> str:
     if worker.pid is not None:
         parts.append(f"pid {worker.pid}")
     return " ".join(parts) + " "
+
+
+__all__ = [
+    "ExecutionFailure",
+    "ExecutionFailureCategory",
+    "RemoteExceptionInfo",
+    "WorkerInfo",
+]

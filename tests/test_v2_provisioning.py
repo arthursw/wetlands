@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -38,6 +39,7 @@ from wetlands._internal.provisioning import (
     environment_lifecycle_gate,
 )
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
+from wetlands.specs import MANAGED_DEBUGPY_VERSION
 
 
 def _fake_pixi(
@@ -46,13 +48,14 @@ def _fake_pixi(
     install_delay: float = 0,
     install_exit_code: int = 0,
     managed_debugpy_importable: bool = True,
-    managed_debugpy_version: str | None = "1.8.17",
+    managed_debugpy_version: str | None = MANAGED_DEBUGPY_VERSION,
     mutate_locked: bool = False,
     version_delay: float = 0,
 ) -> Path:
-    executable = tmp_path / "pixi" / "bin" / ("pixi.exe" if os.name == "nt" else "pixi")
-    executable.parent.mkdir(parents=True)
-    executable.write_text(
+    bin_path = tmp_path / "pixi" / "bin"
+    bin_path.mkdir(parents=True)
+    implementation = bin_path / "fake_pixi.py"
+    implementation.write_text(
         f"""#!/usr/bin/env python3
 import pathlib
 import subprocess
@@ -93,8 +96,11 @@ elif arguments and arguments[0] == "run":
             print("No module named 'debugpy'", file=sys.stderr)
             raise SystemExit(1)
         actual = {managed_debugpy_version!r}
-        if actual != "1.8.17":
-            print(f"Wetlands managed runtime requires debugpy 1.8.17, found {{actual}}", file=sys.stderr)
+        if actual != {MANAGED_DEBUGPY_VERSION!r}:
+            print(
+                f"Wetlands managed runtime requires debugpy {MANAGED_DEBUGPY_VERSION}, found {{actual}}",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
         print(sys.executable)
     else:
@@ -104,7 +110,16 @@ else:
 """,
         encoding="utf-8",
     )
-    executable.chmod(0o755)
+    if os.name == "nt":
+        executable = bin_path / "pixi.cmd"
+        executable.write_text(f'@"{os.fsdecode(sys.executable)}" "{implementation}" %*\n', encoding="utf-8")
+    else:
+        executable = bin_path / "pixi"
+        executable.write_text(
+            f'#!/bin/sh\nexec "{os.fsdecode(sys.executable)}" "{implementation}" "$@"\n',
+            encoding="utf-8",
+        )
+        executable.chmod(0o755)
     return executable
 
 
@@ -357,7 +372,7 @@ def test_failed_install_has_structured_failure_and_cleans_target(tmp_path: Path)
 
 @pytest.mark.parametrize(
     ("managed_debugpy_version", "managed_debugpy_importable"),
-    [(None, True), ("1.8.18", True), ("1.8.17", False)],
+    [(None, True), ("1.8.21", True), (MANAGED_DEBUGPY_VERSION, False)],
 )
 def test_managed_runtime_is_validated_after_post_install(
     tmp_path: Path,

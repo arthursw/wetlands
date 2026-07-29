@@ -4,10 +4,13 @@ from importlib.metadata import PackageNotFoundError, version
 
 from wetlands._internal.value_codec import ValueDecodingError, ValueEncodingError
 from wetlands.debugging import DebugEndpoint, RunningWorker
+from wetlands.diagnostics import ExecutionFailure, ExecutionFailureCategory, RemoteExceptionInfo, WorkerInfo
+from wetlands.environment_info import ManagedEnvironmentInfo, ManagedEnvironmentState
 from wetlands.environment_manager import EnvironmentManager, EnvironmentNotReadyError
 from wetlands.lifecycle import (
     EnvironmentGenerationChangedError,
     EnvironmentInUseError,
+    EnvironmentNotFoundError,
     EnvironmentRecipeConflictError,
     ManagerCloseError,
     UnmanagedTargetError,
@@ -27,8 +30,10 @@ from wetlands.operation import (
     PreparationOperation,
     ProvisioningError,
     ProvisioningOperation,
+    RemovalError,
+    RemovalOperation,
 )
-from wetlands.provisioning import PixiInfo, ProvisioningStage, ProvisioningStep
+from wetlands.provisioning import PixiInfo, ProvisioningStage
 from wetlands.specs import (
     EnvironmentSpec,
     LocalPackage,
@@ -38,7 +43,6 @@ from wetlands.specs import (
 from wetlands.task import (
     ExecutionEvent,
     ExecutionEventKind,
-    ExecutionFailure,
     ExecutionState,
     ExecutionTask,
     InvalidStateError,
@@ -54,6 +58,7 @@ __all__ = [
     "EnvironmentManager",
     "EnvironmentGenerationChangedError",
     "EnvironmentInUseError",
+    "EnvironmentNotFoundError",
     "EnvironmentRecipeConflictError",
     "EnvironmentNotReadyError",
     "EnvironmentSpec",
@@ -61,11 +66,14 @@ __all__ = [
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionFailure",
+    "ExecutionFailureCategory",
     "ExecutionState",
     "ExecutionTask",
     "LocalPackage",
     "LocalPackageValidationError",
     "ManagedEnvironment",
+    "ManagedEnvironmentInfo",
+    "ManagedEnvironmentState",
     "ManagerCloseError",
     "InvalidStateError",
     "Operation",
@@ -82,12 +90,15 @@ __all__ = [
     "ProvisioningError",
     "ProvisioningOperation",
     "ProvisioningStage",
-    "ProvisioningStep",
+    "RemoteExceptionInfo",
+    "RemovalError",
+    "RemovalOperation",
     "RunningWorker",
     "ValueDecodingError",
     "ValueEncodingError",
     "UnmanagedTargetError",
     "WorkerPool",
+    "WorkerInfo",
     "WorkerStartError",
     "__version__",
 ]

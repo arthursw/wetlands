@@ -46,6 +46,13 @@ elif arguments and arguments[0] == "install":
 elif arguments and arguments[0] == "run":
     manifest_index = arguments.index("--manifest-path")
     command = arguments[manifest_index + 2:]
+    if (
+        len(command) == 3
+        and command[:2] == ["python", "-c"]
+        and "importlib.metadata.version('debugpy')" in command[2]
+    ):
+        print(sys.executable)
+        raise SystemExit(0)
     if command and command[0] == "python":
         command[0] = sys.executable
     raise SystemExit(subprocess.run(command, check=False).returncode)

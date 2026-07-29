@@ -1,6 +1,7 @@
 # Getting started
 
 This guide provisions a Pixi environment, starts a worker pool, and calls an installed Python function by qualified name.
+The complete example uses NumPy, so it does not require you to create or publish a separate worker package.
 
 ## Install Wetlands
 
@@ -10,18 +11,6 @@ pip install "wetlands[shared-memory]"
 
 The optional dependency installs NumPy in the host environment for automatic array transport.
 The worker environment must declare its own NumPy dependency.
-
-## Define the worker package
-
-Installable worker code should expose ordinary Python functions:
-
-```python
-def threshold(image: "numpy.ndarray", value: float) -> "numpy.ndarray":
-    return image > value
-```
-
-The package containing this function must be installed into the managed environment.
-Wetlands imports it inside the worker and never imports it into the host process.
 
 ## Construct the manager
 
@@ -69,10 +58,9 @@ from wetlands import EnvironmentSpec
 spec = EnvironmentSpec(
     python="3.12.*",
     conda=("numpy>=2",),
-    pypi=("example-worker-package==1.0.0",),
 )
 
-operation = manager.provision("threshold-v1", spec)
+operation = manager.provision("numpy-example", spec)
 operation.listen(lambda event: print(event.kind.value, event.message))
 environment = operation.wait_for()
 ```
@@ -93,10 +81,12 @@ import numpy as np
 with environment.start(workers=2) as pool:
     image = np.arange(16, dtype=np.float32).reshape(4, 4)
     task = pool.submit_import(
-        "example_worker.filters:threshold",
-        kwargs={"image": image, "value": 7.5},
+        "numpy:negative",
+        args=(image,),
     )
-    mask = task.wait_for()
+    result = task.wait_for()
+
+np.testing.assert_array_equal(result, -image)
 ```
 
 `submit_import()` accepts `package.module:qualified.callable`.
@@ -105,7 +95,36 @@ Nested class attributes such as `package.module:Processor.run` are valid.
 The host input array is copied into transport storage, so worker mutation cannot change the caller's array.
 The returned array is a normal independently owned NumPy array.
 
+## Call your own worker package
+
+Worker packages expose ordinary Python functions and declare their dependencies normally:
+
+```python
+def threshold(image: "numpy.ndarray", value: float) -> "numpy.ndarray":
+    return image > value
+```
+
+Install the package in the managed environment with a pinned PyPI requirement or a `LocalPackage`, then call it by qualified name:
+
+```python
+with environment.start() as pool:
+    task = pool.submit_import(
+        "my_worker_package.filters:threshold",
+        kwargs={"image": image, "value": 7.5},
+    )
+    mask = task.wait_for()
+```
+
+Wetlands imports the package inside the worker and never imports it into the host process.
+
 ## Execute local source during development
+
+For a runnable path-target example, save this as `worker_code.py`:
+
+```python
+def threshold(image, value):
+    return image > value
+```
 
 ```python
 with environment.start() as pool:
@@ -126,6 +145,8 @@ Installed packages should use `submit_import()` so imports follow normal Python 
 ```python
 import asyncio
 
+import numpy as np
+
 from wetlands import EnvironmentManager, EnvironmentSpec
 
 
@@ -143,18 +164,18 @@ async def run() -> None:
     await reporter
 
     environment = await manager.provision(
-        "threshold-v1",
+        "numpy-example",
         EnvironmentSpec(
             python="3.12.*",
             conda=("numpy>=2",),
-            pypi=("example-worker-package==1.0.0",),
         ),
     )
 
     with environment.start() as pool:
+        image = np.arange(16, dtype=np.float32).reshape(4, 4)
         result = await pool.submit_import(
-            "example_worker.filters:threshold",
-            kwargs={"image": image, "value": 7.5},
+            "numpy:negative",
+            args=(image,),
         )
         print(result)
 
@@ -178,6 +199,38 @@ Provisioning cancellation terminates the active subprocess tree and removes the 
 Task cancellation is cooperative during the configured grace period.
 If the worker does not finish in time, Wetlands terminates its process tree, marks the task canceled after cleanup, and starts a replacement worker.
 
+## Discover and remove environments
+
+Applications can inspect the environments owned by a manager root without scanning Wetlands directories:
+
+```python
+from wetlands import ManagedEnvironmentState
+
+for info in manager.managed_environments():
+    if info.state is ManagedEnvironmentState.READY:
+        print(f"{info.name} is ready at {info.path}")
+    else:
+        print(f"{info.name} is incomplete and can be removed or rebuilt")
+```
+
+`managed_environments()` returns immutable `ManagedEnvironmentInfo` snapshots in `READY` or `INCOMPLETE` state.
+Discovery reports incomplete owned targets left by an interrupted host process as well as ready environments.
+It ignores directories that Wetlands cannot prove it owns.
+
+Removal returns an awaitable and listenable `RemovalOperation`:
+
+```python
+removal = manager.remove("numpy-example")
+removal.listen(lambda event: print(event.kind.value, event.message))
+removed = removal.wait_for()
+print(removed.name)
+```
+
+Wetlands raises `EnvironmentNotFoundError` for a missing name and refuses to remove an unmanaged target or an environment with live workers.
+Close its worker pools first.
+Calling `cancel()` can stop removal while Wetlands is waiting or inspecting the target.
+Once Wetlands seals cancellation and begins destructive deletion, cancellation is refused and the operation completes the deletion instead of reporting a misleading canceled state.
+
 ## Close resources
 
 `WorkerPool` is a context manager.
@@ -187,11 +240,12 @@ Exiting it stops its workers.
 
 ```python
 with EnvironmentManager(root="wetlands") as manager:
-    environment = manager.provision("threshold-v1", spec).wait_for()
+    environment = manager.provision("numpy-example", spec).wait_for()
     with environment.start() as pool:
+        image = np.arange(16, dtype=np.float32).reshape(4, 4)
         result = pool.execute_import(
-            "example_worker.filters:threshold",
-            kwargs={"image": image, "value": 7.5},
+            "numpy:negative",
+            args=(image,),
         )
 ```
 

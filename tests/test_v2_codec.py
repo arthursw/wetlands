@@ -335,6 +335,7 @@ def test_zero_copy_decode_requires_caller_owned_attachment_list() -> None:
         dispose_leases(owners, unlink=True)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows shared memory does not use POSIX resource_tracker registration")
 def test_non_owner_tracking_is_disabled_without_unregistering_local_creator() -> None:
     fake_memory = MagicMock()
     fake_memory._name = "/foreign"
@@ -525,6 +526,8 @@ def test_reconciliation_unlinks_host_or_worker_lease_after_creator_identity_dies
     context = _lease_context(tmp_path, direction=direction, started_at=0.0)
     descriptor, leases = encode_value(numpy.arange(4), lease_context=context)
     name = descriptor[CODEC_MARKER]["name"]
+    dispose_leases(leases, unlink=False)
+    leases.clear()
 
     assert reconcile_shared_memory_leases(tmp_path) == (name,)
     assert load_shared_memory_lease_ledger(tmp_path)["leases"] == {}

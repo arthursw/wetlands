@@ -26,6 +26,19 @@ class EnvironmentInUseError(RuntimeError):
         super().__init__(f"Environment {environment!r}{generation} is in use by a live worker pool")
 
 
+class EnvironmentNotFoundError(LookupError):
+    """A requested managed environment target does not exist."""
+
+    def __init__(self, environment: str, *, alias: str | None = None) -> None:
+        self.environment = environment
+        self.alias = alias
+        if alias is None:
+            message = f"Managed environment {environment!r} does not exist"
+        else:
+            message = f"Managed environment {environment!r} does not exist; found portable name alias {alias!r}"
+        super().__init__(message)
+
+
 class EnvironmentGenerationChangedError(RuntimeError):
     """A managed handle or pool no longer matches the ready environment."""
 
@@ -103,6 +116,7 @@ class WorkerStartError(RuntimeError):
 __all__ = [
     "EnvironmentGenerationChangedError",
     "EnvironmentInUseError",
+    "EnvironmentNotFoundError",
     "EnvironmentRecipeConflictError",
     "ManagerCloseError",
     "UnmanagedTargetError",

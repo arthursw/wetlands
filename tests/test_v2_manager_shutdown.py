@@ -83,7 +83,7 @@ def test_close_rejects_operation_runner_listener_without_closing_manager(
     def prepare(manager: EnvironmentManager, operation) -> Any:
         listener_ready.set()
         assert emit_event.wait(2)
-        operation.emit(OperationEventKind.STEP, "preparing")
+        operation._emit(OperationEventKind.STEP, "preparing")
         return expected
 
     def close_from_listener(event) -> None:

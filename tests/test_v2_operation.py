@@ -33,7 +33,7 @@ def test_operation_events_are_replayed_and_async_iterable() -> None:
     operation: Operation[str] = Operation()
 
     def runner() -> str:
-        operation.emit(OperationEventKind.STEP, "working", stage="test")
+        operation._emit(OperationEventKind.STEP, "working", stage="test")
         release.wait()
         return "done"
 
@@ -159,7 +159,7 @@ def test_async_event_replay_is_bounded_and_retains_terminal_event() -> None:
 
     def runner() -> int:
         for index in range(operation._EVENT_HISTORY_LIMIT + 100):
-            operation.emit(OperationEventKind.OUTPUT, str(index), line=str(index))
+            operation._emit(OperationEventKind.OUTPUT, str(index), line=str(index))
         return 1
 
     operation._start_runner(runner, thread_name="test-bounded-events")
@@ -186,7 +186,7 @@ def test_terminal_operation_events_without_replay_close_immediately() -> None:
 
 def test_listener_replay_precedes_events_emitted_concurrently() -> None:
     operation: Operation[None] = Operation()
-    operation.emit(OperationEventKind.STEP, "old")
+    operation._emit(OperationEventKind.STEP, "old")
     replay_started = threading.Event()
     allow_replay = threading.Event()
     received: list[str] = []
@@ -200,7 +200,7 @@ def test_listener_replay_precedes_events_emitted_concurrently() -> None:
     listening = threading.Thread(target=operation.listen, args=(listener,))
     listening.start()
     assert replay_started.wait(timeout=1)
-    operation.emit(OperationEventKind.STEP, "new")
+    operation._emit(OperationEventKind.STEP, "new")
     allow_replay.set()
     listening.join(timeout=1)
 

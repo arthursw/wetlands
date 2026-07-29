@@ -10,10 +10,20 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterator
 
-from wetlands._internal.provisioning import _read_ready, prepare_pixi, provision_environment
+from wetlands._internal.provisioning import (
+    _read_ready,
+    environment_lifecycle_gate,
+    prepare_pixi,
+    provision_environment,
+)
 from wetlands._internal import management, runtime_state
+from wetlands._internal.environment_management import (
+    discover_managed_environments,
+    remove_managed_environment,
+)
 from wetlands._internal.value_codec import reconcile_shared_memory_leases
 from wetlands.debugging import DebugEndpoint, RunningWorker
+from wetlands.environment_info import ManagedEnvironmentInfo
 from wetlands.lifecycle import ManagerCloseError
 from wetlands.managed_environment import ManagedEnvironment
 from wetlands.operation import (
@@ -22,6 +32,7 @@ from wetlands.operation import (
     OperationEvent,
     PreparationOperation,
     ProvisioningOperation,
+    RemovalOperation,
 )
 from wetlands.specs import EnvironmentSpec, PixiInfo, environment_name_key, validate_environment_name
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
@@ -64,6 +75,7 @@ class EnvironmentManager:
         self._prepared: PixiInfo | None = None
         self._environment_lock = threading.RLock()
         self._environments: dict[str, ManagedEnvironment] = {}
+        self._environment_epochs: dict[str, int] = {}
         self._lifecycle_condition = threading.Condition(threading.RLock())
         self._close_lock = threading.Lock()
         self._active_operations: set[Operation[Any]] = set()
@@ -73,12 +85,6 @@ class EnvironmentManager:
 
     @property
     def root(self) -> Path:
-        return self._root
-
-    @property
-    def wetlands_instance_path(self) -> Path:
-        """Canonical root used by worker-runtime state."""
-
         return self._root
 
     @property
@@ -144,11 +150,15 @@ class EnvironmentManager:
         if not isinstance(spec, EnvironmentSpec):
             raise TypeError("spec must be an EnvironmentSpec")
         operation: ProvisioningOperation[ManagedEnvironment] = ProvisioningOperation(environment=normalized_name)
+        key = environment_name_key(normalized_name)
+        with self._environment_lock:
+            initial_epoch = self._environment_epochs.get(key, 0)
 
         def run() -> ManagedEnvironment:
             environment = provision_environment(self, operation, normalized_name, spec, replace_existing)
-            key = environment_name_key(normalized_name)
             with self._environment_lock:
+                if self._environment_epochs.get(key, 0) != initial_epoch:
+                    return environment
                 existing = self._environments.get(key)
                 if (
                     existing is not None
@@ -171,25 +181,44 @@ class EnvironmentManager:
         with self._manager_work():
             normalized_name = validate_environment_name(name)
             key = environment_name_key(normalized_name)
-            with self._environment_lock:
-                existing = self._environments.get(key)
-            if existing is not None:
-                if existing.name != normalized_name:
-                    raise EnvironmentNotReadyError(
-                        f"Environment name {normalized_name!r} aliases managed name {existing.name!r}"
-                    )
-            target = self.environments_root / normalized_name
-            metadata = _read_ready(target)
-            if metadata is None:
+            with environment_lifecycle_gate(self, normalized_name):
                 with self._environment_lock:
-                    self._environments.pop(key, None)
-                raise EnvironmentNotReadyError(f"Environment {normalized_name!r} is not ready")
-            if existing is not None and existing.generation_id == metadata.get("generation_id"):
-                return existing
-            environment = ManagedEnvironment._from_ready(self, normalized_name, target, metadata)
-            with self._environment_lock:
-                self._environments[key] = environment
-            return environment
+                    existing = self._environments.get(key)
+                if existing is not None:
+                    if existing.name != normalized_name:
+                        raise EnvironmentNotReadyError(
+                            f"Environment name {normalized_name!r} aliases managed name {existing.name!r}"
+                        )
+                target = self.environments_root / normalized_name
+                metadata = _read_ready(target)
+                if metadata is None:
+                    with self._environment_lock:
+                        self._environments.pop(key, None)
+                    raise EnvironmentNotReadyError(f"Environment {normalized_name!r} is not ready")
+                if existing is not None and existing.generation_id == metadata.get("generation_id"):
+                    return existing
+                environment = ManagedEnvironment._from_ready(self, normalized_name, target, metadata)
+                with self._environment_lock:
+                    self._environments[key] = environment
+                return environment
+
+    def managed_environments(self) -> tuple[ManagedEnvironmentInfo, ...]:
+        """Discover ready and incomplete environment targets owned by this root."""
+
+        with self._manager_work():
+            return discover_managed_environments(self)
+
+    def remove(self, name: str) -> RemovalOperation[ManagedEnvironmentInfo]:
+        """Remove a managed environment after proving it has no live workers."""
+
+        normalized_name = validate_environment_name(name)
+        operation: RemovalOperation[ManagedEnvironmentInfo] = RemovalOperation(environment=normalized_name)
+        self._start_operation(
+            operation,
+            lambda: remove_managed_environment(self, operation, normalized_name),
+            thread_name=f"wetlands-remove-{normalized_name}-{operation.id[:8]}",
+        )
+        return operation
 
     def _running_worker_entries(self, name: str) -> list[dict[str, Any]]:
         environment = self.environment(name)

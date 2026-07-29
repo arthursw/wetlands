@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import inspect
 import contextlib
+import importlib
+import inspect
 import json
 import os
 import secrets
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
-from dataclasses import field
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field
 from multiprocessing import shared_memory
 from pathlib import Path
-from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 CORE_CODEC_ID = "wetlands.core"
 CORE_CODEC_VERSION = 1
@@ -188,12 +191,13 @@ def _lease_ledger_lock(root: str | Path) -> Iterator[None]:
         if os.name == "nt":
             import msvcrt
 
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            locking = getattr(msvcrt, "locking")
+            locking(lock_file.fileno(), getattr(msvcrt, "LK_LOCK"), 1)
             try:
                 yield
             finally:
                 lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                locking(lock_file.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
         else:
             import fcntl
 
@@ -310,6 +314,7 @@ def load_shared_memory_lease_ledger(root: str | Path) -> dict[str, Any]:
 
 
 def _open_for_unlink(name: str) -> shared_memory.SharedMemory:
+    parameters: Mapping[str, inspect.Parameter]
     try:
         parameters = inspect.signature(shared_memory.SharedMemory).parameters
     except (TypeError, ValueError):
@@ -365,6 +370,7 @@ def reconcile_shared_memory_leases(root: str | Path) -> tuple[str, ...]:
 
 
 def _open_non_owner(name: str) -> shared_memory.SharedMemory:
+    parameters: Mapping[str, inspect.Parameter]
     try:
         parameters = inspect.signature(shared_memory.SharedMemory).parameters
     except (TypeError, ValueError):
@@ -573,10 +579,11 @@ def _encode_registered_value(
     if isinstance(value, bytes):
         return _descriptor(CORE_CODEC_ID, CORE_CODEC_VERSION, "bytes", value=bytes(value)), []
 
+    np: Any
     try:
-        import numpy as np
+        np = importlib.import_module("numpy")
     except ImportError:
-        np = None  # type: ignore[assignment]
+        np = None
     if np is not None and isinstance(value, np.ndarray):
         if value.dtype.hasobject:
             raise ValueEncodingError(f"{path}: object-dtype NumPy arrays are unsupported")
@@ -628,7 +635,7 @@ def _encode_registered_value(
         with _created_names_lock:
             _created_names.add(memory.name)
         try:
-            target = np.ndarray(contiguous.shape, dtype=contiguous.dtype, buffer=memory.buf)
+            target: NDArray[Any] = np.ndarray(contiguous.shape, dtype=contiguous.dtype, buffer=memory.buf)
             target[...] = contiguous
             del target
         except BaseException:
@@ -911,24 +918,24 @@ def _decode_payload(
     if not isinstance(name, str) or not name:
         raise ValueDecodingError(f"{path}: invalid shared-memory name")
     memory = _open_non_owner(name)
-    if memory.size != segment_size:
+    if len(memory.buf) < nbytes or (os.name != "nt" and memory.size != segment_size):
         memory.close()
         raise ValueDecodingError(f"{path}: shared-memory size does not match its descriptor")
     lease = SharedMemoryLease(name, memory, creator=False)
     try:
-        array = np.ndarray(shape_payload, dtype=dtype, buffer=memory.buf)
+        array: NDArray[Any] = np.ndarray(shape_payload, dtype=dtype, buffer=memory.buf)
         if not copy_arrays:
             if attachments is None:
                 raise ValueDecodingError(f"{path}: zero-copy array decoding requires an attachment lease list")
             attachments.append(lease)
             return array
-        result = array.copy(order="C")
+        array_copy = array.copy(order="C")
         del array
         if attachments is not None:
             attachments.append(lease)
         else:
             lease.close()
-        return result
+        return array_copy
     except BaseException:
         lease.close()
         raise

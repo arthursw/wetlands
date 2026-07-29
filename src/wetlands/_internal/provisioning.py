@@ -21,6 +21,7 @@ import urllib.request
 import uuid
 import zipfile
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, TYPE_CHECKING
 
@@ -56,7 +57,6 @@ from wetlands.specs import (
     EnvironmentSpec,
     PixiInfo,
     ProvisioningStage,
-    ProvisioningStep,
     environment_name_key,
     validate_environment_name,
 )
@@ -69,6 +69,19 @@ READY_SCHEMA_VERSION = 2
 OWNER_MARKER = ".wetlands-owned"
 READY_DIRECTORY = ".wetlands"
 READY_FILENAME = "ready.json"
+
+
+@dataclass(frozen=True)
+class ProvisioningStep:
+    """An internal command step with a safe display representation."""
+
+    id: str
+    stage: ProvisioningStage
+    argv: tuple[str, ...]
+    cwd: Path | None = None
+    environment: Mapping[str, str] | None = field(default=None, repr=False)
+    display: str | None = None
+    shell: bool = False
 
 
 def _safe_command(argv: tuple[str, ...], display: str | None = None) -> str:
@@ -154,7 +167,7 @@ class CancelableFileLock:
                     break
                 except Exception:
                     if self.operation is not None:
-                        self.operation.emit(
+                        self.operation._emit(
                             OperationEventKind.STEP,
                             "Waiting for lifecycle lock",
                             stage=self.stage.value,
@@ -173,7 +186,7 @@ class CancelableFileLock:
                     break
                 except BlockingIOError:
                     if self.operation is not None:
-                        self.operation.emit(
+                        self.operation._emit(
                             OperationEventKind.STEP,
                             "Waiting for lifecycle lock",
                             stage=self.stage.value,
@@ -207,6 +220,7 @@ def environment_lifecycle_gate(
     name: str,
     *,
     operation: Operation[Any] | None = None,
+    error_type: type[OperationError] | None = None,
 ) -> CancelableFileLock:
     """Return the cross-process gate for one canonical managed-environment path."""
     normalized_name = validate_environment_name(name)
@@ -222,7 +236,7 @@ def environment_lifecycle_gate(
         operation,
         ProvisioningStage.LOCK_WAIT,
         environment_name=normalized_name,
-        error_type=ProvisioningError if operation is not None else None,
+        error_type=(error_type or ProvisioningError) if operation is not None else None,
     )
 
 
@@ -269,7 +283,7 @@ class _WindowsJob:
                 ("PeakJobMemoryUsed", ctypes.c_size_t),
             ]
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         kernel32.SetInformationJobObject.argtypes = (
             wintypes.HANDLE,
@@ -281,7 +295,8 @@ class _WindowsJob:
         kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         handle = kernel32.CreateJobObjectW(None, None)
         if not handle:
-            raise ctypes.WinError(ctypes.get_last_error())
+            error = getattr(ctypes, "get_last_error")()
+            raise OSError(error, getattr(ctypes, "FormatError")(error))
         try:
             information = EXTENDED_LIMIT_INFORMATION()
             information.BasicLimitInformation.LimitFlags = self._KILL_ON_CLOSE
@@ -291,10 +306,12 @@ class _WindowsJob:
                 ctypes.byref(information),
                 ctypes.sizeof(information),
             ):
-                raise ctypes.WinError(ctypes.get_last_error())
+                error = getattr(ctypes, "get_last_error")()
+                raise OSError(error, getattr(ctypes, "FormatError")(error))
             process_handle = wintypes.HANDLE(int(getattr(process, "_handle")))
             if not kernel32.AssignProcessToJobObject(handle, process_handle):
-                raise ctypes.WinError(ctypes.get_last_error())
+                error = getattr(ctypes, "get_last_error")()
+                raise OSError(error, getattr(ctypes, "FormatError")(error))
         except BaseException:
             kernel32.CloseHandle(handle)
             raise
@@ -335,7 +352,7 @@ class ProcessTreeRunner:
         if self.operation.cancellation_requested:
             raise OperationCanceled(self.operation.id)
         command = _safe_command(step.argv, step.display)
-        self.operation.emit(
+        self.operation._emit(
             OperationEventKind.STEP,
             command,
             stage=step.stage.value,
@@ -359,7 +376,7 @@ class ProcessTreeRunner:
             "shell": step.shell,
         }
         if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
         else:
             kwargs["start_new_session"] = True
         with self._lock:
@@ -408,7 +425,7 @@ class ProcessTreeRunner:
                 try:
                     self._active_job = _WindowsJob(process)
                 except Exception:
-                    self.operation.emit(
+                    self.operation._emit(
                         OperationEventKind.STEP,
                         "Windows Job Object unavailable; using recursive process termination",
                         stage=step.stage.value,
@@ -428,7 +445,7 @@ class ProcessTreeRunner:
                     line = raw_line.rstrip("\r\n")
                     safe_line = _safe_command((line,))
                     tail.append(safe_line)
-                    self.operation.emit(
+                    self.operation._emit(
                         OperationEventKind.OUTPUT,
                         safe_line,
                         stage=step.stage.value,
@@ -750,7 +767,7 @@ def _prepare_pixi_impl(manager: EnvironmentManager, operation: Operation[Any]) -
         with tempfile.TemporaryDirectory(prefix=".pixi-install-", dir=bin_root) as temporary:
             archive_path = Path(temporary) / artifact
             staged_path = Path(temporary) / executable.name
-            operation.emit(
+            operation._emit(
                 OperationEventKind.STEP,
                 f"Downloading Pixi {PIXI_VERSION}",
                 stage=ProvisioningStage.PIXI_DOWNLOAD.value,
@@ -766,6 +783,7 @@ def _prepare_pixi_impl(manager: EnvironmentManager, operation: Operation[Any]) -
             try:
                 response = opener.open(url, timeout=10)
                 close_response = response.close
+                assert close_response is not None
                 runner.set_active_closer(close_response)
                 with response, archive_path.open("wb") as destination:
                     total = int(response.headers.get("Content-Length", "0")) or None
@@ -779,7 +797,7 @@ def _prepare_pixi_impl(manager: EnvironmentManager, operation: Operation[Any]) -
                         destination.write(block)
                         digest.update(block)
                         current += len(block)
-                        operation.emit(
+                        operation._emit(
                             OperationEventKind.PROGRESS,
                             "Downloading Pixi",
                             stage=ProvisioningStage.PIXI_DOWNLOAD.value,
@@ -817,27 +835,27 @@ def _prepare_pixi_impl(manager: EnvironmentManager, operation: Operation[Any]) -
             try:
                 if artifact.endswith(".zip"):
                     with zipfile.ZipFile(archive_path) as archive:
-                        members = [
+                        zip_members = [
                             member
                             for member in archive.infolist()
                             if Path(member.filename).name in {"pixi", "pixi.exe"}
                         ]
-                        if len(members) != 1:
+                        if len(zip_members) != 1:
                             raise ValueError("Pixi archive did not contain exactly one executable")
-                        with archive.open(members[0]) as source, staged_path.open("wb") as destination:
+                        with archive.open(zip_members[0]) as source, staged_path.open("wb") as destination:
                             _copy_cancelable(source, destination, operation)
                 else:
                     with tarfile.open(archive_path, "r:gz") as archive:
-                        members = [
+                        tar_members = [
                             member for member in archive.getmembers() if Path(member.name).name in {"pixi", "pixi.exe"}
                         ]
-                        if len(members) != 1:
+                        if len(tar_members) != 1:
                             raise ValueError("Pixi archive did not contain exactly one executable")
-                        source = archive.extractfile(members[0])
-                        if source is None:
+                        tar_source = archive.extractfile(tar_members[0])
+                        if tar_source is None:
                             raise ValueError("Could not extract Pixi executable")
-                        with source, staged_path.open("wb") as destination:
-                            _copy_cancelable(source, destination, operation)
+                        with tar_source, staged_path.open("wb") as destination:
+                            _copy_cancelable(tar_source, destination, operation)
             except OperationCanceled:
                 raise
             except BaseException as error:
@@ -1868,7 +1886,7 @@ def provision_environment(
             if operation.cancellation_requested:
                 raise OperationCanceled(operation.id)
             current_stage = ProvisioningStage.TARGET_INSPECTION
-            operation.emit(
+            operation._emit(
                 OperationEventKind.STEP,
                 f"Inspecting environment {name!r}",
                 stage=ProvisioningStage.TARGET_INSPECTION.value,
@@ -1958,7 +1976,7 @@ def provision_environment(
                         str(generation_id) if generation_id is not None else None,
                     )
                 current_stage = ProvisioningStage.INCOMPLETE_REMOVAL
-                operation.emit(
+                operation._emit(
                     OperationEventKind.CLEANUP,
                     f"Removing incomplete environment {name!r}",
                     stage=ProvisioningStage.INCOMPLETE_REMOVAL.value,
@@ -1993,7 +2011,7 @@ def provision_environment(
                 },
             )
             current_stage = ProvisioningStage.PROJECT_MATERIALIZATION
-            operation.emit(
+            operation._emit(
                 OperationEventKind.STEP,
                 "Writing deterministic Pixi project",
                 stage=ProvisioningStage.PROJECT_MATERIALIZATION.value,
@@ -2070,7 +2088,7 @@ def provision_environment(
             current_stage = (
                 ProvisioningStage.LOCK_RESOLUTION if spec.lock_bytes is None else ProvisioningStage.CONDA_INSTALL
             )
-            operation.emit(
+            operation._emit(
                 OperationEventKind.STEP,
                 ("Resolving pixi.lock" if spec.lock_bytes is None else "Verifying supplied pixi.lock"),
                 stage=ProvisioningStage.LOCK_RESOLUTION.value,
@@ -2093,7 +2111,7 @@ def provision_environment(
                     environment=pixi_environment,
                 )
             )
-            operation.emit(
+            operation._emit(
                 OperationEventKind.STEP,
                 (
                     "Pixi installed the declared PyPI dependencies and managed worker runtime"
@@ -2133,6 +2151,7 @@ def provision_environment(
                 )
             for index, command in enumerate(spec.post_install):
                 current_stage = ProvisioningStage.POST_INSTALL
+                command_argv: tuple[str, ...]
                 if command.shell:
                     shell_command = command.argv[0] if len(command.argv) == 1 else shlex.join(command.argv)
                     if os.name == "nt":
@@ -2141,7 +2160,7 @@ def provision_environment(
                         command_argv = ("/bin/sh", "-c", shell_command)
                 else:
                     command_argv = command.argv
-                argv = (
+                post_install_argv = (
                     str(pixi.executable),
                     "run",
                     "--manifest-path",
@@ -2158,7 +2177,7 @@ def provision_environment(
                     ProvisioningStep(
                         f"post-install-{index}",
                         ProvisioningStage.POST_INSTALL,
-                        argv,
+                        post_install_argv,
                         cwd=target,
                         environment=pixi_environment,
                         display=command.display,
@@ -2229,7 +2248,7 @@ def provision_environment(
                 "protocol_version": EXECUTION_PROTOCOL_VERSION,
                 "completed_at": time.time(),
             }
-            operation.emit(
+            operation._emit(
                 OperationEventKind.STEP,
                 "Publishing ready metadata",
                 stage=ProvisioningStage.METADATA_PUBLICATION.value,
@@ -2250,7 +2269,7 @@ def provision_environment(
         except BaseException as error:
             if created_target and created_target_identity is not None:
                 current_stage = ProvisioningStage.CLEANUP
-                operation.emit(
+                operation._emit(
                     OperationEventKind.CLEANUP,
                     f"Removing incomplete environment {name!r}",
                     stage=ProvisioningStage.CLEANUP.value,

@@ -8,6 +8,7 @@ from wetlands.specs import (
     EnvironmentSpec,
     LocalPackage,
     LocalPackageValidationError,
+    MANAGED_DEBUGPY_VERSION,
     PostInstallCommand,
     validate_environment_name,
 )
@@ -101,7 +102,7 @@ def test_manifest_renders_pypi_extras_and_direct_urls() -> None:
 
     assert '"requests" = { version = ">=2", extras = ["socks"] }' in manifest
     assert '"example" = { url = "https://example.invalid/example.whl" }' in manifest
-    assert '"debugpy" = "==1.8.17"' in manifest
+    assert f'"debugpy" = "=={MANAGED_DEBUGPY_VERSION}"' in manifest
     assert manifest.startswith("[workspace]\n")
     assert "[project]" not in manifest
 

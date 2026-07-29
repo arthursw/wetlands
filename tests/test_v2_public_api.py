@@ -12,6 +12,7 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "DebugEndpoint",
         "EnvironmentGenerationChangedError",
         "EnvironmentInUseError",
+        "EnvironmentNotFoundError",
         "EnvironmentRecipeConflictError",
         "EnvironmentManager",
         "EnvironmentNotReadyError",
@@ -20,12 +21,15 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "ExecutionEvent",
         "ExecutionEventKind",
         "ExecutionFailure",
+        "ExecutionFailureCategory",
         "ExecutionState",
         "ExecutionTask",
         "InvalidStateError",
         "LocalPackage",
         "LocalPackageValidationError",
         "ManagedEnvironment",
+        "ManagedEnvironmentInfo",
+        "ManagedEnvironmentState",
         "ManagerCloseError",
         "Operation",
         "OperationCanceled",
@@ -41,12 +45,15 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "ProvisioningError",
         "ProvisioningOperation",
         "ProvisioningStage",
-        "ProvisioningStep",
+        "RemoteExceptionInfo",
+        "RemovalError",
+        "RemovalOperation",
         "RunningWorker",
         "ValueDecodingError",
         "ValueEncodingError",
         "UnmanagedTargetError",
         "WorkerPool",
+        "WorkerInfo",
         "WorkerStartError",
         "__version__",
     }
@@ -78,8 +85,7 @@ def test_manager_configuration_is_read_only(tmp_path) -> None:
 
     with pytest.raises(AttributeError):
         manager.root = tmp_path / "other"
-    with pytest.raises(AttributeError):
-        manager.wetlands_instance_path = tmp_path / "other"
+    assert not hasattr(manager, "wetlands_instance_path")
     with pytest.raises(AttributeError):
         manager.termination_grace = 0
     assert manager.network is not None
@@ -103,7 +109,12 @@ def test_execution_task_does_not_expose_mutable_future() -> None:
     task = wetlands.ExecutionTask()
     assert not hasattr(task, "future")
     assert not hasattr(task, "status")
+    assert not hasattr(task, "start")
     assert "CANCELATION" not in wetlands.ExecutionEventKind.__members__
+
+
+def test_operation_does_not_expose_internal_event_emission() -> None:
+    assert not hasattr(wetlands.Operation(), "emit")
 
 
 def test_environment_handle_cannot_start_or_attach_after_manager_close(

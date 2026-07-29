@@ -480,7 +480,7 @@ def test_canceling_awaiter_waits_for_execution_cleanup():
 
 def test_multi_worker_launch_is_failure_atomic(tmp_path):
     manager = MagicMock()
-    manager.wetlands_instance_path = tmp_path
+    manager.root = tmp_path
     manager.debug = False
     manager.termination_grace = 1.0
     runtime = ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
@@ -512,7 +512,7 @@ def test_multi_worker_launch_is_failure_atomic(tmp_path):
 
 def test_persistent_launch_failure_discards_uncommissioned_attempt(tmp_path):
     manager = MagicMock()
-    manager.wetlands_instance_path = tmp_path
+    manager.root = tmp_path
     manager.debug = False
     manager.termination_grace = 1.0
     runtime = ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
@@ -553,7 +553,7 @@ def test_persistent_launch_failure_discards_uncommissioned_attempt(tmp_path):
 
 def test_persistent_launch_reconciliation_failure_releases_controller_claim(tmp_path):
     manager = MagicMock()
-    manager.wetlands_instance_path = tmp_path
+    manager.root = tmp_path
     manager.termination_grace = 1.0
     runtime = ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
 
@@ -579,7 +579,7 @@ def test_persistent_launch_reconciliation_failure_releases_controller_claim(tmp_
 
 def test_partial_attach_rolls_back_connections_and_controller_claim(tmp_path):
     manager = MagicMock()
-    manager.wetlands_instance_path = tmp_path
+    manager.root = tmp_path
     runtime = ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
     first = MagicMock(spec=_Worker)
     first.connection = MagicMock()
@@ -606,7 +606,7 @@ def test_partial_attach_rolls_back_connections_and_controller_claim(tmp_path):
 
 def test_attach_wraps_protocol_mismatch_in_public_start_error(tmp_path):
     manager = MagicMock()
-    manager.wetlands_instance_path = tmp_path
+    manager.root = tmp_path
     runtime = ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
     entries = ({"pool_id": "pool-1", "worker_index": 0},)
     mismatch = ProtocolCompatibilityError("protocol mismatch")
@@ -627,7 +627,7 @@ def test_attach_wraps_protocol_mismatch_in_public_start_error(tmp_path):
 
 def test_attach_claim_failure_does_not_leave_local_controller_identity(tmp_path):
     manager = MagicMock()
-    manager.wetlands_instance_path = tmp_path
+    manager.root = tmp_path
     runtime = ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
 
     with (

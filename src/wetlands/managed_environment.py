@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
 
 class ManagedEnvironment:
+    """A verified, ready Pixi environment managed by one manager root.
+
+    Instances are returned by :meth:`EnvironmentManager.provision` or
+    :meth:`EnvironmentManager.environment`; applications do not construct them directly.
+    """
+
     def __init__(
         self,
         manager: EnvironmentManager,
@@ -45,38 +51,47 @@ class ManagedEnvironment:
 
     @property
     def name(self) -> str:
+        """Return the managed environment name."""
         return self._name
 
     @property
     def path(self) -> Path:
+        """Return the canonical Pixi project directory."""
         return self._path
 
     @property
     def pixi_manifest_path(self) -> Path:
+        """Return the generated ``pixi.toml`` path."""
         return self._path / "pixi.toml"
 
     @property
     def pixi_lock_path(self) -> Path:
+        """Return the resolved or supplied ``pixi.lock`` path."""
         return self._path / "pixi.lock"
 
     @property
     def pixi_version(self) -> str:
+        """Return the Pixi version recorded when this generation was provisioned."""
         return str(self._metadata["pixi_version"])
 
     @property
     def pixi_executable_path(self) -> Path:
+        """Return the Pixi executable used to provision this generation."""
         return Path(self._metadata["pixi_executable"])
 
     @property
     def generation_id(self) -> str:
+        """Return the unique identifier for this published environment generation."""
         return str(self._metadata["generation_id"])
 
     @property
     def recipe_hash(self) -> str:
+        """Return the hash of the complete normalized environment recipe."""
         return str(self._metadata["recipe_hash"])
 
     @property
     def lockfile_hash(self) -> str:
+        """Return the SHA-256 hash of this generation's lockfile."""
         return str(self._metadata["lock_sha256"])
 
     def start(
@@ -86,6 +101,13 @@ class ManagedEnvironment:
         persistent: bool = False,
         worker_timeout: float | None = None,
     ) -> WorkerPool:
+        """Start a new warm worker pool for this environment generation.
+
+        Args:
+            workers: Number of worker processes in the pool.
+            persistent: Keep workers alive when the controller deliberately detaches.
+            worker_timeout: Optional maximum execution time in seconds for each task.
+        """
         with self._manager._manager_work():
             if workers < 1:
                 raise ValueError("workers must be at least one")
@@ -126,6 +148,7 @@ class ManagedEnvironment:
             return pool
 
     def close_pools(self) -> None:
+        """Close every worker pool started through this environment handle."""
         errors = self._close_pools()
         if errors:
             raise ManagerCloseError(errors)
@@ -199,6 +222,8 @@ class ManagedEnvironment:
 
 
 class WorkerPool:
+    """A group of warm worker processes for one managed environment generation."""
+
     def __init__(self, environment: ManagedEnvironment, runtime: ExternalEnvironment) -> None:
         self.environment = environment
         self._runtime = runtime
@@ -206,6 +231,7 @@ class WorkerPool:
 
     @property
     def worker_count(self) -> int:
+        """Return the number of workers in the pool."""
         return self._runtime.worker_count
 
     def submit_import(
@@ -216,6 +242,7 @@ class WorkerPool:
         kwargs: dict[str, Any] | None = None,
         context_keyword: str | None = None,
     ) -> ExecutionTask[Any]:
+        """Submit an installed ``module:qualified.callable`` target for execution."""
         self._ensure_open()
         return self._runtime.submit_import(
             target,
@@ -234,6 +261,11 @@ class WorkerPool:
         cache: bool = True,
         context_keyword: str | None = None,
     ) -> ExecutionTask[Any]:
+        """Submit a callable from an explicit local source path.
+
+        Path execution is intended for local development; installed packages should use
+        :meth:`submit_import`.
+        """
         self._ensure_open()
         return self._runtime.submit_path(
             path,
@@ -253,6 +285,7 @@ class WorkerPool:
         timeout: float | None = None,
         context_keyword: str | None = None,
     ) -> Any:
+        """Execute an installed target and block until it finishes."""
         return self.submit_import(
             target,
             args=args,
@@ -271,6 +304,7 @@ class WorkerPool:
         timeout: float | None = None,
         context_keyword: str | None = None,
     ) -> Any:
+        """Execute a local path target and block until it finishes."""
         return self.submit_path(
             path,
             qualname,
@@ -281,11 +315,13 @@ class WorkerPool:
         ).wait_for(timeout)
 
     def detach(self) -> None:
+        """Release control of a persistent pool without stopping its workers."""
         self._ensure_open()
         self._runtime.detach()
         self._closed = True
 
     def close(self) -> None:
+        """Stop all workers in the pool and release their resources."""
         if self._closed:
             return
         self._runtime._exit()

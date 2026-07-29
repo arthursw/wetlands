@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from wetlands._internal.diagnostics import TaskFailureCategory
+from wetlands.diagnostics import ExecutionFailureCategory
 from wetlands._internal.process_termination import ProcessTerminationError
 from wetlands.external_environment import ExternalEnvironment, _Worker
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
@@ -21,7 +21,7 @@ from wetlands.task import ExecutionState, ExecutionTask
 
 def _environment(tmp_path: Path) -> ExternalEnvironment:
     manager = MagicMock()
-    manager.wetlands_instance_path = tmp_path / "wetlands"
+    manager.root = tmp_path / "wetlands"
     manager.environments_root = tmp_path / "wetlands" / "environments"
     manager.state_root = tmp_path / "wetlands" / "state"
     return ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
@@ -187,7 +187,7 @@ def test_health_monitor_fails_dead_worker_task_and_requests_replacement(mock_ter
 
     assert task.state == ExecutionState.FAILED
     assert task.error is not None
-    assert task.error.category == TaskFailureCategory.WORKER_DIED
+    assert task.error.category == ExecutionFailureCategory.WORKER_DIED
     assert worker not in environment._workers
     environment._try_replace_worker.assert_called_once_with(worker.index)
 
@@ -209,7 +209,7 @@ def test_health_monitor_fails_hung_worker_only_after_timeout(mock_terminate, tmp
 
     assert task.state == ExecutionState.FAILED
     assert task.error is not None
-    assert task.error.category == TaskFailureCategory.TIMEOUT
+    assert task.error.category == ExecutionFailureCategory.TIMEOUT
     assert worker not in environment._workers
     environment._try_replace_worker.assert_called_once_with(worker.index)
 
@@ -422,7 +422,7 @@ def test_worker_protocol_violation_fails_task_retires_worker_and_replaces(
     replace.assert_called_once_with(worker.index)
     assert task.state is ExecutionState.FAILED
     assert task.error is not None
-    assert task.error.category is TaskFailureCategory.WORKER_CONNECTION
+    assert task.error.category is ExecutionFailureCategory.WORKER_CONNECTION
     assert "protocol failure" in task.error.message.lower()
     with pytest.raises(ExecutionError):
         task.wait_for()
@@ -562,7 +562,7 @@ def test_task_is_requeued_when_worker_retires_after_idle_pop(tmp_path):
         "_lease_context",
         side_effect=blocked_lease_context,
     ):
-        starter = threading.Thread(target=task.start)
+        starter = threading.Thread(target=task._start)
         starter.start()
         assert dispatch_entered.wait(2)
         with environment._lock:

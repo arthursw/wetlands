@@ -9,7 +9,6 @@ import os
 import re
 import unicodedata
 import urllib.parse
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,7 @@ from packaging.utils import InvalidName, canonicalize_name
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - exercised by Python 3.9/3.10 compatibility jobs
-    import tomli as tomllib  # type: ignore[no-redef]
+    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
 _WINDOWS_RESERVED = {
     "con",
@@ -32,7 +31,7 @@ _WINDOWS_RESERVED = {
 }
 _WINDOWS_INVALID_CHARACTERS = frozenset('<>:"|?*')
 _PORTABLE_EXTRA = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-MANAGED_DEBUGPY_VERSION = "1.8.17"
+MANAGED_DEBUGPY_VERSION = "1.8.20"
 MANAGED_RUNTIME_PYPI = (f"debugpy=={MANAGED_DEBUGPY_VERSION}",)
 _MANAGED_RUNTIME_PACKAGE_NAMES = frozenset({"debugpy"})
 
@@ -42,6 +41,8 @@ class LocalPackageValidationError(ValueError):
 
 
 class ProvisioningStage(enum.Enum):
+    """A stable provisioning stage identifier used by operation events."""
+
     LOCK_WAIT = "lock_wait"
     PIXI_DISCOVERY = "pixi_discovery"
     PIXI_DOWNLOAD = "pixi_download"
@@ -62,20 +63,11 @@ class ProvisioningStage(enum.Enum):
 
 @dataclass(frozen=True)
 class PixiInfo:
+    """Information about the validated Pixi executable used by Wetlands."""
+
     executable: Path
     version: str
     managed: bool
-
-
-@dataclass(frozen=True)
-class ProvisioningStep:
-    id: str
-    stage: ProvisioningStage
-    argv: tuple[str, ...]
-    cwd: Path | None = None
-    environment: Mapping[str, str] | None = field(default=None, repr=False)
-    display: str | None = None
-    shell: bool = False
 
 
 def validate_environment_name(name: str) -> str:
@@ -108,6 +100,11 @@ def environment_name_key(name: str) -> str:
 
 @dataclass(frozen=True)
 class LocalPackage:
+    """An installable local Python package included in an environment recipe.
+
+    The source must contain a PEP 621 ``pyproject.toml`` with ``[project].name``.
+    """
+
     source: Path
     editable: bool = False
     extras: tuple[str, ...] = ()
@@ -148,6 +145,8 @@ class LocalPackage:
 
 @dataclass(frozen=True)
 class PostInstallCommand:
+    """A command run after Pixi installs the environment dependencies."""
+
     argv: tuple[str, ...]
     shell: bool = False
     display: str | None = None
@@ -165,6 +164,12 @@ class PostInstallCommand:
 
 @dataclass(frozen=True)
 class EnvironmentSpec:
+    """The complete immutable recipe for a managed Pixi environment.
+
+    Dependency strings use Pixi's Conda syntax in :attr:`conda` and PEP 508
+    requirement syntax in :attr:`pypi`.
+    """
+
     python: str = ">=3.9"
     conda: tuple[str, ...] = ()
     pypi: tuple[str, ...] = ()
@@ -220,10 +225,10 @@ class EnvironmentSpec:
         local = tuple(self.local)
         if any(not isinstance(package, LocalPackage) for package in local):
             raise TypeError("local entries must be LocalPackage instances")
-        for package in local:
-            if package.distribution_name in _MANAGED_RUNTIME_PACKAGE_NAMES:
+        for local_package in local:
+            if local_package.distribution_name in _MANAGED_RUNTIME_PACKAGE_NAMES:
                 raise ValueError(
-                    f"Local package {package.distribution_name!r} is managed by the Wetlands worker runtime"
+                    f"Local package {local_package.distribution_name!r} is managed by the Wetlands worker runtime"
                 )
         post_install = tuple(self.post_install)
         if any(not isinstance(command, PostInstallCommand) for command in post_install):
@@ -246,9 +251,11 @@ class EnvironmentSpec:
 
     @property
     def lock_bytes(self) -> bytes | None:
+        """Return an independent copy of the supplied lockfile bytes, if any."""
         return self._lock_bytes
 
     def normalized(self) -> dict[str, Any]:
+        """Return the canonical recipe representation used for identity."""
         return {
             "python": self.python.strip(),
             "conda": sorted(set(self.conda)),
@@ -281,6 +288,7 @@ class EnvironmentSpec:
 
     @property
     def recipe_hash(self) -> str:
+        """Return the SHA-256 identity of the normalized recipe."""
         payload = json.dumps(self.normalized(), sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(payload).hexdigest()
 

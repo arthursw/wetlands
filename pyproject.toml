@@ -26,6 +26,13 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
 ]
 
+[project.urls]
+Homepage = "https://arthursw.github.io/wetlands/latest/"
+Documentation = "https://arthursw.github.io/wetlands/latest/"
+Repository = "https://github.com/arthursw/wetlands"
+Issues = "https://github.com/arthursw/wetlands/issues"
+Changelog = "https://github.com/arthursw/wetlands/blob/main/CHANGELOG.md"
+
 [project.scripts]
 wetlands = "wetlands.cli:main"
 
@@ -35,9 +42,31 @@ requires = ["hatchling"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wetlands"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/examples",
+    "/scripts",
+    "/tools",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/README.md",
+    "/SECURITY.md",
+    "/Wetland.png",
+    "/mkdocs.yml",
+    "/pyproject.toml",
+    "/uv.lock",
+]
 exclude = [
+    "/site",
+    "/dist",
+    "/.vscode",
     "/.venv",
     "/.venv-*",
+    "/.worktrees",
 ]
 
 [project.optional-dependencies]

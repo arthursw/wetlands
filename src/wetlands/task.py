@@ -27,10 +27,10 @@ else:
         Self = Any  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
-    from wetlands._internal.diagnostics import TaskFailure as ExecutionFailure
+    from wetlands.diagnostics import ExecutionFailure
 else:
     try:
-        from wetlands._internal.diagnostics import TaskFailure as ExecutionFailure
+        from wetlands.diagnostics import ExecutionFailure
     except ImportError:
         ExecutionFailure = None  # type: ignore[assignment,misc]
 
@@ -174,10 +174,8 @@ class ExecutionTask(Generic[T]):
 
     # --- Control ---
 
-    def start(self) -> Self:
-        """Dispatch the task to the remote environment.
-        No-op if already started. Returns self for chaining.
-        """
+    def _start(self) -> Self:
+        """Dispatch a task after its owning worker pool has configured it."""
         with self._lock:
             if self._status != ExecutionState.PENDING:
                 return self

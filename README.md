@@ -22,6 +22,7 @@ Wetlands 2 provides:
 - side-effect-light manager construction;
 - observable and cancellable preparation and provisioning operations;
 - reproducible Pixi projects and `pixi.lock` files;
+- managed-environment discovery and safe asynchronous removal;
 - warm worker pools;
 - qualified installed-package targets and path targets for local development;
 - automatic transport of ordinary Python values and NumPy arrays;
@@ -60,44 +61,29 @@ preparation.listen(lambda event: print(event.stage, event.message))
 pixi = preparation.wait_for()
 
 spec = EnvironmentSpec(
-    python="3.10.*",
-    conda=("cellpose==3.1.0",),
-    pypi=("napari-wsegmenter",),
+    python="3.12.*",
+    conda=("numpy>=2",),
 )
-environment = manager.provision("cellpose", spec).wait_for()
+environment = manager.provision("numpy-example", spec).wait_for()
 
 with environment.start(workers=1) as workers:
-    image = np.zeros((256, 256), dtype=np.float32)
+    image = np.arange(9, dtype=np.float32).reshape(3, 3)
     task = workers.submit_import(
-        "napari_wsegmenter._cellpose:segment",
-        kwargs={
-            "image": image,
-            "model_type": "cyto",
-            "use_gpu": False,
-            "diameter": 30.0,
-        },
+        "numpy:negative",
+        args=(image,),
     )
-    masks = task.wait_for()
+    result = task.wait_for()
+
+np.testing.assert_array_equal(result, -image)
+manager.close()
 ```
 
-The worker callable receives and returns normal NumPy arrays:
-
-```python
-def segment(
-    image: "numpy.ndarray",
-    model_type: str,
-    use_gpu: bool,
-    diameter: float,
-) -> "numpy.ndarray":
-    import cellpose.models
-
-    model = cellpose.models.Cellpose(gpu=use_gpu, model_type=model_type)
-    masks, *_ = model.eval(image, diameter=diameter, channels=[0, 0])
-    return masks
-```
+This example is self-contained: Pixi installs NumPy in the worker environment, and the qualified target imports NumPy inside that environment.
+Your own worker package exposes ordinary Python functions, is declared in `EnvironmentSpec`, and is called by its installed `module:qualified.callable` name in the same way.
 
 Wetlands owns the shared-memory details.
 Inputs use copy-in semantics and returned arrays are independently owned by the caller.
+The repository also contains a [complete local worker-package example](https://github.com/arthursw/wetlands/blob/main/examples/getting_started.py).
 
 ## Async applications
 
@@ -125,11 +111,13 @@ async def main() -> None:
 
     with environment.start(workers=2) as workers:
         task = workers.submit_import(
-            "analysis_package.statistics:mean",
+            "numpy:negative",
             args=([1.0, 2.0, 3.0],),
         )
         result = await task
         print(result)
+
+    manager.close()
 
 
 asyncio.run(main())
@@ -204,8 +192,8 @@ Wetlands can start a debugger after an application and its workers are already r
 No debug flag or debugger call is required in application or worker code.
 
 ```sh
-wetlands workers --root ./wetlands --environment cellpose
-wetlands debug --root ./wetlands --environment cellpose --worker WORKER_ID --editor vscode --source .
+wetlands workers --root ./wetlands --environment numpy-example
+wetlands debug --root ./wetlands --environment numpy-example --worker WORKER_ID --editor vscode --source .
 ```
 
 The debug adapter remains available for reconnection until its worker exits.
@@ -255,6 +243,7 @@ Run linting with:
 ```sh
 uv run ruff check
 uv run ruff format --check
+uv run mypy src/wetlands
 ```
 
 Build the package with:

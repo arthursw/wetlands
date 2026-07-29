@@ -1,5 +1,5 @@
 """
-This script launches a server inside a specified conda environment. It listens on a dynamically assigned
+This script launches a server inside a managed Pixi environment. It listens on a dynamically assigned
 local port for incoming execution commands sent via a multiprocessing connection.
 
 Clients send versioned execution envelopes for installed-module or explicit
@@ -31,6 +31,7 @@ import uuid
 import time
 from multiprocessing.context import AuthenticationError
 from multiprocessing.connection import Listener, Connection
+from typing import Any, Callable, cast
 
 
 def import_from_path(name: str, file_path: str | Path):
@@ -95,9 +96,9 @@ args: argparse.Namespace | None = None
 STARTUP_EVENT = "wetlands.worker.ready"
 STARTUP_SCHEMA_VERSION = 1
 STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
-_path_modules: dict[str, object] = {}
+_path_modules: dict[str, types.ModuleType] = {}
 _path_module_keys: dict[str, str] = {}
-_output_leases: dict[str, list[object]] = {}
+_output_leases: dict[str, list[Any]] = {}
 _output_leases_lock = threading.RLock()
 _active_tasks_lock = threading.RLock()
 CONNECTION_LOSS_GRACE = 5.0
@@ -130,9 +131,9 @@ def _create_split_stream_handlers(fmt: str) -> tuple[logging.StreamHandler, logg
     return stdout_handler, stderr_handler
 
 
-def configure_logging(wetlands_instance_path: Path, level: int = logging.INFO) -> Path:
-    """Configure module executor logging under the Wetlands instance directory."""
-    log_path = Path(wetlands_instance_path).resolve() / "environments.log"
+def configure_logging(root: Path, level: int = logging.INFO) -> Path:
+    """Configure module executor logging under the Wetlands manager root."""
+    log_path = Path(root).resolve() / "environments.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     fmt = "%(asctime)s %(levelname)s:%(process)d:%(name)s:%(message)s"
@@ -208,9 +209,8 @@ if __name__ == "__main__":
     parser.add_argument("environment", help="The name of the execution environment.")
     parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
     parser.add_argument(
-        "-wip",
-        "--wetlands_instance_path",
-        help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.",
+        "--root",
+        help="Internal path to the Wetlands manager root containing worker state.",
         default=Path("wetlands"),
         type=Path,
     )
@@ -242,7 +242,7 @@ if __name__ == "__main__":
     if (args.startup_host is None) != (args.startup_port is None):
         parser.error("--startup_host and --startup_port must be provided together")
     port = args.port
-    configure_logging(args.wetlands_instance_path)
+    configure_logging(args.root)
     logger = logging.getLogger(args.environment)
 
 
@@ -379,7 +379,7 @@ def _resolve_qualified_attribute(value: object, qualname: str) -> object:
     return current
 
 
-def _resolve_protocol_target(target: dict) -> object:
+def _resolve_protocol_target(target: dict[str, Any]) -> Callable[..., Any]:
     target = validate_target(target)
     kind = target.get("kind")
     qualname = target.get("qualname")
@@ -390,7 +390,7 @@ def _resolve_protocol_target(target: dict) -> object:
         if not isinstance(module_name, str) or not module_name:
             raise ValueError("Import target has an invalid module")
         module = importlib.import_module(module_name)
-        return _resolve_qualified_attribute(module, qualname)
+        return cast(Callable[..., Any], _resolve_qualified_attribute(module, qualname))
     if kind == "path":
         raw_path = target.get("path")
         if not isinstance(raw_path, str):
@@ -407,15 +407,15 @@ def _resolve_protocol_target(target: dict) -> object:
             if cache
             else f"_wetlands_path_{path_hash}_{content_hash}_{uuid.uuid4().hex}"
         )
-        module = _path_modules.get(module_key) if cache else None
-        if module is None:
-            module = types.ModuleType(module_key)
-            module.__file__ = str(path)
-            module.__loader__ = None
-            module.__package__ = ""
-            sys.modules[module_key] = module
+        path_module = _path_modules.get(module_key) if cache else None
+        if path_module is None:
+            path_module = types.ModuleType(module_key)
+            path_module.__file__ = str(path)
+            path_module.__loader__ = None
+            path_module.__package__ = ""
+            sys.modules[module_key] = path_module
             try:
-                exec(compile(content, str(path), "exec"), module.__dict__)
+                exec(compile(content, str(path), "exec"), path_module.__dict__)
             except BaseException:
                 sys.modules.pop(module_key, None)
                 raise
@@ -424,15 +424,15 @@ def _resolve_protocol_target(target: dict) -> object:
                 if previous_key is not None and previous_key != module_key:
                     _path_modules.pop(previous_key, None)
                     sys.modules.pop(previous_key, None)
-                _path_modules[module_key] = module
+                _path_modules[module_key] = path_module
                 _path_module_keys[str(path)] = module_key
             else:
                 sys.modules.pop(module_key, None)
-        return _resolve_qualified_attribute(module, qualname)
+        return cast(Callable[..., Any], _resolve_qualified_attribute(path_module, qualname))
     raise ValueError(f"Unsupported execution target kind: {kind!r}")
 
 
-def execute_protocol_envelope(message: dict, lock: threading.Lock, connection: Connection) -> None:
+def execute_protocol_envelope(message: dict[str, Any], lock: threading.Lock, connection: Connection) -> None:
     action, task_id = validate_task_message(message)
     if action != "execute":
         raise ValueError(f"Expected an execute envelope, got {action!r}")
@@ -532,9 +532,12 @@ def execution_worker(lock: threading.Lock, connection: Connection, message: dict
         handle_execution_error(lock, connection, e, task_id=task_id, call_target=call_target)
 
 
-def get_message(connection: Connection) -> dict:
+def get_message(connection: Connection) -> dict[str, Any]:
     logger.debug("Waiting for message...")
-    return connection.recv()
+    message = connection.recv()
+    if not isinstance(message, dict):
+        raise ValueError("Worker control message must be an object")
+    return message
 
 
 def _quiesce_task_threads(task_threads: list[threading.Thread], timeout: float) -> bool:
@@ -551,9 +554,9 @@ def _quiesce_task_threads(task_threads: list[threading.Thread], timeout: float) 
     return quiesced
 
 
-def load_root_authkey(wetlands_instance_path: Path) -> bytes:
+def load_root_authkey(root: Path) -> bytes:
     """Read the root-local multiprocessing auth key."""
-    return (Path(wetlands_instance_path).resolve() / "state" / "auth.key").read_bytes()
+    return (Path(root).resolve() / "state" / "auth.key").read_bytes()
 
 
 class _DebuggerState:
@@ -739,6 +742,7 @@ def launch_listener(
         if commissioned:
             commission_event.set()
         elif persistent:
+            assert commission_timeout is not None
             threading.Thread(
                 target=_watch_launcher_commission,
                 args=(commission_event, float(commission_timeout)),
@@ -775,7 +779,7 @@ def launch_listener(
             with connection_context as connection:
                 logger.debug(f"Connection accepted {listener.address}")
                 send_message(lock, connection, hello)
-                message = ""
+                message: dict[str, Any] = {}
                 try:
                     while True:
                         try:
@@ -920,7 +924,7 @@ def launch_listener(
 if __name__ == "__main__":
     assert args is not None
     launch_listener(
-        authkey=load_root_authkey(args.wetlands_instance_path),
+        authkey=load_root_authkey(args.root),
         persistent=args.persistent,
         startup_host=args.startup_host,
         startup_port=args.startup_port,

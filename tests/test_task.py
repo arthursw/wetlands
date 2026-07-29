@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from wetlands import ExecutionError, OperationCanceled
-from wetlands._internal.diagnostics import TaskFailure, TaskFailureCategory, WorkerInfo
+from wetlands.diagnostics import ExecutionFailure, ExecutionFailureCategory, WorkerInfo
 from wetlands.task import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -116,13 +116,13 @@ class TestTaskLifecycle:
     def test_set_failed_with_structured_failure(self):
         task = ExecutionTask("task-1")
         task._set_running()
-        failure = TaskFailure.worker_died(worker=WorkerInfo(environment="env", index=2, pid=123), returncode=-9)
+        failure = ExecutionFailure.worker_died(worker=WorkerInfo(environment="env", index=2, pid=123), returncode=-9)
 
         task._set_failed(failure)
 
         assert task.state == ExecutionState.FAILED
         assert task.error is not None
-        assert task.error.category == TaskFailureCategory.WORKER_DIED
+        assert task.error.category == ExecutionFailureCategory.WORKER_DIED
         assert task.error.signal == 9
         assert task.error.worker is not None
         assert task.error.worker.index == 2
@@ -292,7 +292,7 @@ class TestTaskStart:
         task = ExecutionTask()
         called = []
         task._set_start_fn(lambda: called.append(True))
-        task.start()
+        task._start()
         assert called == [True]
 
     def test_start_noop_when_running(self):
@@ -300,13 +300,13 @@ class TestTaskStart:
         called = []
         task._set_start_fn(lambda: called.append(True))
         task._set_running()
-        task.start()
+        task._start()
         assert called == []  # not called again
 
     def test_start_raises_without_start_fn(self):
         task = ExecutionTask()
         with pytest.raises(InvalidStateError):
-            task.start()
+            task._start()
 
 
 class TestTaskCancel:
@@ -532,7 +532,7 @@ class TestTerminalStateGuards:
         assert task.error.message in ("error1", "error2")
 
 
-class TestTaskFailureDiagnostics:
+class TestExecutionFailureDiagnostics:
     def test_exception_from_chained_exception_preserves_cause(self):
         try:
             try:
@@ -540,7 +540,7 @@ class TestTaskFailureDiagnostics:
             except KeyError as e:
                 raise ValueError("outer") from e
         except ValueError as e:
-            failure = TaskFailure.from_exception(e)
+            failure = ExecutionFailure.from_exception(e)
 
         assert failure.remote_exception is not None
         assert failure.remote_exception.type_name == "ValueError"
@@ -549,14 +549,14 @@ class TestTaskFailureDiagnostics:
         assert "The above exception was the direct cause" in (failure.traceback or "")
 
     def test_failure_payload_round_trips_worker_metadata(self):
-        failure = TaskFailure.worker_died(
+        failure = ExecutionFailure.worker_died(
             worker=WorkerInfo(environment="env", index=1, pid=111, port=5000, persistent=True),
             returncode=-15,
         )
 
-        round_tripped = TaskFailure.from_payload({"failure": failure.to_payload()})
+        round_tripped = ExecutionFailure.from_payload({"failure": failure.to_payload()})
 
-        assert round_tripped.category == TaskFailureCategory.WORKER_DIED
+        assert round_tripped.category == ExecutionFailureCategory.WORKER_DIED
         assert round_tripped.signal == 15
         assert round_tripped.worker is not None
         assert round_tripped.worker.port == 5000

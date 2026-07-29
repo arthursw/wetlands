@@ -10,7 +10,7 @@ import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psutil
 
@@ -86,12 +86,13 @@ def root_lock(root: str | Path) -> Iterator[None]:
         if os.name == "nt":
             import msvcrt
 
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            locking = getattr(msvcrt, "locking")
+            locking(lock_file.fileno(), getattr(msvcrt, "LK_LOCK"), 1)
             try:
                 yield
             finally:
                 lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                locking(lock_file.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
         else:
             import fcntl
 
@@ -130,7 +131,13 @@ def _empty_registry() -> dict[str, Any]:
 
 
 def _is_positive_number(value: object) -> bool:
-    return type(value) in (int, float) and math.isfinite(float(value)) and float(value) > 0
+    if type(value) is int:
+        number = float(cast(int, value))
+    elif type(value) is float:
+        number = cast(float, value)
+    else:
+        return False
+    return math.isfinite(number) and number > 0
 
 
 def _valid_worker_entry(key: str, entry: dict[str, Any]) -> bool:

@@ -92,6 +92,10 @@ class ProvisioningError(OperationError):
     pass
 
 
+class RemovalError(OperationError):
+    """A managed environment could not be removed cleanly."""
+
+
 class ExecutionError(OperationError):
     def __init__(self, failure: Any):
         message = failure.summary() if hasattr(failure, "summary") else failure.message
@@ -153,7 +157,7 @@ class Operation(Generic[T]):
             self._cancellation_requested = True
             callback = self._cancel_callback
         if first_request:
-            self.emit(
+            self._emit(
                 OperationEventKind.CANCELLATION_REQUESTED,
                 "Cancellation requested",
             )
@@ -270,7 +274,7 @@ class Operation(Generic[T]):
         finally:
             self.remove_listener(receive)
 
-    def emit(
+    def _emit(
         self,
         kind: OperationEventKind,
         message: str,
@@ -366,7 +370,7 @@ class Operation(Generic[T]):
             if self._state is not OperationState.PENDING:
                 return
             self._state = OperationState.RUNNING
-        self.emit(OperationEventKind.STATE, "Operation started")
+        self._emit(OperationEventKind.STATE, "Operation started")
 
     def _set_completed(self, result: T) -> None:
         with self._lock:
@@ -374,7 +378,7 @@ class Operation(Generic[T]):
                 return
             self._result = result
             self._state = OperationState.COMPLETED
-        self.emit(OperationEventKind.STATE, "Operation completed")
+        self._emit(OperationEventKind.STATE, "Operation completed")
         self._done.set()
 
     def _set_failed(self, error: BaseException) -> None:
@@ -383,7 +387,7 @@ class Operation(Generic[T]):
                 return
             self._exception = error
             self._state = OperationState.FAILED
-        self.emit(OperationEventKind.STATE, str(error) or type(error).__name__)
+        self._emit(OperationEventKind.STATE, str(error) or type(error).__name__)
         self._done.set()
 
     def _set_canceled(self, error: OperationCanceled | None = None) -> None:
@@ -392,7 +396,7 @@ class Operation(Generic[T]):
                 return
             self._exception = error or OperationCanceled(self.id)
             self._state = OperationState.CANCELED
-        self.emit(OperationEventKind.STATE, "Operation canceled")
+        self._emit(OperationEventKind.STATE, "Operation canceled")
         self._done.set()
 
 
@@ -402,3 +406,7 @@ class PreparationOperation(Operation[T]):
 
 class ProvisioningOperation(Operation[T]):
     pass
+
+
+class RemovalOperation(Operation[T]):
+    """An asynchronous managed-environment removal."""

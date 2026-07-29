@@ -22,6 +22,7 @@ Backward-compatible features use a minor release, and backward-compatible fixes 
 
 Host and worker execution- and management-protocol versions must match exactly.
 A host fails the corresponding connection clearly rather than attempting to communicate with an incompatible worker.
+The package version and managed worker-runtime version are released together and are required to be identical.
 
 Stop all persistent Wetlands workers before upgrading or downgrading Wetlands.
 An upgraded controller must not attach to workers created by another Wetlands release.

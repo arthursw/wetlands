@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING
 
 from wetlands.logger import logger, LOG_SOURCE_EXECUTION
-from wetlands._internal.diagnostics import TaskFailure, WorkerInfo
+from wetlands.diagnostics import ExecutionFailure as ExecutionFailure, WorkerInfo
 from wetlands._internal.process_termination import (
     ProcessIdentityError,
     ProcessTerminationError,
@@ -35,6 +35,7 @@ from wetlands._internal import runtime_state
 from wetlands._internal.provisioning import _read_ready, environment_lifecycle_gate
 from wetlands._internal.value_codec import (
     REQUIRED_WORKER_CODECS,
+    SharedMemoryLease,
     decode_value,
     descriptor_codecs,
     dispose_leases,
@@ -132,11 +133,12 @@ def _assign_windows_kill_job(process: subprocess.Popen) -> None:
             ("PeakJobMemoryUsed", ctypes.c_size_t),
         ]
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel32.CreateJobObjectW.restype = wintypes.HANDLE
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
-        raise ctypes.WinError(ctypes.get_last_error())
+        error = getattr(ctypes, "get_last_error")()
+        raise OSError(error, getattr(ctypes, "FormatError")(error))
     info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
     info.BasicLimitInformation.LimitFlags = _WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     configured = kernel32.SetInformationJobObject(
@@ -150,9 +152,9 @@ def _assign_windows_kill_job(process: subprocess.Popen) -> None:
         wintypes.HANDLE(process._handle),  # type: ignore[attr-defined]
     )
     if not assigned:
-        error = ctypes.get_last_error()
+        error = getattr(ctypes, "get_last_error")()
         kernel32.CloseHandle(job)
-        raise ctypes.WinError(error)
+        raise OSError(error, getattr(ctypes, "FormatError")(error))
     process._wetlands_job_handle = job  # type: ignore[attr-defined]
 
 
@@ -163,7 +165,7 @@ def _close_windows_job(process: subprocess.Popen) -> None:
     process._wetlands_job_handle = None  # type: ignore[attr-defined]
     import ctypes
 
-    ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(handle)
+    getattr(ctypes, "WinDLL")("kernel32", use_last_error=True).CloseHandle(handle)
 
 
 def _mp_connection_attr(*names: str) -> Any:
@@ -410,6 +412,11 @@ class ExternalEnvironment:
             raise RuntimeError(f"Environment {self.name!r} no longer has valid ready metadata")
         return ready
 
+    def _project_path(self) -> Path:
+        if self.path is None:
+            raise RuntimeError(f"Environment {self.name!r} has no executable path")
+        return self.path.parent.resolve()
+
     def _raise_if_failed(self) -> None:
         with self._lock:
             error = self._fatal_error
@@ -447,20 +454,20 @@ class ExternalEnvironment:
             return
         if max_workers < 1:
             raise ValueError("max_workers must be at least one")
-        reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
+        reconcile_shared_memory_leases(self.environment_manager.root)
 
         self._worker_env = worker_env
         self._worker_timeout = worker_timeout
         self._persistent = persistent
         self._pool_commissioned = False
         self._launcher_loss_timeout = max_workers * STARTUP_CALLBACK_TIMEOUT + LAUNCHER_LOSS_TIMEOUT_MARGIN
-        self._authkey = runtime_state.load_or_create_root_authkey(self.environment_manager.wetlands_instance_path)
+        self._authkey = runtime_state.load_or_create_root_authkey(self.environment_manager.root)
         self._shutdown_event.clear()
         if self._persistent:
             self._controller_id = uuid.uuid4().hex
             try:
                 runtime_state.claim_controller(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                     self._controller_id,
                 )
@@ -469,12 +476,12 @@ class ExternalEnvironment:
                 raise
             try:
                 runtime_state.reconcile_persistent_pool(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                     grace=float(self.environment_manager.termination_grace),
                 )
                 live_workers = runtime_state.live_workers_for_env(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                 )
                 if live_workers:
@@ -485,14 +492,14 @@ class ExternalEnvironment:
                     )
                 assert self._pool_id is not None
                 runtime_state.begin_persistent_pool_attempt(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     env_name=self.name,
                     pool_id=self._pool_id,
                     expected_worker_count=max_workers,
                 )
             except BaseException:
                 runtime_state.release_controller(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                     self._controller_id,
                 )
@@ -508,7 +515,7 @@ class ExternalEnvironment:
                 self._commission_workers(started)
                 assert self._pool_id is not None
                 runtime_state.commission_persistent_pool(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     env_name=self.name,
                     pool_id=self._pool_id,
                 )
@@ -529,7 +536,7 @@ class ExternalEnvironment:
             if self._persistent and self._pool_id is not None and cleanup_complete:
                 try:
                     discarded = runtime_state.discard_persistent_pool(
-                        self.environment_manager.wetlands_instance_path,
+                        self.environment_manager.root,
                         env_name=self.name,
                         pool_id=self._pool_id,
                     )
@@ -542,7 +549,7 @@ class ExternalEnvironment:
             if self._controller_id is not None:
                 try:
                     runtime_state.release_controller(
-                        self.environment_manager.wetlands_instance_path,
+                        self.environment_manager.root,
                         self.name,
                         self._controller_id,
                     )
@@ -591,16 +598,16 @@ class ExternalEnvironment:
         startup_host, startup_port = startup_socket.getsockname()
         startup_token = secrets.token_urlsafe(32)
         worker_id = uuid.uuid4().hex
-        wetlands_instance_path = self.environment_manager.wetlands_instance_path.resolve()
+        root = self.environment_manager.root.resolve()
         argv = [
             str(self._environment_python()),
             "-u",
             str(module_executor_path),
             self.name,
-            "--wetlands_instance_path",
-            str(wetlands_instance_path),
+            "--root",
+            str(root),
             "--environment_path",
-            str(Path(self.path).parent.resolve()),
+            str(self._project_path()),
             "--generation_id",
             str(ready["generation_id"]),
             "--recipe_hash",
@@ -654,7 +661,7 @@ class ExternalEnvironment:
 
             expected_identity = {
                 "pid": process.pid,
-                "environment_path": str(Path(self.path).parent.resolve()),
+                "environment_path": str(self._project_path()),
                 "generation_id": str(ready["generation_id"]),
                 "recipe_hash": str(ready["recipe_hash"]),
             }
@@ -682,9 +689,7 @@ class ExternalEnvironment:
                     f"Could not find the server port for worker {index}."
                     f"{self._worker_startup_failure_details(process, process_logger)}"
                 )
-            authkey = self._authkey or runtime_state.load_or_create_root_authkey(
-                self.environment_manager.wetlands_instance_path
-            )
+            authkey = self._authkey or runtime_state.load_or_create_root_authkey(self.environment_manager.root)
             connection, capabilities = self._connect_worker(
                 port,
                 authkey,
@@ -703,7 +708,7 @@ class ExternalEnvironment:
             )
 
             runtime_state.record_worker(
-                self.environment_manager.wetlands_instance_path,
+                self.environment_manager.root,
                 env_name=self.name,
                 env_path=Path(self.path).parent if self.path is not None else None,
                 worker_index=index,
@@ -729,7 +734,7 @@ class ExternalEnvironment:
             if recorded and terminated:
                 try:
                     runtime_state.remove_worker(
-                        self.environment_manager.wetlands_instance_path,
+                        self.environment_manager.root,
                         self.name,
                         index,
                         self._pool_id,
@@ -840,7 +845,7 @@ class ExternalEnvironment:
             "env": env,
         }
         if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
         else:
             kwargs["start_new_session"] = True
         process = subprocess.Popen(argv, **kwargs)
@@ -966,8 +971,8 @@ class ExternalEnvironment:
         worker: _Worker,
         task: ExecutionTask[Any],
         message: str,
-    ) -> TaskFailure:
-        return TaskFailure.worker_connection(
+    ) -> ExecutionFailure:
+        return ExecutionFailure.worker_connection(
             message,
             task_id=task.id,
             call_target=self._task_call_target(task),
@@ -1005,7 +1010,7 @@ class ExternalEnvironment:
                     retired = self._remove_dead_worker(worker)
                     unlink_names(
                         offered_names,
-                        ledger_root=self.environment_manager.wetlands_instance_path,
+                        ledger_root=self.environment_manager.root,
                     )
                     self._cleanup_task_inputs(task)
                     if pending_result is not _NO_RESULT:
@@ -1013,7 +1018,7 @@ class ExternalEnvironment:
                     else:
                         if returncode is not None:
                             task._set_failed(
-                                TaskFailure.worker_died(
+                                ExecutionFailure.worker_died(
                                     task_id=task.id,
                                     call_target=self._task_call_target(task),
                                     worker=self._worker_info(worker),
@@ -1081,7 +1086,7 @@ class ExternalEnvironment:
                 break
 
             if action == ACTION_RESULT_OFFER:
-                attachments = []
+                attachments: list[SharedMemoryLease] = []
                 try:
                     result = decode_value(
                         message.get("result"),
@@ -1098,7 +1103,7 @@ class ExternalEnvironment:
                 except Exception as error:
                     offered_names = [lease.name for lease in attachments]
                     dispose_leases(attachments, unlink=False)
-                    failure = TaskFailure.serialization(
+                    failure = ExecutionFailure.serialization(
                         f"Failed to decode worker result: {error}",
                         task_id=task.id,
                         call_target=self._task_call_target(task),
@@ -1145,7 +1150,7 @@ class ExternalEnvironment:
                 self._dispatch_or_idle(worker)
             elif action in (ACTION_FAILURE, ACTION_CANCELED):
                 if action == ACTION_FAILURE:
-                    failure = TaskFailure.from_payload(message, call_target=self._task_call_target(task))
+                    failure = ExecutionFailure.from_payload(message, call_target=self._task_call_target(task))
                     self._log_task_failure(failure)
                 self._cleanup_task_inputs(task)
                 task._on_message(message)
@@ -1266,7 +1271,7 @@ class ExternalEnvironment:
                 if not worker.alive():
                     rc = self._worker_returncode(worker)
                     logger.error(f"Worker {worker.index} died (exit code {rc}) while running task {task.id}")
-                    failure = TaskFailure.worker_died(
+                    failure = ExecutionFailure.worker_died(
                         task_id=task.id,
                         call_target=self._task_call_target(task),
                         worker=self._worker_info(worker),
@@ -1286,7 +1291,7 @@ class ExternalEnvironment:
                             f"Worker {worker.index} timed out (no response for {elapsed:.0f}s) "
                             f"while running task {task.id}"
                         )
-                        failure = TaskFailure.timeout_failure(
+                        failure = ExecutionFailure.timeout_failure(
                             task_id=task.id,
                             call_target=self._task_call_target(task),
                             worker=self._worker_info(worker),
@@ -1311,6 +1316,8 @@ class ExternalEnvironment:
                 worker = self._launch_worker(index, self._worker_env)
                 with self._lock:
                     if self._shutdown_event.is_set() or any(existing.index == index for existing in self._workers):
+                        if worker.process is None:
+                            raise RuntimeError("A replacement worker has no launched process")
                         terminated = self._cleanup_failed_worker_launch(
                             worker.process,
                             worker.connection,
@@ -1318,7 +1325,7 @@ class ExternalEnvironment:
                         if terminated:
                             try:
                                 runtime_state.remove_worker(
-                                    self.environment_manager.wetlands_instance_path,
+                                    self.environment_manager.root,
                                     self.name,
                                     worker.index,
                                     self._pool_id,
@@ -1415,7 +1422,7 @@ class ExternalEnvironment:
         if terminated:
             try:
                 runtime_state.remove_worker(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                     worker.index,
                     self._pool_id,
@@ -1439,7 +1446,7 @@ class ExternalEnvironment:
                         self._workers.remove(worker)
         if terminated:
             try:
-                reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
+                reconcile_shared_memory_leases(self.environment_manager.root)
             except Exception as error:
                 logger.error(
                     "Shared-memory lease reconciliation after worker retirement failed: %s",
@@ -1509,7 +1516,7 @@ class ExternalEnvironment:
         payload = task._payload  # type: ignore[attr-defined]
         payload["task_id"] = task.id
         if worker.pid is None or worker.process_started_at is None:
-            failure = TaskFailure.environment(
+            failure = ExecutionFailure.environment(
                 "Worker process identity is unavailable for durable result transport",
                 task_id=task.id,
                 call_target=self._task_call_target(task),
@@ -1530,7 +1537,7 @@ class ExternalEnvironment:
             missing = required - available
             if missing:
                 formatted = ", ".join(f"{codec}@{version}" for codec, version in sorted(missing))
-                failure = TaskFailure.environment(
+                failure = ExecutionFailure.environment(
                     f"Worker environment is missing required task codecs: {formatted}",
                     task_id=task.id,
                     call_target=self._task_call_target(task),
@@ -1572,7 +1579,7 @@ class ExternalEnvironment:
                 self._try_replace_worker(worker.index)
             return _DispatchOutcome.TASK_FAILED
         except Exception as e:
-            failure = TaskFailure.serialization(
+            failure = ExecutionFailure.serialization(
                 f"Failed to serialize task payload for worker {worker.index}: {e}",
                 task_id=task.id,
                 call_target=self._task_call_target(task),
@@ -1639,7 +1646,7 @@ class ExternalEnvironment:
         task._set_start_fn(_start)
         task._set_cancel_fn(_cancel)
         if start:
-            task.start()
+            task._start()
         return task
 
     def _queue_task_or_fail_shutdown(self, task: ExecutionTask[Any]) -> bool:
@@ -1654,7 +1661,7 @@ class ExternalEnvironment:
         return queued
 
     def _fail_task_for_shutdown(self, task: ExecutionTask[Any]) -> None:
-        failure = TaskFailure.environment(
+        failure = ExecutionFailure.environment(
             "Environment is shutting down",
             task_id=task.id,
             call_target=self._task_call_target(task),
@@ -1692,7 +1699,7 @@ class ExternalEnvironment:
         if names:
             unlink_names(
                 names,
-                ledger_root=self.environment_manager.wetlands_instance_path,
+                ledger_root=self.environment_manager.root,
             )
         self._cleanup_task_inputs(task)
         if not retirement_claimed:
@@ -1721,7 +1728,7 @@ class ExternalEnvironment:
         if self._pool_id is None:
             raise RuntimeError("Worker pool has no transport identity")
         return {
-            "root": str(self.environment_manager.wetlands_instance_path),
+            "root": str(self.environment_manager.root),
             "creator_pid": creator_pid,
             "creator_started_at": creator_started_at,
             "environment_name": self.name,
@@ -1785,8 +1792,8 @@ class ExternalEnvironment:
             creator_pid=host_identity.pid,
             creator_started_at=host_identity.started_at,
         )
-        argument_leases = []
-        keyword_leases = []
+        argument_leases: list[SharedMemoryLease] = []
+        keyword_leases: list[SharedMemoryLease] = []
         try:
             encoded_args, argument_leases = encode_value(
                 tuple(args),
@@ -1824,7 +1831,7 @@ class ExternalEnvironment:
         self._persistent = True
         self._authkey = authkey
         self._shutdown_event.clear()
-        reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
+        reconcile_shared_memory_leases(self.environment_manager.root)
         entries = tuple(worker_entries)
         pool_ids = {entry.get("pool_id") for entry in entries}
         if len(pool_ids) > 1:
@@ -1845,7 +1852,7 @@ class ExternalEnvironment:
         self._controller_id = uuid.uuid4().hex
         try:
             runtime_state.claim_controller(
-                self.environment_manager.wetlands_instance_path,
+                self.environment_manager.root,
                 self.name,
                 self._controller_id,
             )
@@ -1861,7 +1868,7 @@ class ExternalEnvironment:
                     phase="attach",
                 )
             published = runtime_state.live_workers_for_env(
-                self.environment_manager.wetlands_instance_path,
+                self.environment_manager.root,
                 self.name,
             )
             entry_identities = {
@@ -1906,7 +1913,7 @@ class ExternalEnvironment:
                     cleanup_errors.append(str(cleanup_error))
             try:
                 runtime_state.release_controller(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                     self._controller_id,
                 )
@@ -1948,7 +1955,7 @@ class ExternalEnvironment:
                     pass
             if self._controller_id is not None:
                 runtime_state.release_controller(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                     self._controller_id,
                 )
@@ -1973,7 +1980,7 @@ class ExternalEnvironment:
         ready = self._ready_identity()
         expected_identity = {
             "pid": int(entry["pid"]),
-            "environment_path": str(Path(self.path).parent.resolve()),
+            "environment_path": str(self._project_path()),
             "generation_id": str(ready["generation_id"]),
             "recipe_hash": str(ready["recipe_hash"]),
             "pool_id": entry.get("pool_id"),
@@ -2136,7 +2143,7 @@ class ExternalEnvironment:
             raise AuthenticationError("digest received was wrong")
         connection.send_bytes(welcome)
 
-    def _log_task_failure(self, failure: TaskFailure) -> None:
+    def _log_task_failure(self, failure: ExecutionFailure) -> None:
         level = 30 if failure.category.value == "remote_exception" else 40
         logger.log(level, failure.summary())
 
@@ -2199,7 +2206,7 @@ class ExternalEnvironment:
                 if active:
                     assert active_task is not None
                     active_task._terminal_cleanup_in_progress = True  # type: ignore[attr-defined]
-                    active_failure = TaskFailure.environment(
+                    active_failure = ExecutionFailure.environment(
                         "Environment is shutting down",
                         task_id=active_task.id,
                         call_target=self._task_call_target(active_task),
@@ -2244,7 +2251,7 @@ class ExternalEnvironment:
                 if terminated:
                     try:
                         runtime_state.remove_worker(
-                            self.environment_manager.wetlands_instance_path,
+                            self.environment_manager.root,
                             self.name,
                             worker.index,
                             self._pool_id,
@@ -2265,14 +2272,14 @@ class ExternalEnvironment:
             self._drain_idle_workers()
 
         try:
-            reconcile_shared_memory_leases(self.environment_manager.wetlands_instance_path)
+            reconcile_shared_memory_leases(self.environment_manager.root)
         except Exception as error:
             cleanup_errors.append(f"shared-memory lease reconciliation failed: {error}")
 
         if self._persistent and self._pool_id is not None and all_terminated:
             try:
                 discarded = runtime_state.discard_persistent_pool(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     env_name=self.name,
                     pool_id=self._pool_id,
                 )
@@ -2285,7 +2292,7 @@ class ExternalEnvironment:
         while True:
             try:
                 task = self._task_queue.get_nowait()
-                failure = TaskFailure.environment(
+                failure = ExecutionFailure.environment(
                     "Environment is shutting down",
                     task_id=task.id,
                 )
@@ -2297,7 +2304,7 @@ class ExternalEnvironment:
         if self._controller_id is not None and not survivors:
             try:
                 runtime_state.release_controller(
-                    self.environment_manager.wetlands_instance_path,
+                    self.environment_manager.root,
                     self.name,
                     self._controller_id,
                 )
@@ -2335,7 +2342,7 @@ class ExternalEnvironment:
                 pass
             if worker._current_task is not None and not worker._current_task.state.terminal:
                 task = worker._current_task
-                failure = TaskFailure.environment(
+                failure = ExecutionFailure.environment(
                     "Environment is detaching",
                     task_id=task.id,
                     call_target=self._task_call_target(task),
@@ -2348,7 +2355,7 @@ class ExternalEnvironment:
         while True:
             try:
                 task = self._task_queue.get_nowait()
-                failure = TaskFailure.environment(
+                failure = ExecutionFailure.environment(
                     "Environment is detaching",
                     task_id=task.id,
                 )
@@ -2358,7 +2365,7 @@ class ExternalEnvironment:
                 break
         if self._controller_id is not None:
             runtime_state.release_controller(
-                self.environment_manager.wetlands_instance_path,
+                self.environment_manager.root,
                 self.name,
                 self._controller_id,
             )
