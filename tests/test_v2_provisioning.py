@@ -264,8 +264,12 @@ def test_supplied_lock_is_preserved_and_published(tmp_path: Path) -> None:
 def test_local_package_is_added_by_pixi_and_reused(tmp_path: Path) -> None:
     executable = _fake_pixi(tmp_path)
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
-    package = tmp_path / "package"
+    package = tmp_path / "package with spaces"
     package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "Example_Local.Package"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
     spec = EnvironmentSpec(
         local=(LocalPackage(package, editable=True, extras=("test",)),),
     )
@@ -273,7 +277,9 @@ def test_local_package_is_added_by_pixi_and_reused(tmp_path: Path) -> None:
     first = manager.provision("example", spec).wait_for()
     second = manager.provision("example", spec).wait_for()
 
-    assert "# local " in first.pixi_manifest_path.read_text(encoding="utf-8")
+    assert f"# local example-local-package[test] @ {package.resolve().as_uri()}" in first.pixi_manifest_path.read_text(
+        encoding="utf-8"
+    )
     assert first.generation_id == second.generation_id
 
 
@@ -282,6 +288,10 @@ def test_local_package_can_use_a_supplied_lock_without_modifying_it(tmp_path: Pa
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
     package = tmp_path / "package"
     package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "locked-local"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
     lock = b"version: 6\nlocal: locked\n"
 
     environment = manager.provision(
@@ -293,7 +303,9 @@ def test_local_package_can_use_a_supplied_lock_without_modifying_it(tmp_path: Pa
     ).wait_for()
 
     assert environment.pixi_lock_path.read_bytes() == lock
-    assert "# local " in environment.pixi_manifest_path.read_text(encoding="utf-8")
+    assert f"# local locked-local @ {package.resolve().as_uri()}" in environment.pixi_manifest_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_modified_supplied_lock_fails_and_removes_incomplete_target(tmp_path: Path) -> None:

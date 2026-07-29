@@ -8,6 +8,7 @@ from wetlands.lifecycle import (
     EnvironmentGenerationChangedError,
     EnvironmentInUseError,
     EnvironmentRecipeConflictError,
+    ManagerCloseError,
     UnmanagedTargetError,
     WorkerStartError,
 )
@@ -28,8 +29,20 @@ from wetlands.operation import (
 )
 from wetlands.provisioning import PixiInfo, ProvisioningStage, ProvisioningStep
 from wetlands.protocol import CodecCapability, WorkerCapabilities
-from wetlands.specs import EnvironmentSpec, LocalPackage, PostInstallCommand
-from wetlands.task import ExecutionEvent, ExecutionEventKind, ExecutionFailure, ExecutionState, ExecutionTask
+from wetlands.specs import (
+    EnvironmentSpec,
+    LocalPackage,
+    LocalPackageValidationError,
+    PostInstallCommand,
+)
+from wetlands.task import (
+    ExecutionEvent,
+    ExecutionEventKind,
+    ExecutionFailure,
+    ExecutionState,
+    ExecutionTask,
+    InvalidStateError,
+)
 
 try:
     __version__ = version("wetlands")
@@ -51,7 +64,10 @@ __all__ = [
     "ExecutionState",
     "ExecutionTask",
     "LocalPackage",
+    "LocalPackageValidationError",
     "ManagedEnvironment",
+    "ManagerCloseError",
+    "InvalidStateError",
     "Operation",
     "OperationCanceled",
     "OperationError",

@@ -925,7 +925,7 @@ def render_pixi_manifest(name: str, spec: EnvironmentSpec) -> bytes:
     else:
         target_platform = "linux-aarch64" if machine in {"arm64", "aarch64"} else "linux-64"
     lines = [
-        "[project]",
+        "[workspace]",
         f"name = {_toml_quote(name)}",
         f"channels = [{', '.join(_toml_quote(channel) for channel in channels)}]",
         f"platforms = [{_toml_quote(target_platform)}]",
@@ -2024,9 +2024,10 @@ def provision_environment(
             }
             for index, package in enumerate(spec.local):
                 current_stage = ProvisioningStage.LOCAL_INSTALL
-                requirement = str(package.source)
+                requirement_name = package.distribution_name
                 if package.extras:
-                    requirement += f"[{','.join(package.extras)}]"
+                    requirement_name += f"[{','.join(package.extras)}]"
+                requirement = f"{requirement_name} @ {package.source.as_uri()}"
                 argv = [
                     str(pixi.executable),
                     "add",

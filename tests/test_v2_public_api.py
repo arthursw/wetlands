@@ -22,8 +22,11 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "ExecutionFailure",
         "ExecutionState",
         "ExecutionTask",
+        "InvalidStateError",
         "LocalPackage",
+        "LocalPackageValidationError",
         "ManagedEnvironment",
+        "ManagerCloseError",
         "Operation",
         "OperationCanceled",
         "OperationError",
@@ -82,6 +85,18 @@ def test_manager_configuration_is_read_only(tmp_path) -> None:
     assert manager.network is not None
     with pytest.raises(TypeError):
         manager.network["https"] = "https://other.invalid"
+
+
+@pytest.mark.parametrize(
+    "termination_grace",
+    [float("nan"), float("inf"), float("-inf"), -1, True, "1"],
+)
+def test_manager_rejects_invalid_termination_grace(
+    tmp_path,
+    termination_grace,
+) -> None:
+    with pytest.raises(ValueError, match="finite non-negative"):
+        wetlands.EnvironmentManager(tmp_path, termination_grace=termination_grace)
 
 
 def test_execution_task_does_not_expose_mutable_future() -> None:

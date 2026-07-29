@@ -6,12 +6,18 @@
 [![Wetlands PyPI](https://img.shields.io/pypi/v/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
 [![Wetlands Python versions](https://img.shields.io/pypi/pyversions/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
 
-Wetlands provisions isolated [Pixi](https://pixi.sh/) environments and runs Python callables in managed worker processes.
+Wetlands is a Python library for creating isolated environments with [Pixi](https://pixi.sh/) and running Python functions inside them.
 
-It is intended for trusted local dependency isolation.
-It is not a security sandbox.
+This lets an application use libraries with incompatible dependencies at the same time.
+For example, [Cellpose](https://www.cellpose.org/) and [StarDist](https://github.com/stardist/stardist) can each run in their own environment while exchanging ordinary Python values and NumPy arrays with the main application.
 
-Wetlands 2 gives applications a small, application-neutral API for:
+Wetlands creates these environments when needed, installs their dependencies, keeps worker processes ready for repeated calls, and cleans up their resources automatically.
+It can be used in desktop applications, servers, and plugin systems.
+
+> Wetlands is intended for code you trust.
+> Isolated environments prevent dependency conflicts, but they do not restrict what code can access on your computer.
+
+Wetlands 2 provides:
 
 - side-effect-light manager construction;
 - observable and cancellable preparation and provisioning operations;
@@ -20,6 +26,10 @@ Wetlands 2 gives applications a small, application-neutral API for:
 - qualified installed-package targets and path targets for local development;
 - automatic transport of ordinary Python values and NumPy arrays;
 - blocking, callback-based, and `asyncio`-friendly execution.
+
+The first preparation may download a verified Pixi executable, and the first provisioning of an environment downloads its declared packages.
+These operations require network access and can take several minutes.
+Wetlands stores Pixi, managed environments, locks, logs, and runtime state below the manager root you choose.
 
 ## Installation
 
@@ -127,6 +137,8 @@ asyncio.run(main())
 
 Cancel an operation or execution task with `cancel()`.
 A canceled provisioning operation becomes terminal only after its active process tree has stopped and its incomplete environment has been cleaned up.
+For a running worker task, Wetlands first requests cooperative cancellation.
+If the worker does not finish during the configured grace period, Wetlands terminates its process tree and starts a replacement worker.
 
 ## Pixi projects and lockfiles
 
@@ -143,9 +155,7 @@ spec = EnvironmentSpec(
     pypi=("example-pypi-package==1.2.0",),
     channels=("conda-forge",),
     local=(LocalPackage(Path("../worker-package"), editable=True),),
-    post_install=(
-        PostInstallCommand(("python", "-m", "worker_package.prepare_assets")),
-    ),
+    post_install=(PostInstallCommand(("python", "-m", "worker_package.prepare_assets")),),
     pixi_lock=Path("pixi.lock"),
 )
 ```
@@ -208,19 +218,19 @@ See the [Wetlands 2 migration guide](docs/migration_v2.md).
 Install the development environment with:
 
 ```sh
-uv sync --frozen --group dev
+uv sync --frozen --group dev --extra shared-memory
 ```
 
 Run the fast test suite with:
 
 ```sh
-uv run pytest -m "not integration and not compat and not manual"
+uv run --extra shared-memory pytest -m "not integration and not compat and not manual"
 ```
 
 Run the representative real-Pixi integration suite with:
 
 ```sh
-UV_PROJECT_ENVIRONMENT=.venv-py313 uv run --python 3.13 pytest -m "not manual and not compat and agent_integration"
+UV_PROJECT_ENVIRONMENT=.venv-py314 uv run --python 3.14 --extra shared-memory pytest tests/test_v2_pixi_integration.py
 ```
 
 Run linting with:
@@ -242,4 +252,6 @@ The complete documentation is available at [arthursw.github.io/wetlands](https:/
 
 ## License
 
-Wetlands is licensed under the MIT License.
+Wetlands is licensed under the [MIT License](LICENSE).
+
+See the [security policy](SECURITY.md) before executing third-party worker code or post-install commands.

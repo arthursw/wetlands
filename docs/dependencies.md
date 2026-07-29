@@ -20,6 +20,7 @@ spec = EnvironmentSpec(
 
 `conda`
 : Conda package constraints installed by Pixi.
+Declare channels separately with `channels`; `channel::package` requirements are rejected.
 
 `pypi`
 : Python package requirements installed through the Pixi project.
@@ -56,7 +57,11 @@ spec = EnvironmentSpec(
 )
 ```
 
-Local paths are resolved when the specification is constructed and participate in its recipe identity.
+Each local source must be an existing directory with a valid `pyproject.toml` and a non-empty `[project].name`.
+Wetlands uses that normalized distribution name to register the local requirement with Pixi.
+Invalid local package metadata raises `LocalPackageValidationError` when `LocalPackage` is constructed.
+
+Local paths are resolved when the specification is constructed, and the path and distribution name participate in the recipe identity.
 Use editable installs for development, not for immutable production recipes.
 
 ## Post-install commands
@@ -79,7 +84,7 @@ Shell execution requires an explicit safe display string so logs and structured 
 
 ```python
 PostInstallCommand(
-    argv=("worker-package configure --token \"$WORKER_TOKEN\"",),
+    argv=('worker-package configure --token "$WORKER_TOKEN"',),
     shell=True,
     display="worker-package configure --token <redacted>",
 )

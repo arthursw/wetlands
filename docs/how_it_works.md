@@ -88,5 +88,10 @@ Wetlands never assumes ownership of the application's event loop.
 ## Trust model
 
 Worker targets execute arbitrary Python with the current user's privileges.
-Authentication prevents accidental or unauthenticated connection to a local worker but does not make worker code safe.
+Installers and post-install commands have those privileges as well.
+They can generally access the user's files, environment variables, network, local services, processes, CPU, memory, and disk.
+
+Authentication prevents accidental or unauthenticated connection to a local worker.
+It does not restrict code already running as the same user and does not turn the worker into a sandbox.
 Use Wetlands only with trusted code and dependency sources.
+See the [security policy](https://github.com/arthursw/wetlands/security/policy) for reporting instructions and supported releases.

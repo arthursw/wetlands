@@ -340,6 +340,10 @@ class Operation(Generic[T]):
             self._thread = threading.Thread(target=self._run, args=(runner,), name=thread_name, daemon=True)
             self._thread.start()
 
+    def _runs_on_current_thread(self) -> bool:
+        with self._lock:
+            return self._thread is threading.current_thread()
+
     def _run(self, runner: Callable[[], T]) -> None:
         if self.cancellation_requested:
             self._set_canceled()

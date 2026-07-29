@@ -179,7 +179,11 @@ class TaskFailure:
         legacy_traceback = failure_payload.get("traceback")
         category_value = failure_payload.get("category")
         try:
-            category = TaskFailureCategory(category_value) if category_value is not None else TaskFailureCategory.REMOTE_EXCEPTION
+            category = (
+                TaskFailureCategory(category_value)
+                if category_value is not None
+                else TaskFailureCategory.REMOTE_EXCEPTION
+            )
         except ValueError:
             category = TaskFailureCategory.UNKNOWN
 

@@ -14,6 +14,8 @@ from wetlands._internal.process_termination import ProcessTerminationError
 from wetlands.external_environment import ExternalEnvironment, _Worker
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
 from wetlands.managed_environment import WorkerPool
+from wetlands.operation import ExecutionError
+from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, ProtocolCompatibilityError
 from wetlands.task import ExecutionState, ExecutionTask
 
 
@@ -255,7 +257,8 @@ def test_dispatch_failure_cannot_finish_task_before_transport_and_worker_cleanup
     cleanup_started = threading.Event()
     allow_cleanup = threading.Event()
 
-    def remove_worker(_worker):
+    def remove_worker(_worker, *, retirement_claimed=False):
+        assert retirement_claimed
         cleanup_started.set()
         assert allow_cleanup.wait(2)
         return True
@@ -320,6 +323,395 @@ def test_launch_wraps_worker_failure_in_public_start_error(tmp_path):
     assert caught.value.environment == "example"
     assert caught.value.phase == "launch"
     assert "boom" in str(caught.value)
+
+
+def test_launch_wraps_protocol_mismatch_in_public_start_error(tmp_path):
+    environment = _environment(tmp_path)
+    mismatch = ProtocolCompatibilityError("protocol mismatch")
+
+    with (
+        patch.object(environment, "_launch_worker", side_effect=mismatch),
+        pytest.raises(WorkerStartError) as caught,
+    ):
+        environment.launch()
+
+    assert caught.value.environment == "example"
+    assert caught.value.phase == "launch"
+    assert caught.value.__cause__ is mismatch
+
+
+@pytest.mark.parametrize(
+    "worker_timeout",
+    [0, -1, float("inf"), float("-inf"), float("nan"), True, "1"],
+)
+def test_launch_rejects_invalid_worker_timeout(tmp_path, worker_timeout):
+    environment = _environment(tmp_path)
+
+    with pytest.raises(ValueError, match="positive finite"):
+        environment.launch(worker_timeout=worker_timeout)
+
+
+@pytest.mark.parametrize(
+    ("message", "task_setup"),
+    [
+        (None, lambda task: None),
+        (
+            {
+                "action": "unknown",
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                "task_id": "task-1",
+            },
+            lambda task: None,
+        ),
+        (
+            {
+                "action": "accepted",
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                "task_id": "other-task",
+            },
+            lambda task: None,
+        ),
+        (
+            {
+                "action": "accepted",
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                "task_id": "task-1",
+            },
+            lambda task: setattr(task, "_accepted", True),
+        ),
+        (
+            {
+                "action": "update",
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                "task_id": "task-1",
+                "message": "too soon",
+            },
+            lambda task: None,
+        ),
+        (
+            {
+                "action": "released",
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                "task_id": "task-1",
+                "names": [],
+            },
+            lambda task: setattr(task, "_accepted", True),
+        ),
+    ],
+)
+def test_worker_protocol_violation_fails_task_retires_worker_and_replaces(
+    tmp_path,
+    message,
+    task_setup,
+):
+    environment = _environment(tmp_path)
+    worker = _worker()
+    task = _active_task()
+    task_setup(task)
+    worker._current_task = task
+    worker.connection.recv.return_value = message
+    environment._workers = [worker]
+
+    with (
+        patch.object(environment, "_cleanup_failed_task_worker", return_value=True) as cleanup,
+        patch.object(environment, "_try_replace_worker") as replace,
+    ):
+        environment._worker_reader_loop(worker)
+
+    cleanup.assert_called_once()
+    replace.assert_called_once_with(worker.index)
+    assert task.state is ExecutionState.FAILED
+    assert task.error is not None
+    assert task.error.category is TaskFailureCategory.WORKER_CONNECTION
+    assert "protocol failure" in task.error.message.lower()
+    with pytest.raises(ExecutionError):
+        task.wait_for()
+
+
+def test_unexpected_protocol_validator_error_still_fails_closed(tmp_path):
+    environment = _environment(tmp_path)
+    worker = _worker()
+    task = _active_task()
+    worker._current_task = task
+    worker.connection.recv.return_value = {
+        "action": "error",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "task_id": task.id,
+    }
+    environment._workers = [worker]
+
+    with (
+        patch(
+            "wetlands.external_environment.validate_worker_task_message",
+            side_effect=RecursionError("malicious recursive payload"),
+        ),
+        patch.object(environment, "_cleanup_failed_task_worker", return_value=True) as cleanup,
+        patch.object(environment, "_try_replace_worker") as replace,
+    ):
+        environment._worker_reader_loop(worker)
+
+    cleanup.assert_called_once()
+    replace.assert_called_once_with(worker.index)
+    assert task.state is ExecutionState.FAILED
+    assert task.error is not None
+    assert "RecursionError" in task.error.message
+    with pytest.raises(ExecutionError):
+        task.wait_for()
+
+
+def test_forced_cancel_barrier_prevents_late_message_redispatch(tmp_path):
+    environment = _environment(tmp_path)
+    worker = _worker()
+    task = _active_task()
+    task._accepted = True  # type: ignore[attr-defined]
+    task._inputs_released = True  # type: ignore[attr-defined]
+    worker._current_task = task
+    worker.connection.recv.return_value = {
+        "action": "canceled",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "task_id": task.id,
+    }
+    environment._workers = [worker]
+    queued = ExecutionTask("queued-task")
+    environment._task_queue.put(queued)
+    validator_entered = threading.Event()
+    allow_validation = threading.Event()
+
+    def blocked_validation(message, *, expected_task_id):
+        validator_entered.set()
+        assert allow_validation.wait(2)
+        return "canceled"
+
+    with patch(
+        "wetlands.external_environment.validate_worker_task_message",
+        side_effect=blocked_validation,
+    ):
+        reader = threading.Thread(
+            target=environment._worker_reader_loop,
+            args=(worker,),
+        )
+        reader.start()
+        assert validator_entered.wait(2)
+        with environment._lock:
+            task._terminal_cleanup_in_progress = True  # type: ignore[attr-defined]
+            worker._current_task = None
+            worker._retired = True
+        task._set_canceled()
+        allow_validation.set()
+        reader.join(2)
+
+    assert not reader.is_alive()
+    assert environment._task_queue.get_nowait() is queued
+    assert environment._idle_workers.empty()
+    worker.connection.send.assert_not_called()
+
+
+def test_cleanup_claims_worker_retirement_before_slow_lease_cleanup(tmp_path):
+    environment = _environment(tmp_path)
+    worker = _worker()
+    task = _active_task()
+    worker._current_task = task
+    environment._workers = [worker]
+    cleanup_entered = threading.Event()
+    allow_cleanup = threading.Event()
+
+    def slow_input_cleanup(_task):
+        cleanup_entered.set()
+        assert allow_cleanup.wait(2)
+
+    with (
+        patch.object(environment, "_cleanup_task_inputs", side_effect=slow_input_cleanup),
+        patch.object(environment, "_remove_dead_worker", return_value=True) as remove,
+    ):
+        cleanup = threading.Thread(
+            target=environment._cleanup_failed_task_worker,
+            args=(worker, task),
+        )
+        cleanup.start()
+        assert cleanup_entered.wait(2)
+        assert worker._retired
+        assert worker._current_task is None
+        assert not environment._worker_owns_task(worker, task)
+        allow_cleanup.set()
+        cleanup.join(2)
+
+    assert not cleanup.is_alive()
+    remove.assert_called_once_with(worker, retirement_claimed=True)
+
+
+def test_task_is_requeued_when_worker_retires_after_idle_pop(tmp_path):
+    environment = _environment(tmp_path)
+    worker = _worker()
+    worker.process_started_at = 1.0
+    environment._workers = [worker]
+    environment._idle_workers.put(worker)
+    task: ExecutionTask[Any] = ExecutionTask("task-race")
+    task._payload = {"_call_target": "sample.module:run", "codecs": []}  # type: ignore[attr-defined]
+    task._input_leases = []  # type: ignore[attr-defined]
+    environment._submit_task(task, start=False)
+    dispatch_entered = threading.Event()
+    allow_dispatch = threading.Event()
+
+    def blocked_lease_context(*args, **kwargs):
+        dispatch_entered.set()
+        assert allow_dispatch.wait(2)
+        return {}
+
+    with patch.object(
+        environment,
+        "_lease_context",
+        side_effect=blocked_lease_context,
+    ):
+        starter = threading.Thread(target=task.start)
+        starter.start()
+        assert dispatch_entered.wait(2)
+        with environment._lock:
+            worker._retired = True
+        allow_dispatch.set()
+        starter.join(2)
+
+    assert not starter.is_alive()
+    assert task.state is ExecutionState.PENDING
+    assert environment._task_queue.get_nowait() is task
+    worker.connection.send.assert_not_called()
+
+
+def test_submit_that_passed_open_check_is_failed_during_concurrent_pool_close(
+    tmp_path,
+):
+    environment = _environment(tmp_path)
+    environment._expected_generation_id = "generation-1"
+    managed = MagicMock()
+    managed._manager = MagicMock()
+    pool = WorkerPool(managed, environment)
+    submit_entered = threading.Event()
+    allow_submit = threading.Event()
+    close_entered = threading.Event()
+    allow_close = threading.Event()
+    original_submit = environment._submit_encoded
+    submitted = []
+
+    def blocked_submit(*args, **kwargs):
+        submit_entered.set()
+        assert allow_submit.wait(2)
+        submitted.append(original_submit(*args, **kwargs))
+
+    def blocked_reconciliation(_root):
+        close_entered.set()
+        assert allow_close.wait(2)
+
+    with (
+        patch.object(environment, "_submit_encoded", side_effect=blocked_submit),
+        patch(
+            "wetlands.external_environment.reconcile_shared_memory_leases",
+            side_effect=blocked_reconciliation,
+        ),
+    ):
+        submitter = threading.Thread(
+            target=pool.submit_import,
+            args=("operator:add",),
+            kwargs={"args": (1, 2)},
+        )
+        submitter.start()
+        assert submit_entered.wait(2)
+
+        closer = threading.Thread(target=pool.close)
+        closer.start()
+        assert close_entered.wait(2)
+
+        allow_submit.set()
+        allow_close.set()
+        submitter.join(2)
+        closer.join(2)
+
+    assert not submitter.is_alive()
+    assert not closer.is_alive()
+    assert len(submitted) == 1
+    task = submitted[0]
+    assert task.state is ExecutionState.FAILED
+    assert task.error is not None
+    assert "shutting down" in task.error.message
+    assert task._input_leases is None  # type: ignore[attr-defined]
+    assert environment._task_queue.empty()
+    with pytest.raises(ExecutionError):
+        task.wait_for()
+
+
+def test_worker_message_without_active_task_retires_and_replaces(tmp_path):
+    environment = _environment(tmp_path)
+    worker = _worker()
+    worker.connection.recv.return_value = {
+        "action": "accepted",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "task_id": "late-task",
+    }
+    environment._workers = [worker]
+
+    with (
+        patch.object(environment, "_remove_dead_worker", return_value=True) as retire,
+        patch.object(environment, "_try_replace_worker") as replace,
+    ):
+        environment._worker_reader_loop(worker)
+
+    retire.assert_called_once_with(worker)
+    replace.assert_called_once_with(worker.index)
+
+
+def test_commission_ack_schema_and_order_are_strict(tmp_path):
+    environment = _environment(tmp_path)
+    environment._persistent = True
+    environment._pool_id = "pool-1"
+    worker = _worker()
+    message = {
+        "action": "commissioned",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "pool_id": "pool-1",
+    }
+
+    assert environment._is_valid_commissioned_message(worker, message)
+    worker._commissioned.set()
+    assert not environment._is_valid_commissioned_message(worker, message)
+    assert not environment._is_valid_commissioned_message(
+        _worker(),
+        {**message, "unexpected": True},
+    )
+
+
+def test_commission_ack_is_processed_while_launch_holds_runtime_lock(tmp_path):
+    environment = _environment(tmp_path)
+    environment._persistent = True
+    environment._pool_id = "pool-1"
+    worker = _worker()
+    message = {
+        "action": "commissioned",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "pool_id": "pool-1",
+    }
+    allow_eof = threading.Event()
+    receive_count = 0
+
+    def receive():
+        nonlocal receive_count
+        receive_count += 1
+        if receive_count == 1:
+            return message
+        assert allow_eof.wait(2)
+        raise EOFError
+
+    worker.connection.recv.side_effect = receive
+    with environment._lock:
+        reader = threading.Thread(
+            target=environment._worker_reader_loop,
+            args=(worker,),
+        )
+        reader.start()
+        assert worker._commissioned.wait(1)
+        environment._shutdown_event.set()
+        allow_eof.set()
+    reader.join(2)
+
+    assert not reader.is_alive()
+    assert receive_count == 2
 
 
 def test_failed_recorded_launch_retains_worker_until_death_is_verified(

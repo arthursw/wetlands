@@ -42,6 +42,22 @@ TASK_ACTIONS = frozenset(
     }
 )
 
+WORKER_TASK_ACTIONS = frozenset(
+    {
+        ACTION_ACCEPTED,
+        ACTION_INPUT_RELEASED,
+        ACTION_UPDATE,
+        ACTION_LOG,
+        ACTION_RESULT_OFFER,
+        ACTION_RELEASED,
+        ACTION_FAILURE,
+        ACTION_CANCELED,
+    }
+)
+
+_TASK_MESSAGE_FIELDS = frozenset({"action", "protocol_version", "task_id"})
+_MAX_REMOTE_EXCEPTION_DEPTH = 32
+
 
 class ProtocolError(RuntimeError):
     """A malformed execution message was observed."""
@@ -176,6 +192,64 @@ def validate_task_message(message: Any, *, expected_task_id: str | None = None) 
     return action, task_id
 
 
+def validate_worker_task_message(message: Any, *, expected_task_id: str) -> str:
+    """Validate one worker-to-host task message and return its action.
+
+    This validates the complete protocol-v1 payload shape. Lifecycle ordering
+    remains the responsibility of the host, which owns the task state.
+    """
+
+    action, _task_id = validate_task_message(message, expected_task_id=expected_task_id)
+    if action not in WORKER_TASK_ACTIONS:
+        raise ProtocolError(f"Action {action!r} is not valid from worker to host")
+
+    fields = set(message)
+    if action in {ACTION_ACCEPTED, ACTION_INPUT_RELEASED, ACTION_CANCELED}:
+        _require_fields(fields, _TASK_MESSAGE_FIELDS, action)
+    elif action == ACTION_RESULT_OFFER:
+        _require_fields(fields, _TASK_MESSAGE_FIELDS | {"result"}, action)
+    elif action == ACTION_RELEASED:
+        _require_fields(fields, _TASK_MESSAGE_FIELDS | {"names"}, action)
+        names = message["names"]
+        if (
+            not isinstance(names, list)
+            or any(not isinstance(name, str) or not name for name in names)
+            or len(names) != len(set(names))
+        ):
+            raise ProtocolError("Worker released message has invalid shared-memory names")
+    elif action == ACTION_LOG:
+        _require_fields(fields, _TASK_MESSAGE_FIELDS | {"level", "message"}, action)
+        if type(message["level"]) is not int:
+            raise ProtocolError("Worker log level must be an integer")
+        if not isinstance(message["message"], str):
+            raise ProtocolError("Worker log message must be a string")
+    elif action == ACTION_UPDATE:
+        optional = {"message", "current", "maximum", "outputs"}
+        unexpected = fields - (_TASK_MESSAGE_FIELDS | optional)
+        if unexpected:
+            raise ProtocolError(f"Worker update contains unexpected fields: {sorted(unexpected)!r}")
+        if "message" in message and not isinstance(message["message"], str):
+            raise ProtocolError("Worker progress message must be a string")
+        for field in ("current", "maximum"):
+            if field in message and (type(message[field]) is not int or message[field] < 0):
+                raise ProtocolError(f"Worker progress {field} must be a nonnegative integer")
+        if "outputs" in message:
+            outputs = message["outputs"]
+            if not isinstance(outputs, dict) or any(not isinstance(key, str) or not key for key in outputs):
+                raise ProtocolError("Worker intermediate outputs must be an object with nonempty string keys")
+            _validate_intermediate_value(outputs, path="outputs")
+    elif action == ACTION_FAILURE:
+        _require_fields(
+            fields,
+            _TASK_MESSAGE_FIELDS | {"failure", "exception", "traceback"},
+            action,
+        )
+        if not isinstance(message["exception"], str) or not isinstance(message["traceback"], str):
+            raise ProtocolError("Worker failure exception and traceback must be strings")
+        _validate_failure_payload(message["failure"], expected_task_id=expected_task_id)
+    return action
+
+
 def worker_hello(
     *,
     codecs: Iterable[tuple[str, int]],
@@ -206,6 +280,28 @@ def validate_worker_capabilities(
 ) -> WorkerCapabilities:
     if not isinstance(payload, dict):
         raise ProtocolCompatibilityError("Worker handshake was not an object")
+    if payload.get("action") != ACTION_HELLO:
+        raise ProtocolCompatibilityError("Worker handshake has an invalid action")
+    base_fields = {
+        "action",
+        "protocol_version",
+        "codecs",
+        "worker_runtime_version",
+        "python_version",
+        "pid",
+        "environment_path",
+        "generation_id",
+        "recipe_hash",
+    }
+    persistent_fields = {"pool_id", "worker_index"}
+    startup_fields = {"event", "schema_version", "port", "debug_port", "token"}
+    extra_fields = set(payload) - base_fields
+    if extra_fields & persistent_fields and not persistent_fields.issubset(extra_fields):
+        raise ProtocolCompatibilityError("Worker handshake has an incomplete persistent identity")
+    if extra_fields & startup_fields and not startup_fields.issubset(extra_fields):
+        raise ProtocolCompatibilityError("Worker startup handshake has incomplete callback metadata")
+    if extra_fields not in (set(), persistent_fields, startup_fields, persistent_fields | startup_fields):
+        raise ProtocolCompatibilityError(f"Worker handshake contains unexpected fields: {sorted(extra_fields)!r}")
     protocol_version = payload.get("protocol_version")
     if protocol_version != EXECUTION_PROTOCOL_VERSION:
         raise ProtocolCompatibilityError(
@@ -232,6 +328,8 @@ def validate_worker_capabilities(
             raise ProtocolCompatibilityError("Worker handshake contains an invalid codec capability")
         codecs.append(CodecCapability(item["id"], item["version"]))
     available = {(codec.id, codec.version) for codec in codecs}
+    if len(available) != len(codecs):
+        raise ProtocolCompatibilityError("Worker handshake contains duplicate codec capabilities")
     missing = set(required_codecs) - available
     if missing:
         formatted = ", ".join(f"{codec}@{version}" for codec, version in sorted(missing))
@@ -252,6 +350,11 @@ def validate_worker_capabilities(
     }.items():
         if not isinstance(value, str) or not value:
             raise ProtocolCompatibilityError(f"Worker handshake has an invalid {field}")
+    if persistent_fields.issubset(payload):
+        if not isinstance(payload["pool_id"], str) or not payload["pool_id"]:
+            raise ProtocolCompatibilityError("Worker handshake has an invalid pool_id")
+        if type(payload["worker_index"]) is not int or payload["worker_index"] < 0:
+            raise ProtocolCompatibilityError("Worker handshake has an invalid worker_index")
 
     if expected_identity is not None:
         mismatches = {
@@ -280,3 +383,135 @@ def validate_worker_capabilities(
 
 def _is_dotted_identifier(value: Any) -> bool:
     return isinstance(value, str) and bool(value) and all(part.isidentifier() for part in value.split("."))
+
+
+def _require_fields(actual: set[str], expected: set[str] | frozenset[str], action: str) -> None:
+    if actual != set(expected):
+        missing = sorted(set(expected) - actual)
+        unexpected = sorted(actual - set(expected))
+        details = []
+        if missing:
+            details.append(f"missing {missing!r}")
+        if unexpected:
+            details.append(f"unexpected {unexpected!r}")
+        raise ProtocolError(f"Worker {action} message has invalid fields ({', '.join(details)})")
+
+
+def _validate_intermediate_value(value: Any, *, path: str, active: set[int] | None = None) -> None:
+    if value is None or type(value) in {bool, int, float, str, bytes}:
+        return
+    if not isinstance(value, (list, tuple, dict)):
+        raise ProtocolError(f"{path} contains unsupported value type {type(value).__qualname__}")
+    seen = active if active is not None else set()
+    identity = id(value)
+    if identity in seen:
+        raise ProtocolError(f"{path} contains a recursive value")
+    seen.add(identity)
+    try:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if type(key) not in {bool, int, float, str, bytes}:
+                    raise ProtocolError(f"{path} contains an unsupported dictionary key")
+                _validate_intermediate_value(item, path=f"{path}[{key!r}]", active=seen)
+        else:
+            for index, item in enumerate(value):
+                _validate_intermediate_value(item, path=f"{path}[{index}]", active=seen)
+    finally:
+        seen.remove(identity)
+
+
+def _validate_failure_payload(payload: Any, *, expected_task_id: str) -> None:
+    expected = {
+        "category",
+        "message",
+        "task_id",
+        "call_target",
+        "traceback",
+        "traceback_frames",
+        "remote_exception",
+        "worker",
+        "exit_code",
+        "signal",
+        "timeout",
+        "elapsed",
+        "serialization_context",
+    }
+    if not isinstance(payload, dict):
+        raise ProtocolError("Worker failure payload must be an object")
+    _require_fields(set(payload), expected, "failure payload")
+    if not isinstance(payload["category"], str) or not payload["category"]:
+        raise ProtocolError("Worker failure payload has an invalid category")
+    if not isinstance(payload["message"], str):
+        raise ProtocolError("Worker failure payload has an invalid message")
+    if payload["task_id"] not in (None, expected_task_id):
+        raise ProtocolError("Worker failure payload has an inconsistent task ID")
+    for field in ("call_target", "traceback", "serialization_context"):
+        if payload[field] is not None and not isinstance(payload[field], str):
+            raise ProtocolError(f"Worker failure payload has an invalid {field}")
+    frames = payload["traceback_frames"]
+    if not isinstance(frames, list) or any(not isinstance(frame, str) for frame in frames):
+        raise ProtocolError("Worker failure payload has invalid traceback frames")
+    _validate_remote_exception(payload["remote_exception"])
+    _validate_worker_info(payload["worker"])
+    for field in ("exit_code", "signal"):
+        if payload[field] is not None and type(payload[field]) is not int:
+            raise ProtocolError(f"Worker failure payload has an invalid {field}")
+    for field in ("timeout", "elapsed"):
+        if payload[field] is not None and (type(payload[field]) not in {int, float} or payload[field] < 0):
+            raise ProtocolError(f"Worker failure payload has an invalid {field}")
+
+
+def _validate_remote_exception(
+    payload: Any,
+    *,
+    active: set[int] | None = None,
+    depth: int = 0,
+) -> None:
+    if payload is None:
+        return
+    if depth > _MAX_REMOTE_EXCEPTION_DEPTH:
+        raise ProtocolError(f"Worker remote exception exceeds maximum nesting depth {_MAX_REMOTE_EXCEPTION_DEPTH}")
+    expected = {
+        "module",
+        "type_name",
+        "qualified_name",
+        "message",
+        "traceback",
+        "cause",
+        "context",
+        "suppress_context",
+    }
+    if not isinstance(payload, dict):
+        raise ProtocolError("Worker failure has an invalid remote exception")
+    seen = active if active is not None else set()
+    identity = id(payload)
+    if identity in seen:
+        raise ProtocolError("Worker remote exception contains a recursive reference")
+    seen.add(identity)
+    try:
+        _require_fields(set(payload), expected, "remote exception")
+        for field in ("module", "type_name", "qualified_name", "message", "traceback"):
+            if payload[field] is not None and not isinstance(payload[field], str):
+                raise ProtocolError(f"Worker remote exception has an invalid {field}")
+        if type(payload["suppress_context"]) is not bool:
+            raise ProtocolError("Worker remote exception has an invalid suppress_context")
+        _validate_remote_exception(payload["cause"], active=seen, depth=depth + 1)
+        _validate_remote_exception(payload["context"], active=seen, depth=depth + 1)
+    finally:
+        seen.remove(identity)
+
+
+def _validate_worker_info(payload: Any) -> None:
+    if payload is None:
+        return
+    expected = {"environment", "index", "pid", "port", "persistent"}
+    if not isinstance(payload, dict):
+        raise ProtocolError("Worker failure has invalid worker information")
+    _require_fields(set(payload), expected, "worker information")
+    if payload["environment"] is not None and not isinstance(payload["environment"], str):
+        raise ProtocolError("Worker failure has an invalid environment")
+    for field in ("index", "pid", "port"):
+        if payload[field] is not None and type(payload[field]) is not int:
+            raise ProtocolError(f"Worker failure has an invalid worker {field}")
+    if payload["persistent"] is not None and type(payload["persistent"]) is not bool:
+        raise ProtocolError("Worker failure has an invalid worker persistent flag")

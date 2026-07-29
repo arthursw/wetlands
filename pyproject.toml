@@ -1,12 +1,14 @@
 [project]
 name = "wetlands"
 version = "2.0.0"
-description = "Provision isolated Pixi environments and execute Python callables in managed workers."
+description = "Create isolated Pixi environments and run Python functions without dependency conflicts."
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "tomli>=2.0; python_version < '3.11'",
     "typing-extensions>=4.0; python_version < '3.11'",
     "psutil>=6.1.0",
     "packaging>=24.2",
@@ -18,6 +20,10 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
 ]
 
 [build-system]
@@ -57,6 +63,9 @@ dev = [
     "pytest-mock>=3.14.0",
     "ruff>=0.16.0",
     "types-psutil>=6.1.0.20241221",
+]
+release = [
+    "twine>=6.1.0",
 ]
 
 [tool.ruff]

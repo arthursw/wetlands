@@ -54,6 +54,10 @@ pixi = operation.wait_for()
 Preparation discovers and validates the configured executable or downloads and verifies Wetlands' registered Pixi release.
 The returned `PixiInfo` reports the executable path, version, and whether Wetlands manages it.
 
+The first managed preparation requires network access and may take a few minutes.
+Provisioning also downloads the packages declared by the environment recipe.
+Wetlands stores its Pixi installation, managed environments, locks, logs, and runtime state below the manager root.
+
 Calling `provision()` without a preceding `prepare()` is also valid.
 Provisioning performs preparation as its first coordinated stage.
 
@@ -170,6 +174,10 @@ task.cancel()
 
 Awaiting coroutine cancellation requests cancellation of the underlying operation or task and waits for its required cleanup before propagating `CancelledError`.
 
+Provisioning cancellation terminates the active subprocess tree and removes the incomplete environment before it becomes terminal.
+Task cancellation is cooperative during the configured grace period.
+If the worker does not finish in time, Wetlands terminates its process tree, marks the task canceled after cleanup, and starts a replacement worker.
+
 ## Close resources
 
 `WorkerPool` is a context manager.
@@ -188,3 +196,7 @@ with EnvironmentManager(root="wetlands") as manager:
 ```
 
 `execute_import()` and `execute_path()` are blocking conveniences around submission and `wait_for()`.
+
+Closing a manager first cancels and joins active preparation and provisioning operations, then attempts to close every known worker pool.
+If any cleanup fails, `ManagerCloseError.errors` contains every collected failure.
+A later `close()` call retries pools that remain open, but a manager cannot be used again after shutdown begins.

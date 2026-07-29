@@ -57,6 +57,13 @@ class TestExecutionEvent:
 
 
 class TestTaskLifecycle:
+    def test_tasks_are_not_context_managers(self):
+        task = ExecutionTask()
+        assert not hasattr(task, "__enter__")
+        assert not hasattr(task, "__exit__")
+        assert not hasattr(task, "__aenter__")
+        assert not hasattr(task, "__aexit__")
+
     def test_initial_state(self):
         task = ExecutionTask()
         assert task.state == ExecutionState.PENDING

@@ -314,28 +314,6 @@ class ExecutionTask(Generic[T]):
         finally:
             self.remove_listener(receive)
 
-    # --- Context manager (auto-cancel on exit) ---
-
-    def __enter__(self) -> Self:
-        if self._status == ExecutionState.PENDING:
-            self.start()
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if not self._status.terminal:
-            self.cancel()
-            self.wait_for()
-
-    async def __aenter__(self) -> Self:
-        if self._status == ExecutionState.PENDING:
-            self.start()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if not self._status.terminal:
-            self.cancel()
-            await self
-
     # --- Internal methods (called by the environment/IPC reader) ---
 
     def _set_start_fn(self, fn: Callable[[], None]) -> None:

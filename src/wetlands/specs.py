@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.utils import canonicalize_name
+from packaging.utils import InvalidName, canonicalize_name
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by Python 3.9/3.10 compatibility jobs
+    import tomli as tomllib  # type: ignore[no-redef]
 
 _WINDOWS_RESERVED = {
     "con",
@@ -27,6 +32,10 @@ _WINDOWS_RESERVED = {
 }
 _WINDOWS_INVALID_CHARACTERS = frozenset('<>:"|?*')
 _PORTABLE_EXTRA = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+class LocalPackageValidationError(ValueError):
+    """A local package cannot be represented as a deterministic Pixi requirement."""
 
 
 class ProvisioningStage(enum.Enum):
@@ -99,9 +108,33 @@ class LocalPackage:
     source: Path
     editable: bool = False
     extras: tuple[str, ...] = ()
+    distribution_name: str = field(init=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "source", Path(self.source).resolve())
+        source = Path(self.source).resolve()
+        pyproject = source / "pyproject.toml"
+        if not source.is_dir():
+            raise LocalPackageValidationError(f"Local package source must be an existing directory: {source}")
+        if not pyproject.is_file():
+            raise LocalPackageValidationError(f"Local package {source} must contain pyproject.toml with [project].name")
+        try:
+            document = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+            raise LocalPackageValidationError(
+                f"Could not read valid TOML from local package {pyproject}: {error}"
+            ) from error
+        project = document.get("project")
+        declared_name = project.get("name") if isinstance(project, dict) else None
+        if not isinstance(declared_name, str) or not declared_name:
+            raise LocalPackageValidationError(f"Local package {pyproject} must declare a non-empty [project].name")
+        try:
+            distribution_name = canonicalize_name(declared_name, validate=True)
+        except InvalidName as error:
+            raise LocalPackageValidationError(
+                f"Local package {pyproject} has invalid [project].name {declared_name!r}"
+            ) from error
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "distribution_name", distribution_name)
         if isinstance(self.extras, str):
             raise TypeError("Local package extras must be a sequence of names, not a string")
         extras = tuple(str(extra) for extra in self.extras)
@@ -145,11 +178,12 @@ class EnvironmentSpec:
         conda = _nonempty_strings(self.conda, "Conda dependency")
         conda_names: set[str] = set()
         for dependency in conda:
-            channel, separator, value = dependency.partition("::")
-            if separator and not channel.strip():
-                raise ValueError(f"Invalid Conda dependency: {dependency!r}")
-            value = (value if separator else channel).strip()
-            match = re.match(r"^([A-Za-z0-9_.-]+)", value)
+            if "::" in dependency:
+                raise ValueError(
+                    f"Channel-qualified Conda dependencies are not supported: {dependency!r}. "
+                    "Declare channels with EnvironmentSpec(channels=...)."
+                )
+            match = re.match(r"^([A-Za-z0-9_.-]+)", dependency)
             if match is None:
                 raise ValueError(f"Invalid Conda dependency: {dependency!r}")
             package = canonicalize_name(match.group(1))
@@ -211,6 +245,7 @@ class EnvironmentSpec:
             "local": [
                 {
                     "source": str(package.source),
+                    "distribution_name": package.distribution_name,
                     "editable": package.editable,
                     "extras": list(package.extras),
                 }

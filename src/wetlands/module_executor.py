@@ -102,6 +102,7 @@ _output_leases_lock = threading.RLock()
 _active_tasks_lock = threading.RLock()
 CONNECTION_LOSS_GRACE = 5.0
 UNCOMMISSIONED_EXIT_CODE = 70
+REMOTE_EXCEPTION_CHAIN_LIMIT = 32
 
 
 class _MaxLevelFilter(logging.Filter):
@@ -262,18 +263,46 @@ def send_message(lock: threading.Lock, connection: Connection, message: dict):
         connection.send(message)
 
 
-def _remote_exception_payload(e: BaseException) -> dict:
+def _remote_exception_payload(
+    e: BaseException,
+    *,
+    active: set[int] | None = None,
+    depth: int = 0,
+) -> dict:
     exc_type = type(e)
-    return {
-        "module": exc_type.__module__,
-        "type_name": exc_type.__name__,
-        "qualified_name": getattr(exc_type, "__qualname__", exc_type.__name__),
-        "message": str(e),
-        "traceback": "".join(traceback.format_exception(exc_type, e, e.__traceback__, chain=False)),
-        "cause": _remote_exception_payload(e.__cause__) if e.__cause__ is not None else None,
-        "context": _remote_exception_payload(e.__context__) if e.__context__ is not None else None,
-        "suppress_context": bool(getattr(e, "__suppress_context__", False)),
-    }
+    seen = active if active is not None else set()
+    identity = id(e)
+    recursive = identity in seen
+    if not recursive:
+        seen.add(identity)
+    try:
+        if recursive or depth >= REMOTE_EXCEPTION_CHAIN_LIMIT:
+            cause = None
+            context = None
+        else:
+            cause = (
+                _remote_exception_payload(e.__cause__, active=seen, depth=depth + 1)
+                if e.__cause__ is not None
+                else None
+            )
+            context = (
+                _remote_exception_payload(e.__context__, active=seen, depth=depth + 1)
+                if e.__context__ is not None
+                else None
+            )
+        return {
+            "module": exc_type.__module__,
+            "type_name": exc_type.__name__,
+            "qualified_name": getattr(exc_type, "__qualname__", exc_type.__name__),
+            "message": str(e),
+            "traceback": "".join(traceback.format_exception(exc_type, e, e.__traceback__, chain=False)),
+            "cause": cause,
+            "context": context,
+            "suppress_context": bool(getattr(e, "__suppress_context__", False)),
+        }
+    finally:
+        if not recursive:
+            seen.remove(identity)
 
 
 def _failure_payload(

@@ -5,6 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 
+class ManagerCloseError(RuntimeError):
+    """One or more resources could not be cleaned up during manager shutdown."""
+
+    def __init__(self, errors: tuple[BaseException, ...]) -> None:
+        if not errors:
+            raise ValueError("errors must not be empty")
+        self.errors = errors
+        details = "; ".join(f"{type(error).__name__}: {error}" for error in errors)
+        super().__init__(f"EnvironmentManager cleanup did not complete: {details}")
+
+
 class EnvironmentInUseError(RuntimeError):
     """A managed environment cannot be replaced while its workers are alive."""
 
@@ -93,6 +104,7 @@ __all__ = [
     "EnvironmentGenerationChangedError",
     "EnvironmentInUseError",
     "EnvironmentRecipeConflictError",
+    "ManagerCloseError",
     "UnmanagedTargetError",
     "WorkerStartError",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -9,7 +10,7 @@ from typing import Any, TYPE_CHECKING
 from wetlands._internal import runtime_state
 from wetlands._internal.provisioning import _read_ready, environment_lifecycle_gate
 from wetlands.external_environment import ExternalEnvironment
-from wetlands.lifecycle import EnvironmentGenerationChangedError
+from wetlands.lifecycle import EnvironmentGenerationChangedError, ManagerCloseError
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
 from wetlands.task import ExecutionTask
 
@@ -85,89 +86,103 @@ class ManagedEnvironment:
         persistent: bool = False,
         worker_timeout: float | None = None,
     ) -> WorkerPool:
-        self._manager._ensure_open()
-        if workers < 1:
-            raise ValueError("workers must be at least one")
-        with self._lock:
-            existing_pools = tuple(self._pools)
-        for existing_pool in existing_pools:
-            if not existing_pool._closed:
-                existing_pool._runtime._raise_if_failed()
-        with environment_lifecycle_gate(self._manager, self.name):
-            self._require_current_generation()
-            runtime_state.reconcile_persistent_pool(
-                self._manager.root,
-                self.name,
-                grace=self._manager.termination_grace,
-            )
-            runtime = ExternalEnvironment(
-                self.name,
-                self.pixi_manifest_path,
-                self._manager,
-                expected_generation_id=self.generation_id,
-                expected_recipe_hash=self.recipe_hash,
-            )
-            pool = WorkerPool(self, runtime)
+        with self._manager._manager_work():
+            if workers < 1:
+                raise ValueError("workers must be at least one")
             with self._lock:
-                self._pools.append(pool)
-            try:
-                runtime.launch(
-                    max_workers=workers,
-                    persistent=persistent,
-                    worker_timeout=worker_timeout,
+                existing_pools = tuple(self._pools)
+            for existing_pool in existing_pools:
+                if not existing_pool._closed:
+                    existing_pool._runtime._raise_if_failed()
+            with environment_lifecycle_gate(self._manager, self.name):
+                self._require_current_generation()
+                runtime_state.reconcile_persistent_pool(
+                    self._manager.root,
+                    self.name,
+                    grace=self._manager.termination_grace,
                 )
-            except BaseException:
-                if not runtime._workers:
-                    with self._lock:
-                        self._pools.remove(pool)
-                    pool._closed = True
-                raise
-        return pool
+                runtime = ExternalEnvironment(
+                    self.name,
+                    self.pixi_manifest_path,
+                    self._manager,
+                    expected_generation_id=self.generation_id,
+                    expected_recipe_hash=self.recipe_hash,
+                )
+                pool = WorkerPool(self, runtime)
+                with self._lock:
+                    self._pools.append(pool)
+                try:
+                    runtime.launch(
+                        max_workers=workers,
+                        persistent=persistent,
+                        worker_timeout=worker_timeout,
+                    )
+                except BaseException:
+                    if not runtime._workers:
+                        with self._lock:
+                            self._pools.remove(pool)
+                        pool._closed = True
+                    raise
+            return pool
 
     def close_pools(self) -> None:
+        errors = self._close_pools()
+        if errors:
+            raise ManagerCloseError(errors)
+
+    def _close_pools(self) -> tuple[BaseException, ...]:
         with self._lock:
             pools = tuple(self._pools)
+        errors: list[BaseException] = []
         for pool in pools:
-            pool.close()
+            try:
+                pool.close()
+            except BaseException as error:
+                errors.append(error)
+        return tuple(errors)
+
+    def _has_open_pools(self) -> bool:
+        with self._lock:
+            return any(not pool._closed for pool in self._pools)
 
     def attach_pool(self, *, timeout: float = 5.0) -> WorkerPool:
         """Exclusively attach to this generation's detached persistent pool."""
-        self._manager._ensure_open()
-        if timeout <= 0:
-            raise ValueError("timeout must be positive")
-        with environment_lifecycle_gate(self._manager, self.name):
-            self._require_current_generation()
-            runtime_state.reconcile_persistent_pool(
-                self._manager.root,
-                self.name,
-                grace=self._manager.termination_grace,
-            )
-            entries = runtime_state.live_workers_for_env(
-                self._manager.root,
-                self.name,
-                expected_identity={
-                    "env_path": str(self.path),
-                    "generation_id": self.generation_id,
-                    "recipe_hash": self.recipe_hash,
-                    "worker_runtime_version": WORKER_RUNTIME_VERSION,
-                    "protocol_version": EXECUTION_PROTOCOL_VERSION,
-                },
-            )
-            if not entries:
-                raise RuntimeError(f"No detached persistent pool exists for environment {self.name!r}")
-            runtime = ExternalEnvironment(
-                self.name,
-                self.pixi_manifest_path,
-                self._manager,
-                expected_generation_id=self.generation_id,
-                expected_recipe_hash=self.recipe_hash,
-            )
-            pool = WorkerPool(self, runtime)
-            authkey = runtime_state.load_or_create_root_authkey(self._manager.root)
-            runtime.attach_workers(entries, authkey, timeout=timeout)
-        with self._lock:
-            self._pools.append(pool)
-        return pool
+        with self._manager._manager_work():
+            if type(timeout) not in {int, float} or not math.isfinite(timeout) or timeout <= 0:
+                raise ValueError("timeout must be a positive finite number")
+            with environment_lifecycle_gate(self._manager, self.name):
+                self._require_current_generation()
+                runtime_state.reconcile_persistent_pool(
+                    self._manager.root,
+                    self.name,
+                    grace=self._manager.termination_grace,
+                )
+                entries = runtime_state.live_workers_for_env(
+                    self._manager.root,
+                    self.name,
+                    expected_identity={
+                        "env_path": str(self.path),
+                        "generation_id": self.generation_id,
+                        "recipe_hash": self.recipe_hash,
+                        "worker_runtime_version": WORKER_RUNTIME_VERSION,
+                        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                    },
+                )
+                if not entries:
+                    raise RuntimeError(f"No detached persistent pool exists for environment {self.name!r}")
+                runtime = ExternalEnvironment(
+                    self.name,
+                    self.pixi_manifest_path,
+                    self._manager,
+                    expected_generation_id=self.generation_id,
+                    expected_recipe_hash=self.recipe_hash,
+                )
+                pool = WorkerPool(self, runtime)
+                authkey = runtime_state.load_or_create_root_authkey(self._manager.root)
+                runtime.attach_workers(entries, authkey, timeout=timeout)
+            with self._lock:
+                self._pools.append(pool)
+            return pool
 
     def _require_current_generation(self) -> None:
         ready = _read_ready(self.path)
@@ -277,6 +292,7 @@ class WorkerPool:
         self._closed = True
 
     def _ensure_open(self) -> None:
+        self.environment._manager._ensure_open()
         if self._closed:
             raise RuntimeError("WorkerPool is closed")
         self._runtime._raise_if_failed()

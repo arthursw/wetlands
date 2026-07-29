@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from wetlands.specs import EnvironmentSpec, LocalPackage, PostInstallCommand, validate_environment_name
+from wetlands.specs import (
+    EnvironmentSpec,
+    LocalPackage,
+    LocalPackageValidationError,
+    PostInstallCommand,
+    validate_environment_name,
+)
 from wetlands._internal.provisioning import render_pixi_manifest
 
 
@@ -63,9 +69,9 @@ def test_environment_spec_rejects_invalid_entries_immediately() -> None:
         EnvironmentSpec(pypi=("example @ https://example.invalid/example.whl?token=secret",))
     with pytest.raises(ValueError, match="Duplicate PyPI"):
         EnvironmentSpec(pypi=("my-package>=1", "my_package<3"))
-    with pytest.raises(ValueError, match="Duplicate Conda"):
-        EnvironmentSpec(conda=("conda-forge::NumPy>=1", "numpy<3"))
-    with pytest.raises(ValueError, match="Invalid Conda"):
+    with pytest.raises(ValueError, match="channels="):
+        EnvironmentSpec(conda=("conda-forge::NumPy>=1",))
+    with pytest.raises(ValueError, match="channels="):
         EnvironmentSpec(conda=("::numpy",))
     with pytest.raises(ValueError, match="Channel"):
         EnvironmentSpec(channels=("",))
@@ -95,3 +101,58 @@ def test_manifest_renders_pypi_extras_and_direct_urls() -> None:
 
     assert '"requests" = { version = ">=2", extras = ["socks"] }' in manifest
     assert '"example" = { url = "https://example.invalid/example.whl" }' in manifest
+    assert manifest.startswith("[workspace]\n")
+    assert "[project]" not in manifest
+
+
+def test_local_package_discovers_and_canonicalizes_distribution_name(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "My_Distribution.Name"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+
+    local = LocalPackage(package, editable=True, extras=("test",))
+    original_recipe = EnvironmentSpec(local=(local,)).recipe_hash
+
+    assert local.source == package.resolve()
+    assert local.distribution_name == "my-distribution-name"
+    assert EnvironmentSpec(local=(local,)).normalized()["local"] == [
+        {
+            "source": str(package.resolve()),
+            "distribution_name": "my-distribution-name",
+            "editable": True,
+            "extras": ["test"],
+        }
+    ]
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "renamed-distribution"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+    renamed_recipe = EnvironmentSpec(local=(LocalPackage(package),)).recipe_hash
+    assert renamed_recipe != original_recipe
+
+
+@pytest.mark.parametrize(
+    "pyproject, message",
+    [
+        (None, "must contain pyproject.toml"),
+        ("[build-system]\nrequires = []\n", r"declare a non-empty \[project\]\.name"),
+        ('[project]\nname = ""\n', r"declare a non-empty \[project\]\.name"),
+        ('[project]\nname = "invalid name!"\n', r"invalid \[project\]\.name"),
+        ("[project\n", "valid TOML"),
+    ],
+)
+def test_local_package_rejects_missing_or_invalid_project_name(
+    tmp_path: Path,
+    pyproject: str | None,
+    message: str,
+) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    if pyproject is not None:
+        (package / "pyproject.toml").write_text(pyproject, encoding="utf-8")
+
+    with pytest.raises(LocalPackageValidationError, match=message):
+        LocalPackage(package)

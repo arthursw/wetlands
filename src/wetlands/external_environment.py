@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import enum
 import json
+import math
 import subprocess
 import time
 import socket
@@ -50,11 +52,13 @@ from wetlands.protocol import (
     ACTION_RESULT_OFFER,
     ACTION_UPDATE,
     EXECUTION_PROTOCOL_VERSION,
+    ProtocolError,
     WORKER_RUNTIME_VERSION,
     execution_envelope,
     import_target,
     path_target,
     protocol_message,
+    validate_worker_task_message,
     validate_worker_capabilities,
 )
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
@@ -77,6 +81,13 @@ WORKER_GRACEFUL_EXIT_TIMEOUT = 2.0
 PROCESS_LOGGER_JOIN_TIMEOUT = 5.0
 _NO_RESULT = object()
 _WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
+
+class _DispatchOutcome(enum.Enum):
+    DISPATCHED = "dispatched"
+    SHUTTING_DOWN = "shutting_down"
+    TASK_FAILED = "task_failed"
+    WORKER_UNAVAILABLE = "worker_unavailable"
 
 
 class _AttachTimeout(TimeoutError):
@@ -428,6 +439,10 @@ class ExternalEnvironment:
                 later be reconnected with EnvironmentManager.attach().
         """
         self._raise_if_failed()
+        if worker_timeout is not None and (
+            type(worker_timeout) not in {int, float} or not math.isfinite(worker_timeout) or worker_timeout <= 0
+        ):
+            raise ValueError("worker_timeout must be None or a positive finite number")
         if self.launched():
             return
         if max_workers < 1:
@@ -1026,89 +1041,44 @@ class ExternalEnvironment:
                 break
 
             task = worker._current_task
-            message_task_id = message.get("task_id")
             if task is None:
-                if (
-                    message.get("action") == "commissioned"
-                    and message.get("protocol_version") == EXECUTION_PROTOCOL_VERSION
-                    and message.get("pool_id") == self._pool_id
-                ):
+                if self._shutdown_event.is_set():
+                    break
+                # launch() holds the runtime lock while commissioning the
+                # complete pool, so this startup acknowledgement must remain
+                # lock-free. The event provides the required synchronization.
+                if self._is_valid_commissioned_message(worker, message):
                     worker._commissioned.set()
                     continue
-                if message_task_id is not None and message_task_id in worker._finished_task_ids:
-                    logger.debug(
-                        "Worker %s: ignoring late %r message for finished task %s",
-                        worker.index,
-                        message.get("action"),
-                        message_task_id,
-                    )
-                    continue
-                # No active task — this is a legacy message or unexpected
-                logger.warning(
-                    "Worker %s: received %r message with no active task",
-                    worker.index,
-                    message.get("action"),
-                )
-                continue
-            if (
-                message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION
-                or not isinstance(message_task_id, str)
-                or not message_task_id
-            ):
-                failure = self._worker_connection_failure(
+                with self._lock:
+                    if worker._retired:
+                        break
+                self._fail_worker_protocol(
                     worker,
-                    task,
-                    "Worker sent a malformed execution message",
+                    None,
+                    "Worker sent an execution message with no active task",
                 )
-                retired = self._cleanup_failed_task_worker(worker, task)
-                task._set_failed(failure)
-                if retired:
-                    self._try_replace_worker(worker.index)
                 break
-            if message_task_id is not None and message_task_id != task.id:
-                if message_task_id in worker._finished_task_ids:
-                    logger.debug(
-                        "Worker %s: ignoring stale %r message for finished task %s",
-                        worker.index,
-                        message.get("action"),
-                        message_task_id,
-                    )
-                    continue
-                failure = self._worker_connection_failure(
-                    worker,
-                    task,
-                    f"Worker sent a message for unexpected task {message_task_id}",
-                )
-                retired = self._cleanup_failed_task_worker(worker, task)
-                task._set_failed(failure)
-                if retired:
-                    self._try_replace_worker(worker.index)
+            if not self._worker_owns_task(worker, task):
                 break
 
-            action = message.get("action")
+            try:
+                action = validate_worker_task_message(message, expected_task_id=task.id)
+                self._validate_worker_message_order(task, action)
+            except ProtocolError as error:
+                self._fail_worker_protocol(worker, task, str(error))
+                break
+            except Exception as error:
+                self._fail_worker_protocol(
+                    worker,
+                    task,
+                    f"Worker protocol validation failed unexpectedly ({type(error).__name__})",
+                )
+                break
+            if not self._worker_owns_task(worker, task):
+                break
+
             if action == ACTION_RESULT_OFFER:
-                if not getattr(task, "_accepted", False) or not getattr(task, "_inputs_released", False):
-                    failure = self._worker_connection_failure(
-                        worker,
-                        task,
-                        "Worker offered a result out of order",
-                    )
-                    retired = self._cleanup_failed_task_worker(worker, task)
-                    task._set_failed(failure)
-                    if retired:
-                        self._try_replace_worker(worker.index)
-                    break
-                if getattr(task, "_pending_result", _NO_RESULT) is not _NO_RESULT:
-                    failure = self._worker_connection_failure(
-                        worker,
-                        task,
-                        "Worker offered more than one result",
-                    )
-                    retired = self._cleanup_failed_task_worker(worker, task)
-                    task._set_failed(failure)
-                    if retired:
-                        self._try_replace_worker(worker.index)
-                    break
                 attachments = []
                 try:
                     result = decode_value(
@@ -1144,20 +1114,9 @@ class ExternalEnvironment:
                     break
             elif action == ACTION_RELEASED:
                 result = getattr(task, "_pending_result", _NO_RESULT)
-                if result is _NO_RESULT:
-                    failure = self._worker_connection_failure(
-                        worker,
-                        task,
-                        "Worker released an unknown result",
-                    )
-                    retired = self._cleanup_failed_task_worker(worker, task)
-                    task._set_failed(failure)
-                    if retired:
-                        self._try_replace_worker(worker.index)
-                    break
                 offered_names = list(getattr(task, "_offered_names", ()))
                 released_names = message.get("names")
-                if not isinstance(released_names, list) or set(released_names) != set(offered_names):
+                if set(released_names) != set(offered_names):
                     failure = self._worker_connection_failure(
                         worker,
                         task,
@@ -1178,7 +1137,9 @@ class ExternalEnvironment:
                 else:
                     task._set_completed(result)
                 worker._finished_task_ids.add(task.id)
-                worker._current_task = None
+                with self._lock:
+                    if worker._current_task is task:
+                        worker._current_task = None
                 self._dispatch_or_idle(worker)
             elif action in (ACTION_FAILURE, ACTION_CANCELED):
                 if action == ACTION_FAILURE:
@@ -1187,65 +1148,104 @@ class ExternalEnvironment:
                 self._cleanup_task_inputs(task)
                 task._on_message(message)
                 worker._finished_task_ids.add(task.id)
-                worker._current_task = None
+                with self._lock:
+                    if worker._current_task is task:
+                        worker._current_task = None
                 # Return worker to idle pool and dispatch next queued task
                 self._dispatch_or_idle(worker)
             elif action == ACTION_UPDATE:
-                if not getattr(task, "_accepted", False):
-                    failure = self._worker_connection_failure(
-                        worker,
-                        task,
-                        "Worker sent progress before accepting the task",
-                    )
-                    retired = self._cleanup_failed_task_worker(worker, task)
-                    task._set_failed(failure)
-                    if retired:
-                        self._try_replace_worker(worker.index)
-                    break
                 task._on_message(message)
             elif action == ACTION_ACCEPTED:
-                if getattr(task, "_accepted", False):
-                    failure = self._worker_connection_failure(
-                        worker,
-                        task,
-                        "Worker accepted the task more than once",
-                    )
-                    retired = self._cleanup_failed_task_worker(worker, task)
-                    task._set_failed(failure)
-                    if retired:
-                        self._try_replace_worker(worker.index)
-                    break
                 task._accepted = True  # type: ignore[attr-defined]
                 logger.debug("Worker %s: task %s accepted", worker.index, task.id)
             elif action == ACTION_INPUT_RELEASED:
-                if getattr(task, "_inputs_released", False):
-                    failure = self._worker_connection_failure(
-                        worker,
-                        task,
-                        "Worker released task inputs more than once",
-                    )
-                    retired = self._cleanup_failed_task_worker(worker, task)
-                    task._set_failed(failure)
-                    if retired:
-                        self._try_replace_worker(worker.index)
-                    break
                 task._inputs_released = True  # type: ignore[attr-defined]
                 logger.debug("Worker %s: task %s %s", worker.index, task.id, action)
             elif action == ACTION_LOG:
-                if not getattr(task, "_accepted", False):
-                    continue
-                level = message.get("level", 20)
-                log_message = message.get("message")
-                if type(level) is not int or not isinstance(log_message, str):
-                    continue
-                logger.log(level, log_message)
-            else:
-                logger.warning(
-                    "Worker %s: unexpected action %r for task %s",
-                    worker.index,
-                    action,
-                    task.id,
-                )
+                logger.log(message["level"], message["message"])
+
+    def _is_valid_commissioned_message(self, worker: _Worker, message: Any) -> bool:
+        return (
+            self._persistent
+            and not worker._commissioned.is_set()
+            and isinstance(message, dict)
+            and set(message) == {"action", "protocol_version", "pool_id"}
+            and message["action"] == "commissioned"
+            and message["protocol_version"] == EXECUTION_PROTOCOL_VERSION
+            and isinstance(message["pool_id"], str)
+            and message["pool_id"] == self._pool_id
+        )
+
+    def _worker_owns_task(self, worker: _Worker, task: ExecutionTask[Any]) -> bool:
+        with self._lock:
+            return (
+                worker in self._workers
+                and not worker._retired
+                and worker._current_task is task
+                and not getattr(task, "_terminal_cleanup_in_progress", False)
+            )
+
+    def _validate_worker_message_order(self, task: ExecutionTask[Any], action: str) -> None:
+        accepted = bool(getattr(task, "_accepted", False))
+        inputs_released = bool(getattr(task, "_inputs_released", False))
+        result_offered = getattr(task, "_pending_result", _NO_RESULT) is not _NO_RESULT
+        release_sent = bool(getattr(task, "_result_release_sent", False))
+
+        if task.state.terminal:
+            raise ProtocolError("Worker sent a message after the task became terminal")
+        if action == ACTION_ACCEPTED:
+            if accepted or inputs_released or result_offered:
+                raise ProtocolError("Worker accepted the task out of order or more than once")
+            return
+        if action == ACTION_INPUT_RELEASED:
+            if inputs_released or result_offered:
+                raise ProtocolError("Worker released task inputs out of order or more than once")
+            return
+        if action in {ACTION_UPDATE, ACTION_LOG}:
+            if not accepted or inputs_released or result_offered:
+                raise ProtocolError(f"Worker sent {action} outside active task execution")
+            return
+        if action == ACTION_RESULT_OFFER:
+            if not accepted or not inputs_released or result_offered:
+                raise ProtocolError("Worker offered a result out of order or more than once")
+            return
+        if action == ACTION_RELEASED:
+            if not result_offered or not release_sent:
+                raise ProtocolError("Worker released an unknown result or acknowledged it out of order")
+            return
+        if action == ACTION_CANCELED:
+            if not accepted or not inputs_released or result_offered:
+                raise ProtocolError("Worker reported cancellation out of order")
+            return
+        if action == ACTION_FAILURE and result_offered:
+            raise ProtocolError("Worker reported failure after offering a result")
+
+    def _fail_worker_protocol(
+        self,
+        worker: _Worker,
+        task: ExecutionTask[Any] | None,
+        detail: str,
+    ) -> None:
+        logger.error("Worker %s protocol failure: %s", worker.index, detail)
+        with self._lock:
+            pool_was_usable = worker in self._workers
+        if task is None:
+            retired = self._remove_dead_worker(worker)
+        else:
+            failure = self._worker_connection_failure(
+                worker,
+                task,
+                f"Worker protocol failure: {detail}",
+            )
+            offered_names = tuple(getattr(task, "_offered_names", ()))
+            retired = self._cleanup_failed_task_worker(
+                worker,
+                task,
+                offered_names=offered_names,
+            )
+            task._set_failed(failure)
+        if retired and pool_was_usable:
+            self._try_replace_worker(worker.index)
 
     _HEALTH_CHECK_INTERVAL = 5  # seconds
 
@@ -1367,12 +1367,21 @@ class ExternalEnvironment:
             with self._lock:
                 self._fatal_error = replacement_error
 
-    def _remove_dead_worker(self, worker: _Worker) -> bool:
+    def _remove_dead_worker(
+        self,
+        worker: _Worker,
+        *,
+        retirement_claimed: bool = False,
+    ) -> bool:
         """Remove a dead worker from all pools and clean up its resources."""
         with self._lock:
-            if worker._retired:
-                return False
-            worker._retired = True
+            if retirement_claimed:
+                if not worker._retired:
+                    raise RuntimeError("Worker retirement was not claimed before cleanup")
+            else:
+                if worker._retired:
+                    return False
+                worker._retired = True
 
         try:
             if worker.connection and not worker.connection.closed:
@@ -1458,21 +1467,42 @@ class ExternalEnvironment:
 
     def _dispatch_or_idle(self, worker: _Worker) -> None:
         """Try to dispatch the next queued task to this worker, or return it to idle pool."""
-        if worker not in self._workers:
-            return
         while True:
+            with self._lock:
+                if (
+                    self._shutdown_event.is_set()
+                    or worker not in self._workers
+                    or worker._retired
+                    or worker._current_task is not None
+                ):
+                    return
             try:
                 task = self._task_queue.get_nowait()
             except queue.Empty:
-                self._idle_workers.put(worker)
+                with self._lock:
+                    if (
+                        not self._shutdown_event.is_set()
+                        and worker in self._workers
+                        and not worker._retired
+                        and worker._current_task is None
+                    ):
+                        self._idle_workers.put(worker)
                 return
             if task.state.terminal:
                 self._cleanup_task_inputs(task)
                 continue
-            if self._dispatch_to_worker(worker, task):
+            outcome = self._dispatch_to_worker(worker, task)
+            if outcome is _DispatchOutcome.DISPATCHED:
+                return
+            if outcome is _DispatchOutcome.WORKER_UNAVAILABLE:
+                self._queue_task_or_fail_shutdown(task)
                 return
 
-    def _dispatch_to_worker(self, worker: _Worker, task: ExecutionTask[Any]) -> bool:
+    def _dispatch_to_worker(
+        self,
+        worker: _Worker,
+        task: ExecutionTask[Any],
+    ) -> _DispatchOutcome:
         """Send a task's payload to a worker for execution."""
         payload = task._payload  # type: ignore[attr-defined]
         payload["task_id"] = task.id
@@ -1484,7 +1514,7 @@ class ExternalEnvironment:
             )
             self._cleanup_task_inputs(task)
             task._set_failed(failure)
-            return False
+            return _DispatchOutcome.TASK_FAILED
         payload["output_lease_context"] = self._lease_context(
             task.id,
             direction="output",
@@ -1505,9 +1535,21 @@ class ExternalEnvironment:
                 )
                 self._cleanup_task_inputs(task)
                 task._set_failed(failure)
-                return False
-        worker._current_task = task
-        worker._last_activity = time.time()
+                return _DispatchOutcome.TASK_FAILED
+        with self._lock:
+            shutting_down = self._shutdown_event.is_set()
+            if shutting_down:
+                unavailable = False
+            else:
+                unavailable = worker not in self._workers or worker._retired or worker._current_task is not None
+            if unavailable:
+                return _DispatchOutcome.WORKER_UNAVAILABLE
+            if not shutting_down:
+                worker._current_task = task
+                worker._last_activity = time.time()
+        if shutting_down:
+            self._fail_task_for_shutdown(task)
+            return _DispatchOutcome.SHUTTING_DOWN
         task._set_running()
 
         if worker.process_logger:
@@ -1526,6 +1568,7 @@ class ExternalEnvironment:
             task._set_failed(failure)
             if retired:
                 self._try_replace_worker(worker.index)
+            return _DispatchOutcome.TASK_FAILED
         except Exception as e:
             failure = TaskFailure.serialization(
                 f"Failed to serialize task payload for worker {worker.index}: {e}",
@@ -1538,7 +1581,8 @@ class ExternalEnvironment:
             task._set_failed(failure)
             if retired:
                 self._try_replace_worker(worker.index)
-        return True
+            return _DispatchOutcome.TASK_FAILED
+        return _DispatchOutcome.DISPATCHED
 
     def _submit_task(
         self,
@@ -1549,17 +1593,23 @@ class ExternalEnvironment:
 
         def _start() -> None:
             while True:
+                if self._shutdown_event.is_set():
+                    self._fail_task_for_shutdown(task)
+                    return
                 try:
                     worker = self._idle_workers.get_nowait()
                 except queue.Empty:
-                    self._task_queue.put(task)
+                    self._queue_task_or_fail_shutdown(task)
                     return
                 # Skip dead workers that are still in the idle queue
-                if worker not in self._workers:
+                if worker not in self._workers or worker._retired:
                     continue
-                dispatched = self._dispatch_to_worker(worker, task)
-                if not dispatched and worker in self._workers:
-                    self._idle_workers.put(worker)
+                outcome = self._dispatch_to_worker(worker, task)
+                if outcome is _DispatchOutcome.WORKER_UNAVAILABLE:
+                    self._queue_task_or_fail_shutdown(task)
+                elif outcome is _DispatchOutcome.TASK_FAILED:
+                    if worker in self._workers and not worker._retired:
+                        self._idle_workers.put(worker)
                 return
 
         def _cancel() -> None:
@@ -1590,12 +1640,33 @@ class ExternalEnvironment:
             task.start()
         return task
 
+    def _queue_task_or_fail_shutdown(self, task: ExecutionTask[Any]) -> bool:
+        with self._lock:
+            if self._shutdown_event.is_set():
+                queued = False
+            else:
+                self._task_queue.put(task)
+                queued = True
+        if not queued:
+            self._fail_task_for_shutdown(task)
+        return queued
+
+    def _fail_task_for_shutdown(self, task: ExecutionTask[Any]) -> None:
+        failure = TaskFailure.environment(
+            "Environment is shutting down",
+            task_id=task.id,
+            call_target=self._task_call_target(task),
+        )
+        self._cleanup_task_inputs(task)
+        task._set_failed(failure)
+
     def _force_cancel_after_grace(self, worker: _Worker, task: ExecutionTask[Any]) -> None:
         grace = float(self.environment_manager.termination_grace)
         if task._done_event.wait(timeout=grace):  # type: ignore[attr-defined]
             return
-        if worker._current_task is not task:
-            return
+        with self._lock:
+            if worker._current_task is not task or worker._retired:
+                return
         retired = self._cleanup_failed_task_worker(worker, task)
         task._set_canceled()
         if retired:
@@ -1609,8 +1680,12 @@ class ExternalEnvironment:
         offered_names: Iterable[str] = (),
     ) -> bool:
         """Finish transport and worker cleanup before publishing task failure."""
-        task._terminal_cleanup_in_progress = True  # type: ignore[attr-defined]
-        worker._current_task = None
+        with self._lock:
+            task._terminal_cleanup_in_progress = True  # type: ignore[attr-defined]
+            if worker._current_task is task:
+                worker._current_task = None
+            retirement_claimed = not worker._retired
+            worker._retired = True
         names = list(offered_names)
         if names:
             unlink_names(
@@ -1618,7 +1693,9 @@ class ExternalEnvironment:
                 ledger_root=self.environment_manager.wetlands_instance_path,
             )
         self._cleanup_task_inputs(task)
-        return self._remove_dead_worker(worker)
+        if not retirement_claimed:
+            return False
+        return self._remove_dead_worker(worker, retirement_claimed=True)
 
     def _cleanup_task_inputs(self, task: ExecutionTask[Any]) -> None:
         with task._lock:  # type: ignore[attr-defined]

@@ -19,6 +19,7 @@ from wetlands._internal.value_codec import (
     encode_value,
 )
 from wetlands.external_environment import ExternalEnvironment, _Worker
+from wetlands.lifecycle import WorkerStartError
 from wetlands import module_executor
 from wetlands.protocol import (
     EXECUTION_PROTOCOL_VERSION,
@@ -29,6 +30,7 @@ from wetlands.protocol import (
     import_target,
     path_target,
     validate_task_message,
+    validate_worker_task_message,
     validate_worker_capabilities,
     worker_hello,
 )
@@ -97,6 +99,222 @@ def test_protocol_messages_require_version_action_and_task_identity():
     with pytest.raises(ProtocolError):
         validate_task_message(
             {"action": "unknown", "protocol_version": EXECUTION_PROTOCOL_VERSION, "task_id": "task-1"}
+        )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        None,
+        {
+            "action": "unknown",
+            "protocol_version": EXECUTION_PROTOCOL_VERSION,
+            "task_id": "task-1",
+        },
+        {
+            "action": "accepted",
+            "protocol_version": EXECUTION_PROTOCOL_VERSION,
+            "task_id": "task-1",
+            "unexpected": True,
+        },
+        {
+            "action": "log",
+            "protocol_version": EXECUTION_PROTOCOL_VERSION,
+            "task_id": "task-1",
+            "level": "INFO",
+            "message": "hello",
+        },
+        {
+            "action": "released",
+            "protocol_version": EXECUTION_PROTOCOL_VERSION,
+            "task_id": "task-1",
+            "names": ["same", "same"],
+        },
+        {
+            "action": "error",
+            "protocol_version": EXECUTION_PROTOCOL_VERSION,
+            "task_id": "task-1",
+            "failure": {},
+            "exception": "boom",
+            "traceback": "",
+        },
+    ],
+)
+def test_worker_task_messages_reject_malformed_payloads(message):
+    with pytest.raises(ProtocolError):
+        validate_worker_task_message(message, expected_task_id="task-1")
+
+
+def test_worker_task_messages_validate_complete_payload_shapes():
+    assert (
+        validate_worker_task_message(
+            {
+                "action": "update",
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                "task_id": "task-1",
+                "message": "working",
+                "current": 1,
+                "maximum": 2,
+                "outputs": {"preview": [1, True, None]},
+            },
+            expected_task_id="task-1",
+        )
+        == "update"
+    )
+    assert (
+        validate_worker_task_message(
+            {
+                "action": "log",
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                "task_id": "task-1",
+                "level": 20,
+                "message": "working",
+            },
+            expected_task_id="task-1",
+        )
+        == "log"
+    )
+
+
+def test_worker_failure_producer_matches_strict_host_schema():
+    failure = module_executor._failure_payload(
+        ValueError("bad input"),
+        task_id="task-1",
+        call_target="example:run",
+    )
+    message = {
+        "action": "error",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "task_id": "task-1",
+        "failure": failure,
+        "exception": "bad input",
+        "traceback": failure["traceback"],
+    }
+
+    assert validate_worker_task_message(message, expected_task_id="task-1") == "error"
+
+
+def test_worker_failure_producer_truncates_recursive_exception_chain():
+    error = ValueError("recursive cause")
+    error.__cause__ = error
+
+    failure = module_executor._failure_payload(
+        error,
+        task_id="task-1",
+        call_target="example:run",
+    )
+    remote_exception = failure["remote_exception"]
+
+    assert remote_exception["cause"] is not None
+    assert remote_exception["cause"]["cause"] is None
+    message = {
+        "action": "error",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "task_id": "task-1",
+        "failure": failure,
+        "exception": "recursive cause",
+        "traceback": failure["traceback"],
+    }
+    assert validate_worker_task_message(message, expected_task_id="task-1") == "error"
+
+
+def test_execution_worker_reports_self_caused_exception_without_hanging(tmp_path):
+    module = tmp_path / "recursive_failure.py"
+    module.write_text(
+        "def fail():\n    error = ValueError('recursive cause')\n    error.__cause__ = error\n    raise error\n",
+        encoding="utf-8",
+    )
+    encoded_args, _ = encode_value((), path="args")
+    encoded_kwargs, _ = encode_value({}, path="kwargs")
+    envelope = execution_envelope(
+        task_id="task-recursive-failure",
+        target=path_target(module, "fail", cache=False),
+        args=encoded_args,
+        kwargs=encoded_kwargs,
+        codecs=descriptor_codecs(encoded_args, encoded_kwargs),
+    )
+    connection = MagicMock()
+
+    module_executor.execution_worker(threading.Lock(), connection, envelope)
+
+    messages = [call.args[0] for call in connection.send.call_args_list]
+    assert [message["action"] for message in messages] == [
+        "accepted",
+        "input_released",
+        "error",
+    ]
+    assert (
+        validate_worker_task_message(
+            messages[-1],
+            expected_task_id="task-recursive-failure",
+        )
+        == "error"
+    )
+
+
+def test_worker_failure_rejects_recursive_remote_exception_payload():
+    failure = module_executor._failure_payload(
+        ValueError("bad input"),
+        task_id="task-1",
+        call_target="example:run",
+    )
+    remote_exception = failure["remote_exception"]
+    remote_exception["cause"] = remote_exception
+    message = {
+        "action": "error",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "task_id": "task-1",
+        "failure": failure,
+        "exception": "bad input",
+        "traceback": failure["traceback"],
+    }
+
+    with pytest.raises(ProtocolError, match="recursive reference"):
+        validate_worker_task_message(message, expected_task_id="task-1")
+
+
+def test_worker_failure_rejects_excessively_deep_remote_exception_payload():
+    remote_exception = None
+    for index in range(35):
+        remote_exception = {
+            "module": "builtins",
+            "type_name": "ValueError",
+            "qualified_name": "ValueError",
+            "message": f"level {index}",
+            "traceback": "",
+            "cause": remote_exception,
+            "context": None,
+            "suppress_context": False,
+        }
+    failure = module_executor._failure_payload(
+        ValueError("bad input"),
+        task_id="task-1",
+        call_target="example:run",
+    )
+    failure["remote_exception"] = remote_exception
+    message = {
+        "action": "error",
+        "protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "task_id": "task-1",
+        "failure": failure,
+        "exception": "bad input",
+        "traceback": failure["traceback"],
+    }
+
+    with pytest.raises(ProtocolError, match="maximum nesting depth"):
+        validate_worker_task_message(message, expected_task_id="task-1")
+
+
+def test_worker_handshake_rejects_unknown_and_incomplete_fields():
+    with pytest.raises(ProtocolCompatibilityError, match="unexpected fields"):
+        validate_worker_capabilities(
+            _hello(unexpected=True),
+            required_codecs=SUPPORTED_CODECS,
+        )
+    with pytest.raises(ProtocolCompatibilityError, match="incomplete persistent"):
+        validate_worker_capabilities(
+            _hello(pool_id="pool-1"),
+            required_codecs=SUPPORTED_CODECS,
         )
 
 
@@ -384,6 +602,27 @@ def test_partial_attach_rolls_back_connections_and_controller_claim(tmp_path):
     first.connection.close.assert_called_once()
     release.assert_called_once()
     assert runtime.worker_count == 0
+
+
+def test_attach_wraps_protocol_mismatch_in_public_start_error(tmp_path):
+    manager = MagicMock()
+    manager.wetlands_instance_path = tmp_path
+    runtime = ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
+    entries = ({"pool_id": "pool-1", "worker_index": 0},)
+    mismatch = ProtocolCompatibilityError("protocol mismatch")
+
+    with (
+        patch.object(runtime_state, "claim_controller"),
+        patch.object(runtime_state, "release_controller"),
+        patch.object(runtime_state, "live_workers_for_env", return_value=list(entries)),
+        patch.object(runtime, "_attach_worker", side_effect=mismatch),
+        pytest.raises(WorkerStartError) as caught,
+    ):
+        runtime.attach_workers(entries, b"key")
+
+    assert caught.value.environment == "example"
+    assert caught.value.phase == "attach"
+    assert caught.value.__cause__ is mismatch
 
 
 def test_attach_claim_failure_does_not_leave_local_controller_identity(tmp_path):

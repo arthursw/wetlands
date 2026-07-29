@@ -41,6 +41,7 @@ operation.listen(on_event)
 
 Listeners may run on Wetlands background threads.
 GUI applications must marshal UI mutations onto their own UI thread.
+Do not call `EnvironmentManager.close()` directly from an operation listener; schedule shutdown on another thread so the operation can finish.
 
 ## Structured failure
 
@@ -147,8 +148,10 @@ task = pool.submit_import(
 Progress messages and intermediate outputs are initially limited to simple supported values.
 NumPy arrays should be returned as the terminal result rather than published as intermediate output.
 
-Cancellation is cooperative for running Python code.
+Cancellation starts cooperatively for running Python code.
 The worker observes `task.cancel_requested` and may acknowledge it with `task.cancel()`.
+If it does not finish during the manager's configured termination grace period, Wetlands terminates that worker's process tree and starts a replacement.
+The task reaches `CANCELED` only after this cleanup has completed.
 If a worker becomes unhealthy or disconnects, Wetlands fails its assigned task and replaces the worker.
 
 ## Async use
@@ -185,10 +188,7 @@ Canceling an awaiting coroutine requests cancellation of the underlying operatio
 
 ```python
 with environment.start(workers=4, worker_timeout=300) as pool:
-    tasks = [
-        pool.submit_import("analysis_package.pipeline:run", args=(item,))
-        for item in items
-    ]
+    tasks = [pool.submit_import("analysis_package.pipeline:run", args=(item,)) for item in items]
     results = [task.wait_for() for task in tasks]
 ```
 

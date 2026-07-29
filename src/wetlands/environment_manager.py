@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import math
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Iterator
 
 from wetlands._internal.provisioning import _read_ready, prepare_pixi, provision_environment
 from wetlands._internal.value_codec import reconcile_shared_memory_leases
+from wetlands.lifecycle import ManagerCloseError
 from wetlands.managed_environment import ManagedEnvironment
-from wetlands.operation import Operation, OperationCanceled, PreparationOperation, ProvisioningOperation
+from wetlands.operation import (
+    Operation,
+    OperationCanceled,
+    OperationEvent,
+    PreparationOperation,
+    ProvisioningOperation,
+)
 from wetlands.specs import EnvironmentSpec, PixiInfo, environment_name_key, validate_environment_name
 
 _NETWORK_KEYS = frozenset({"http", "https", "no_proxy"})
@@ -28,8 +37,8 @@ class EnvironmentManager:
         network: Mapping[str, str] | None = None,
         termination_grace: float = 5.0,
     ) -> None:
-        if termination_grace < 0:
-            raise ValueError("termination_grace must be non-negative")
+        if type(termination_grace) not in {int, float} or not math.isfinite(termination_grace) or termination_grace < 0:
+            raise ValueError("termination_grace must be a finite non-negative number")
         self._root = Path(root).expanduser().resolve(strict=False)
         self._pixi_executable = (
             Path(pixi_executable).expanduser().resolve(strict=False) if pixi_executable is not None else None
@@ -52,7 +61,12 @@ class EnvironmentManager:
         self._prepared: PixiInfo | None = None
         self._environment_lock = threading.RLock()
         self._environments: dict[str, ManagedEnvironment] = {}
+        self._lifecycle_condition = threading.Condition(threading.RLock())
+        self._close_lock = threading.Lock()
+        self._active_operations: set[Operation[Any]] = set()
+        self._active_manager_work = 0
         self._closed = False
+        self._close_complete = False
 
     @property
     def root(self) -> Path:
@@ -85,9 +99,9 @@ class EnvironmentManager:
         return self._state_root
 
     def prepare(self) -> PreparationOperation[PixiInfo]:
-        self._ensure_open()
         operation: PreparationOperation[PixiInfo] = PreparationOperation()
-        operation._start_runner(
+        self._start_operation(
+            operation,
             lambda: self._prepare_sync(operation),
             thread_name=f"wetlands-prepare-{operation.id[:8]}",
         )
@@ -123,7 +137,6 @@ class EnvironmentManager:
         *,
         replace_existing: bool = False,
     ) -> ProvisioningOperation[ManagedEnvironment]:
-        self._ensure_open()
         normalized_name = validate_environment_name(name)
         if not isinstance(spec, EnvironmentSpec):
             raise TypeError("spec must be an EnvironmentSpec")
@@ -144,45 +157,130 @@ class EnvironmentManager:
                 self._environments[key] = environment
             return environment
 
-        operation._start_runner(run, thread_name=f"wetlands-provision-{normalized_name}-{operation.id[:8]}")
+        self._start_operation(
+            operation,
+            run,
+            thread_name=f"wetlands-provision-{normalized_name}-{operation.id[:8]}",
+        )
         return operation
 
     def environment(self, name: str) -> ManagedEnvironment:
-        self._ensure_open()
-        normalized_name = validate_environment_name(name)
-        key = environment_name_key(normalized_name)
-        with self._environment_lock:
-            existing = self._environments.get(key)
-        if existing is not None:
-            if existing.name != normalized_name:
-                raise EnvironmentNotReadyError(
-                    f"Environment name {normalized_name!r} aliases managed name {existing.name!r}"
-                )
-        target = self.environments_root / normalized_name
-        metadata = _read_ready(target)
-        if metadata is None:
+        with self._manager_work():
+            normalized_name = validate_environment_name(name)
+            key = environment_name_key(normalized_name)
             with self._environment_lock:
-                self._environments.pop(key, None)
-            raise EnvironmentNotReadyError(f"Environment {normalized_name!r} is not ready")
-        if existing is not None and existing.generation_id == metadata.get("generation_id"):
-            return existing
-        environment = ManagedEnvironment._from_ready(self, normalized_name, target, metadata)
-        with self._environment_lock:
-            self._environments[key] = environment
-        return environment
+                existing = self._environments.get(key)
+            if existing is not None:
+                if existing.name != normalized_name:
+                    raise EnvironmentNotReadyError(
+                        f"Environment name {normalized_name!r} aliases managed name {existing.name!r}"
+                    )
+            target = self.environments_root / normalized_name
+            metadata = _read_ready(target)
+            if metadata is None:
+                with self._environment_lock:
+                    self._environments.pop(key, None)
+                raise EnvironmentNotReadyError(f"Environment {normalized_name!r} is not ready")
+            if existing is not None and existing.generation_id == metadata.get("generation_id"):
+                return existing
+            environment = ManagedEnvironment._from_ready(self, normalized_name, target, metadata)
+            with self._environment_lock:
+                self._environments[key] = environment
+            return environment
 
     def close(self) -> None:
-        if self._closed:
-            return
-        with self._environment_lock:
-            environments = tuple(self._environments.values())
-        for environment in environments:
-            environment.close_pools()
-        self._closed = True
+        with self._close_lock:
+            with self._lifecycle_condition:
+                if self._close_complete:
+                    return
+                operations = tuple(self._active_operations)
+                if any(operation._runs_on_current_thread() for operation in operations):
+                    raise RuntimeError(
+                        "EnvironmentManager.close() cannot run from an active operation listener; "
+                        "schedule shutdown on another thread"
+                    )
+                self._closed = True
+
+            errors: list[BaseException] = []
+            for operation in operations:
+                operation.cancel()
+            for operation in operations:
+                try:
+                    operation.wait_for()
+                except OperationCanceled:
+                    pass
+                except BaseException as error:
+                    errors.append(error)
+
+            with self._lifecycle_condition:
+                while self._active_manager_work:
+                    self._lifecycle_condition.wait()
+
+            # Provisioning publishes its ManagedEnvironment before it reaches a
+            # terminal state, so taking this snapshot after joining operations
+            # cannot miss an environment that completed concurrently with close.
+            with self._environment_lock:
+                environments = tuple(self._environments.values())
+            for environment in environments:
+                errors.extend(environment._close_pools())
+
+            with self._lifecycle_condition:
+                remaining_pool = any(environment._has_open_pools() for environment in environments)
+                self._close_complete = not remaining_pool
+            if errors:
+                raise ManagerCloseError(tuple(errors))
 
     def _ensure_open(self) -> None:
+        with self._lifecycle_condition:
+            self._ensure_open_locked()
+
+    def _ensure_open_locked(self) -> None:
         if self._closed:
             raise RuntimeError("EnvironmentManager is closed")
+
+    def _start_operation(
+        self,
+        operation: Operation[Any],
+        runner: Callable[[], Any],
+        *,
+        thread_name: str,
+    ) -> None:
+        with self._lifecycle_condition:
+            self._ensure_open_locked()
+            self._active_operations.add(operation)
+
+            def unregister(event: OperationEvent) -> None:
+                if event.state.terminal:
+                    operation.remove_listener(unregister)
+                    self._unregister_operation(operation)
+
+            operation.listen(unregister, replay=False)
+            try:
+                operation._start_runner(runner, thread_name=thread_name)
+            except BaseException:
+                operation.remove_listener(unregister)
+                self._active_operations.discard(operation)
+                self._lifecycle_condition.notify_all()
+                raise
+
+    def _unregister_operation(self, operation: Operation[Any]) -> None:
+        with self._lifecycle_condition:
+            self._active_operations.discard(operation)
+            self._lifecycle_condition.notify_all()
+
+    @contextmanager
+    def _manager_work(self) -> Iterator[None]:
+        """Keep shutdown from overtaking synchronous manager-owned work."""
+
+        with self._lifecycle_condition:
+            self._ensure_open_locked()
+            self._active_manager_work += 1
+        try:
+            yield
+        finally:
+            with self._lifecycle_condition:
+                self._active_manager_work -= 1
+                self._lifecycle_condition.notify_all()
 
     def __enter__(self) -> EnvironmentManager:
         self._ensure_open()

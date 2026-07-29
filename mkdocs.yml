@@ -35,6 +35,8 @@ nav:
   - Environment specifications: dependencies.md
   - Operations and tasks: tasks.md
   - Automatic NumPy transport: shared_memory.md
+  - Compatibility and releases: compatibility.md
+  - Release checklist: releasing.md
   - Migration to Wetlands 2: migration_v2.md
   - How it works: how_it_works.md
   - Debugging: debugging.md

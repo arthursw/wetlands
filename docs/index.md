@@ -2,20 +2,26 @@
 
 # Wetlands
 
-Wetlands provisions isolated Pixi environments and runs Python callables in managed worker processes.
+Wetlands is a Python library for creating isolated environments with [Pixi](https://pixi.sh/) and running Python functions inside them.
 
-The library is application-neutral and designed for trusted local dependency isolation.
-It does not provide a security boundary.
+Applications sometimes need libraries whose dependencies cannot be installed together.
+For example, [Cellpose](https://www.cellpose.org/) and [StarDist](https://github.com/stardist/stardist) can each run in their own environment while the main application exchanges ordinary Python values and NumPy arrays with both.
 
-## What Wetlands manages
+Wetlands creates environments when needed, installs their dependencies, keeps workers ready for repeated calls, and cleans up their resources.
+It can be embedded in desktop applications, servers, and plugin systems.
 
-- A verified Pixi installation prepared explicitly with `EnvironmentManager.prepare()`.
-- Reproducible Pixi projects described by immutable `EnvironmentSpec` values.
-- Cancellable provisioning operations with structured stages, output, and failures.
-- Warm worker pools with health monitoring and replacement.
-- A versioned execution protocol with qualified import and source-path targets.
-- Automatic transport of simple Python values and NumPy arrays.
-- Synchronous, callback-based, and `asyncio`-friendly observation.
+> Wetlands is intended for code you trust.
+> Isolated environments prevent dependency conflicts, but they do not restrict what code can access on your computer.
+
+## What Wetlands does
+
+- Downloads and verifies Pixi, or uses the Pixi executable you provide.
+- Creates reproducible environments from clear dependency recipes and `pixi.lock`.
+- Reports preparation and installation progress and supports cancellation.
+- Runs installed Python functions without importing their dependencies into the main environment.
+- Keeps workers warm and replaces them when they fail or ignore cancellation.
+- Transfers simple Python values and NumPy arrays automatically.
+- Works in blocking, callback-based, and `asyncio` applications.
 
 ## Start here
 
@@ -27,10 +33,17 @@ Read [Operations and tasks](tasks.md) for cancellation, events, and async integr
 
 Existing Wetlands 1 users should start with the [Wetlands 2 migration guide](migration_v2.md).
 
-## Design boundary
+## Before the first run
 
-Wetlands owns environment preparation, provisioning, workers, transport resources, and cleanup.
+Wetlands may need to download Pixi and your declared packages.
+The first provisioning can therefore require network access and take several minutes.
+Pixi, environments, locks, logs, and runtime state are stored below the `EnvironmentManager` root you configure.
 
-The embedding application owns manifests, user-facing naming and policy, GUI integration, and presentation of operation events.
+## Trusted code only
 
-Worker code remains ordinary Python and does not need to import Wetlands.
+Worker functions, package installers, and post-install commands run with the permissions of the current operating-system user.
+They can generally read and modify that user's files, inspect environment variables, use the network, start processes, and consume system resources.
+Authenticated local worker connections prevent accidental or unauthenticated connections; they do not restrict the worker code itself.
+
+Use an operating-system sandbox, container, virtual machine, or separate user account if you need to run untrusted code.
+See the [security policy](https://github.com/arthursw/wetlands/security/policy) for the supported threat model and reporting instructions.
