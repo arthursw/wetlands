@@ -22,7 +22,7 @@ from wetlands._internal.process_termination import (
 )
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 STATE_DIR_NAME = "state"
 AUTH_KEY_FILE = "auth.key"
 WORKERS_FILE = "workers.json"
@@ -139,6 +139,8 @@ def _valid_worker_entry(key: str, entry: dict[str, Any]) -> bool:
     pool_id = entry.get("pool_id")
     pid = entry.get("pid")
     port = entry.get("port")
+    management_port = entry.get("management_port")
+    worker_id = entry.get("worker_id")
     persistent = entry.get("persistent")
     process_group_id = entry.get("process_group_id")
     session_id = entry.get("session_id")
@@ -154,6 +156,20 @@ def _valid_worker_entry(key: str, entry: dict[str, Any]) -> bool:
         and pid > 0
         and type(port) is int
         and 0 < port <= 65535
+        and isinstance(worker_id, str)
+        and bool(worker_id)
+        and type(management_port) is int
+        and 0 < management_port <= 65535
+        and (
+            entry.get("debugger") is None
+            or (
+                isinstance(entry.get("debugger"), dict)
+                and entry["debugger"].get("adapter") == "debugpy"
+                and entry["debugger"].get("host") == "127.0.0.1"
+                and type(entry["debugger"].get("port")) is int
+                and 0 < entry["debugger"]["port"] <= 65535
+            )
+        )
         and type(persistent) is bool
         and (entry.get("env_path") is None or isinstance(entry.get("env_path"), str))
         and isinstance(entry.get("generation_id"), str)
@@ -229,6 +245,9 @@ def load_workers(root: str | Path) -> dict[str, Any]:
     persistent_pools = data["persistent_pools"]
     if any(not _valid_worker_entry(key, entry) for key, entry in workers.items()):
         raise RuntimeRegistryError(f"Worker registry {path} field 'workers' contains an invalid entry")
+    worker_ids = [entry["worker_id"] for entry in workers.values()]
+    if len(worker_ids) != len(set(worker_ids)):
+        raise RuntimeRegistryError(f"Worker registry {path} field 'workers' contains duplicate worker IDs")
     if any(not key or not _valid_controller_entry(entry) for key, entry in controllers.items()):
         raise RuntimeRegistryError(f"Worker registry {path} field 'controllers' contains an invalid entry")
     if any(not key or not _valid_pool_entry(key, entry) for key, entry in persistent_pools.items()):
@@ -286,11 +305,17 @@ def record_worker(
     recipe_hash: str,
     worker_runtime_version: str,
     protocol_version: int,
+    worker_id: str,
+    management_port: int,
     pool_id: str | None = None,
 ) -> None:
     if persistent and not pool_id:
         raise ValueError("persistent workers require a pool_id")
     key = worker_key(env_name, worker_index, pool_id)
+    if not worker_id:
+        raise ValueError("worker_id must be nonempty")
+    if type(management_port) is not int or not (0 < management_port <= 65535):
+        raise ValueError("management_port must be a valid TCP port")
     identity = capture_process_identity(pid)
     with root_lock(root):
         registry = load_workers(root)
@@ -308,6 +333,9 @@ def record_worker(
             "pool_id": pool_id,
             "pid": pid,
             "port": port,
+            "worker_id": worker_id,
+            "management_port": management_port,
+            "debugger": None,
             "persistent": persistent,
             "generation_id": generation_id,
             "recipe_hash": recipe_hash,
@@ -318,6 +346,32 @@ def record_worker(
             "process_group_id": identity.process_group_id,
             "session_id": identity.session_id,
             "started_at": time.time(),
+        }
+        atomic_write_json(state_dir(root) / WORKERS_FILE, registry)
+
+
+def record_debugger(
+    root: str | Path,
+    *,
+    worker_id: str,
+    adapter: str,
+    host: str,
+    port: int,
+) -> None:
+    """Publish a debugger endpoint only while its exact worker record exists."""
+    if adapter != "debugpy" or host != "127.0.0.1":
+        raise ValueError("Wetlands debugger endpoints must use debugpy on 127.0.0.1")
+    if type(port) is not int or not (0 < port <= 65535):
+        raise ValueError("debugger port must be a valid TCP port")
+    with root_lock(root):
+        registry = load_workers(root)
+        matches = [entry for entry in registry["workers"].values() if entry.get("worker_id") == worker_id]
+        if len(matches) != 1:
+            raise RuntimeError(f"Worker {worker_id!r} is no longer registered")
+        matches[0]["debugger"] = {
+            "adapter": adapter,
+            "host": host,
+            "port": port,
         }
         atomic_write_json(state_dir(root) / WORKERS_FILE, registry)
 

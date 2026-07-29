@@ -751,7 +751,7 @@ def test_failed_recorded_launch_retains_worker_until_death_is_verified(
         patch("wetlands.external_environment.ProcessLogger"),
         patch(
             "wetlands.external_environment._wait_for_startup_payload",
-            return_value={"port": 5000},
+            return_value={"port": 5000, "management_port": 5001},
         ),
         patch(
             "wetlands.external_environment.validate_worker_capabilities",

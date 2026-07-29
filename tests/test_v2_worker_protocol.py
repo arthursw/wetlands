@@ -787,6 +787,8 @@ def test_persistent_registry_requires_exact_generation_and_protocol_identity(tmp
         worker_index=0,
         pid=os.getpid(),
         port=54321,
+        worker_id="pool-1-worker-0",
+        management_port=54322,
         persistent=True,
         pool_id="pool-1",
         generation_id="generation-1",

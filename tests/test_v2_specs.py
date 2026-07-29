@@ -40,7 +40,7 @@ def test_invalid_environment_names_are_rejected(name: str) -> None:
 
 def test_environment_spec_snapshots_lockfile(tmp_path: Path) -> None:
     lock = tmp_path / "pixi.lock"
-    lock.write_bytes(b"version: 6\n")
+    lock.write_bytes(b"version: 6\n- name: debugpy\n")
     spec = EnvironmentSpec(
         python="3.11",
         conda=("numpy>=2",),
@@ -49,7 +49,7 @@ def test_environment_spec_snapshots_lockfile(tmp_path: Path) -> None:
         pixi_lock=lock,
     )
     lock.write_bytes(b"changed")
-    assert spec.lock_bytes == b"version: 6\n"
+    assert spec.lock_bytes == b"version: 6\n- name: debugpy\n"
     assert spec.normalized()["pixi_lock_sha256"]
 
 
@@ -83,9 +83,9 @@ def test_environment_spec_rejects_invalid_entries_immediately() -> None:
         PostInstallCommand("python -V")  # type: ignore[arg-type]
     combined = EnvironmentSpec(
         local=(LocalPackage(Path.cwd()),),
-        pixi_lock=b"version: 6\n",
+        pixi_lock=b"version: 6\n- name: debugpy\n",
     )
-    assert combined.lock_bytes == b"version: 6\n"
+    assert combined.lock_bytes == b"version: 6\n- name: debugpy\n"
 
 
 def test_manifest_renders_pypi_extras_and_direct_urls() -> None:
@@ -101,8 +101,21 @@ def test_manifest_renders_pypi_extras_and_direct_urls() -> None:
 
     assert '"requests" = { version = ">=2", extras = ["socks"] }' in manifest
     assert '"example" = { url = "https://example.invalid/example.whl" }' in manifest
+    assert '"debugpy" = "==1.8.17"' in manifest
     assert manifest.startswith("[workspace]\n")
     assert "[project]" not in manifest
+
+
+def test_managed_debugger_dependency_cannot_be_overridden(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="managed by the Wetlands worker runtime"):
+        EnvironmentSpec(pypi=("debugpy>=1",))
+    with pytest.raises(ValueError, match="managed by the Wetlands worker runtime"):
+        EnvironmentSpec(conda=("debugpy",))
+    local = tmp_path / "debugpy"
+    local.mkdir()
+    (local / "pyproject.toml").write_text('[project]\nname = "debugpy"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="managed by the Wetlands worker runtime"):
+        EnvironmentSpec(local=(LocalPackage(local),))
 
 
 def test_local_package_discovers_and_canonicalizes_distribution_name(tmp_path: Path) -> None:

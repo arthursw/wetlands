@@ -1,4 +1,4 @@
-# Automatic NumPy transport
+# Values and NumPy arrays
 
 Wetlands transports NumPy arrays automatically through its value codec protocol.
 Application and worker code exchange normal `numpy.ndarray` objects and never manage shared-memory handles.

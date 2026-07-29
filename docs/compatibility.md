@@ -20,8 +20,8 @@ Wetlands uses [semantic versioning](https://semver.org/).
 Breaking public API, managed-metadata, or worker-protocol changes require a new major version.
 Backward-compatible features use a minor release, and backward-compatible fixes use a patch release.
 
-Host and worker execution-protocol versions must match exactly.
-A host fails startup clearly rather than attempting to communicate with an incompatible worker.
+Host and worker execution- and management-protocol versions must match exactly.
+A host fails the corresponding connection clearly rather than attempting to communicate with an incompatible worker.
 
 Stop all persistent Wetlands workers before upgrading or downgrading Wetlands.
 An upgraded controller must not attach to workers created by another Wetlands release.

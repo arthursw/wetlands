@@ -45,6 +45,8 @@ def _fake_pixi(
     *,
     install_delay: float = 0,
     install_exit_code: int = 0,
+    managed_debugpy_importable: bool = True,
+    managed_debugpy_version: str | None = "1.8.17",
     mutate_locked: bool = False,
     version_delay: float = 0,
 ) -> Path:
@@ -82,7 +84,21 @@ elif arguments and arguments[0] == "add":
 elif arguments and arguments[0] == "run":
     manifest_index = arguments.index("--manifest-path")
     command = arguments[manifest_index + 2:]
-    raise SystemExit(subprocess.run(command, check=False).returncode)
+    if (
+        command[:2] == ["python", "-c"]
+        and len(command) == 3
+        and "importlib.metadata.version('debugpy')" in command[2]
+    ):
+        if not {managed_debugpy_importable!r}:
+            print("No module named 'debugpy'", file=sys.stderr)
+            raise SystemExit(1)
+        actual = {managed_debugpy_version!r}
+        if actual != "1.8.17":
+            print(f"Wetlands managed runtime requires debugpy 1.8.17, found {{actual}}", file=sys.stderr)
+            raise SystemExit(1)
+        print(sys.executable)
+    else:
+        raise SystemExit(subprocess.run(command, check=False).returncode)
 else:
     raise SystemExit("unexpected fake Pixi arguments: " + repr(arguments))
 """,
@@ -221,6 +237,8 @@ def test_replacement_fails_closed_when_worker_identity_is_uninspectable(
         worker_index=0,
         pid=os.getpid(),
         port=5001,
+        worker_id="pool-a-worker-0",
+        management_port=5101,
         persistent=False,
         pool_id="pool-a",
         generation_id=original.generation_id,
@@ -251,7 +269,7 @@ def test_replacement_fails_closed_when_worker_identity_is_uninspectable(
 def test_supplied_lock_is_preserved_and_published(tmp_path: Path) -> None:
     executable = _fake_pixi(tmp_path)
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
-    lock = b"version: 6\npinned: true\n"
+    lock = b"version: 6\npinned: true\n- name: debugpy\n"
 
     environment = manager.provision(
         "example",
@@ -292,7 +310,7 @@ def test_local_package_can_use_a_supplied_lock_without_modifying_it(tmp_path: Pa
         '[project]\nname = "locked-local"\nversion = "1.0"\n',
         encoding="utf-8",
     )
-    lock = b"version: 6\nlocal: locked\n"
+    lock = b"version: 6\nlocal: locked\n- name: debugpy\n"
 
     environment = manager.provision(
         "example",
@@ -313,7 +331,7 @@ def test_modified_supplied_lock_fails_and_removes_incomplete_target(tmp_path: Pa
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
     operation = manager.provision(
         "example",
-        EnvironmentSpec(python="3.11", pixi_lock=b"version: 6\npinned: true\n"),
+        EnvironmentSpec(python="3.11", pixi_lock=b"version: 6\npinned: true\n- name: debugpy\n"),
     )
 
     with pytest.raises(ProvisioningError, match="modified the supplied"):
@@ -334,6 +352,38 @@ def test_failed_install_has_structured_failure_and_cleans_target(tmp_path: Path)
     assert caught.value.failure.stage == ProvisioningStage.CONDA_INSTALL.value
     assert caught.value.failure.step_id == "pixi-install"
     assert caught.value.failure.returncode == 17
+    assert not (manager.environments_root / "example").exists()
+
+
+@pytest.mark.parametrize(
+    ("managed_debugpy_version", "managed_debugpy_importable"),
+    [(None, True), ("1.8.18", True), ("1.8.17", False)],
+)
+def test_managed_runtime_is_validated_after_post_install(
+    tmp_path: Path,
+    managed_debugpy_version: str | None,
+    managed_debugpy_importable: bool,
+) -> None:
+    executable = _fake_pixi(
+        tmp_path,
+        managed_debugpy_importable=managed_debugpy_importable,
+        managed_debugpy_version=managed_debugpy_version,
+    )
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    operation = manager.provision(
+        "example",
+        EnvironmentSpec(
+            python="3.11",
+            post_install=(PostInstallCommand(("python", "-c", "print('post install completed')")),),
+        ),
+    )
+
+    with pytest.raises(ProvisioningError) as caught:
+        operation.wait_for()
+
+    assert caught.value.failure.stage == ProvisioningStage.VALIDATION.value
+    assert caught.value.failure.step_id == "validate-runtime"
+    assert caught.value.failure.returncode == 1
     assert not (manager.environments_root / "example").exists()
 
 

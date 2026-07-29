@@ -51,6 +51,8 @@ from wetlands.operation import (
 )
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION
 from wetlands.specs import (
+    MANAGED_DEBUGPY_VERSION,
+    MANAGED_RUNTIME_PYPI,
     EnvironmentSpec,
     PixiInfo,
     ProvisioningStage,
@@ -936,9 +938,10 @@ def render_pixi_manifest(name: str, spec: EnvironmentSpec) -> bytes:
     for dependency in sorted(spec.conda):
         package, constraint = _split_conda_dependency(dependency)
         lines.append(f"{_toml_quote(package)} = {_toml_quote(constraint)}")
-    if spec.pypi:
+    pypi_dependencies = (*spec.pypi, *MANAGED_RUNTIME_PYPI)
+    if pypi_dependencies:
         lines.extend(("", "[pypi-dependencies]"))
-        for dependency in sorted(spec.pypi):
+        for dependency in sorted(pypi_dependencies):
             package, rendered = _render_pypi_dependency(dependency)
             lines.append(f"{_toml_quote(package)} = {rendered}")
     lines.append("")
@@ -2090,14 +2093,17 @@ def provision_environment(
                     environment=pixi_environment,
                 )
             )
-            if spec.pypi:
-                operation.emit(
-                    OperationEventKind.STEP,
-                    "Pixi installed the declared PyPI dependencies",
-                    stage=ProvisioningStage.PYPI_INSTALL.value,
-                    step_id="pixi-install",
-                    environment=name,
-                )
+            operation.emit(
+                OperationEventKind.STEP,
+                (
+                    "Pixi installed the declared PyPI dependencies and managed worker runtime"
+                    if spec.pypi
+                    else "Pixi installed the managed worker runtime"
+                ),
+                stage=ProvisioningStage.PYPI_INSTALL.value,
+                step_id="pixi-install",
+                environment=name,
+            )
             try:
                 lock_bytes = _read_target_file(
                     manager.environments_root,
@@ -2167,7 +2173,7 @@ def provision_environment(
             )
             runner.run(
                 ProvisioningStep(
-                    "validate-python",
+                    "validate-runtime",
                     ProvisioningStage.VALIDATION,
                     (
                         str(pixi.executable),
@@ -2176,7 +2182,14 @@ def provision_environment(
                         str(manifest_path),
                         "python",
                         "-c",
-                        "import sys; print(sys.executable)",
+                        (
+                            "import debugpy, importlib.metadata, sys; "
+                            f"expected = {MANAGED_DEBUGPY_VERSION!r}; "
+                            "actual = importlib.metadata.version('debugpy'); "
+                            "sys.exit("
+                            "f'Wetlands managed runtime requires debugpy {expected}, found {actual}'"
+                            ") if actual != expected else print(sys.executable)"
+                        ),
                     ),
                     cwd=target,
                     environment=pixi_environment,

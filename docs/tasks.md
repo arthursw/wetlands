@@ -199,3 +199,5 @@ A replacement worker is started when a pool worker fails.
 `persistent=True` keeps trusted local workers alive when a controller detaches.
 Persistent pools use authenticated loopback connections and exclusive controller ownership.
 They do not change Wetlands' trusted-local execution model.
+
+See [Persistent workers and reconnection](persistent_workers.md) for complete controller lifecycle, attachment validation, crash behavior, and debugger reconnection.

@@ -11,7 +11,9 @@ from types import MappingProxyType
 from typing import Any, Iterator
 
 from wetlands._internal.provisioning import _read_ready, prepare_pixi, provision_environment
+from wetlands._internal import management, runtime_state
 from wetlands._internal.value_codec import reconcile_shared_memory_leases
+from wetlands.debugging import DebugEndpoint, RunningWorker
 from wetlands.lifecycle import ManagerCloseError
 from wetlands.managed_environment import ManagedEnvironment
 from wetlands.operation import (
@@ -22,6 +24,7 @@ from wetlands.operation import (
     ProvisioningOperation,
 )
 from wetlands.specs import EnvironmentSpec, PixiInfo, environment_name_key, validate_environment_name
+from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
 
 _NETWORK_KEYS = frozenset({"http", "https", "no_proxy"})
 
@@ -187,6 +190,98 @@ class EnvironmentManager:
             with self._environment_lock:
                 self._environments[key] = environment
             return environment
+
+    def _running_worker_entries(self, name: str) -> list[dict[str, Any]]:
+        environment = self.environment(name)
+        return runtime_state.live_workers_for_env(
+            self.root,
+            environment.name,
+            expected_identity={
+                "env_path": str(environment.path),
+                "generation_id": environment.generation_id,
+                "recipe_hash": environment.recipe_hash,
+                "worker_runtime_version": WORKER_RUNTIME_VERSION,
+                "protocol_version": EXECUTION_PROTOCOL_VERSION,
+            },
+            include_nonpersistent=True,
+        )
+
+    @staticmethod
+    def _public_worker(entry: dict[str, Any]) -> RunningWorker:
+        raw_debugger = entry.get("debugger")
+        debugger = (
+            None
+            if not isinstance(raw_debugger, dict)
+            else DebugEndpoint(
+                worker_id=str(entry["worker_id"]),
+                adapter="debugpy",
+                host=str(raw_debugger["host"]),
+                port=int(raw_debugger["port"]),
+            )
+        )
+        return RunningWorker(
+            id=str(entry["worker_id"]),
+            environment=str(entry["env_name"]),
+            pool_id=str(entry["pool_id"]) if entry.get("pool_id") is not None else None,
+            index=int(entry["worker_index"]),
+            process_id=int(entry["pid"]),
+            persistent=bool(entry["persistent"]),
+            debugger=debugger,
+        )
+
+    def running_workers(self, environment: str) -> tuple[RunningWorker, ...]:
+        """Return live workers belonging to the environment's current generation."""
+        with self._manager_work():
+            normalized_name = validate_environment_name(environment)
+            return tuple(self._public_worker(entry) for entry in self._running_worker_entries(normalized_name))
+
+    def start_debugger(
+        self,
+        environment: str,
+        *,
+        worker: str | None = None,
+    ) -> DebugEndpoint:
+        """Lazily start debugpy in a live worker without claiming its task controller."""
+        with self._manager_work():
+            normalized_name = validate_environment_name(environment)
+            entries = self._running_worker_entries(normalized_name)
+            if worker is None:
+                if not entries:
+                    raise RuntimeError(f"Environment {normalized_name!r} has no running workers")
+                if len(entries) != 1:
+                    raise ValueError(
+                        f"Environment {normalized_name!r} has {len(entries)} running workers; select one by ID"
+                    )
+                entry = entries[0]
+            else:
+                if not isinstance(worker, str) or not worker:
+                    raise ValueError("worker must be a nonempty worker ID")
+                matches = [entry for entry in entries if entry.get("worker_id") == worker]
+                if not matches:
+                    raise ValueError(f"Worker {worker!r} is not running in environment {normalized_name!r}")
+                entry = matches[0]
+
+            authkey = runtime_state.load_or_create_root_authkey(self.root)
+            response = management.start_debugger(entry, authkey)
+            adapter = response.get("adapter")
+            host = response.get("host")
+            port = response.get("port")
+            if adapter != "debugpy" or host != "127.0.0.1" or type(port) is not int or not (0 < port <= 65535):
+                raise management.ManagementConnectionError("Worker returned an invalid debugger endpoint")
+            endpoint = DebugEndpoint(
+                worker_id=str(entry["worker_id"]),
+                adapter="debugpy",
+                host=host,
+                port=port,
+            )
+            runtime_state.record_debugger(
+                self.root,
+                worker_id=endpoint.worker_id,
+                adapter=endpoint.adapter,
+                host=endpoint.host,
+                port=endpoint.port,
+            )
+            return endpoint
 
     def close(self) -> None:
         with self._close_lock:

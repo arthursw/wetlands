@@ -14,6 +14,9 @@ The authenticated local connection prevents accidental or unauthenticated connec
 It does not restrict code already running as the same user.
 Only use Wetlands with worker code and dependency sources you trust.
 
+Post-hoc debugger startup is authenticated, but the resulting `debugpy` endpoint is an unauthenticated loopback service that can control the worker.
+Use it only on a machine whose local users and processes you trust, and never expose its port beyond the local host.
+
 Use an operating-system sandbox, container, virtual machine, or separate user account when executing untrusted code.
 
 ## Reporting a vulnerability

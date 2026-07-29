@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import socket
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 import numpy as np
 import psutil
@@ -46,6 +48,146 @@ def _observe(operation: Any) -> Any:
         print(f"[{event.stage or 'lifecycle'}:{event.kind.value}] {detail}")
 
     return operation.listen(report)
+
+
+class _DAPClient:
+    """Small stdlib-only client for exercising a real debug adapter."""
+
+    def __init__(self, host: str, port: int, *, timeout: float = 30.0) -> None:
+        self._socket = socket.create_connection((host, port), timeout=timeout)
+        self._socket.settimeout(timeout)
+        self._stream = self._socket.makefile("rwb")
+        self._pending: list[dict[str, Any]] = []
+        self._sequence = 1
+
+    def close(self) -> None:
+        self._stream.close()
+        self._socket.close()
+
+    def request(self, command: str, arguments: dict[str, Any] | None = None) -> int:
+        sequence = self._sequence
+        self._sequence += 1
+        message: dict[str, Any] = {
+            "seq": sequence,
+            "type": "request",
+            "command": command,
+        }
+        if arguments is not None:
+            message["arguments"] = arguments
+        self._write_message(message)
+        return sequence
+
+    def wait_for_response(self, request_sequence: int) -> dict[str, Any]:
+        response = self._wait_for(
+            lambda message: message.get("type") == "response" and message.get("request_seq") == request_sequence
+        )
+        assert response.get("success") is True, response
+        return response
+
+    def wait_for_event(self, event: str) -> dict[str, Any]:
+        return self._wait_for(lambda message: message.get("type") == "event" and message.get("event") == event)
+
+    def _wait_for(self, predicate: Callable[[dict[str, Any]], bool]) -> dict[str, Any]:
+        for index, message in enumerate(self._pending):
+            if predicate(message):
+                return self._pending.pop(index)
+        while True:
+            message = self._read_message()
+            if predicate(message):
+                return message
+            self._pending.append(message)
+
+    def _write_message(self, message: dict[str, Any]) -> None:
+        payload = json.dumps(message, separators=(",", ":")).encode("utf-8")
+        self._stream.write(f"Content-Length: {len(payload)}\r\n\r\n".encode("ascii"))
+        self._stream.write(payload)
+        self._stream.flush()
+
+    def _read_message(self) -> dict[str, Any]:
+        content_length: int | None = None
+        while True:
+            line = self._stream.readline()
+            if not line:
+                raise EOFError("Debug adapter closed the DAP connection")
+            if line == b"\r\n":
+                break
+            name, separator, value = line.decode("ascii").partition(":")
+            if not separator:
+                raise ValueError(f"Malformed DAP header: {line!r}")
+            if name.lower() == "content-length":
+                content_length = int(value.strip())
+        if content_length is None:
+            raise ValueError("DAP message did not contain Content-Length")
+        payload = _read_exactly(self._stream, content_length)
+        message = json.loads(payload)
+        if not isinstance(message, dict):
+            raise ValueError("DAP message was not an object")
+        return message
+
+
+class _Readable(Protocol):
+    def read(self, size: int | None = -1, /) -> bytes: ...
+
+
+def _read_exactly(stream: _Readable, length: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = length
+    while remaining:
+        chunk = stream.read(remaining)
+        if not chunk:
+            raise EOFError("Debug adapter closed the DAP message body")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _complete_debug_session(host: str, port: int) -> None:
+    client = _DAPClient(host, port)
+    try:
+        initialize = client.request(
+            "initialize",
+            {
+                "adapterID": "python",
+                "clientID": "wetlands-integration-test",
+                "clientName": "Wetlands integration test",
+                "columnsStartAt1": True,
+                "linesStartAt1": True,
+                "pathFormat": "path",
+                "supportsRunInTerminalRequest": False,
+            },
+        )
+        client.wait_for_response(initialize)
+
+        attach = client.request("attach", {"justMyCode": False})
+        client.wait_for_event("initialized")
+
+        configured = client.request("configurationDone")
+        client.wait_for_response(configured)
+        client.wait_for_response(attach)
+
+        threads = client.request("threads")
+        threads_response = client.wait_for_response(threads)
+        assert threads_response.get("body", {}).get("threads")
+
+        disconnected = client.request(
+            "disconnect",
+            {
+                "restart": False,
+                "terminateDebuggee": False,
+            },
+        )
+        client.wait_for_response(disconnected)
+    finally:
+        client.close()
+
+
+def _listener_accepts_connections(host: str, port: int) -> bool:
+    try:
+        connection = socket.create_connection((host, port), timeout=0.2)
+    except OSError:
+        return False
+    connection.close()
+    return True
 
 
 def _create_worker_package(root: Path) -> Path:
@@ -95,6 +237,43 @@ def ignore_cancellation(task=None):
         encoding="utf-8",
     )
     return package
+
+
+def test_real_pixi_debugger_can_reconnect_after_normal_startup(tmp_path: Path) -> None:
+    manager = EnvironmentManager(tmp_path / "manager", termination_grace=1.0)
+    python_requirement = f"{sys.version_info.major}.{sys.version_info.minor}.*"
+    endpoint = None
+
+    try:
+        _observe(manager.prepare()).wait_for(300)
+        environment = _observe(
+            manager.provision(
+                "debugger",
+                EnvironmentSpec(python=python_requirement),
+            )
+        ).wait_for(600)
+
+        with environment.start() as pool:
+            assert pool.execute_import("builtins:len", args=([20, 22],), timeout=60) == 2
+
+            endpoint = manager.start_debugger("debugger")
+            assert endpoint.adapter == "debugpy"
+            assert endpoint.host == "127.0.0.1"
+
+            _complete_debug_session(endpoint.host, endpoint.port)
+            assert manager.start_debugger("debugger") == endpoint
+            _complete_debug_session(endpoint.host, endpoint.port)
+
+            assert pool.execute_import("builtins:sum", args=([20, 22],), timeout=60) == 42
+
+        assert endpoint is not None
+        _wait_until(
+            lambda: not _listener_accepts_connections(endpoint.host, endpoint.port),
+            30,
+            "debug adapter listener shutdown",
+        )
+    finally:
+        manager.close()
 
 
 def test_real_pixi_release_acceptance(tmp_path: Path) -> None:

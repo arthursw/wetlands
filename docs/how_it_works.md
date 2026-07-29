@@ -40,8 +40,9 @@ If the host crashes before cleanup, the next provisioning attempt treats missing
 
 `ManagedEnvironment.start()` launches one or more warm Python worker processes from the Pixi project.
 
-Each worker connects to the host through an authenticated local `multiprocessing.connection`.
-The control channel uses an OS-assigned loopback TCP port for consistent Linux, macOS, and Windows behavior.
+Each worker exposes separate authenticated local `multiprocessing.connection` endpoints for execution control and narrowly scoped runtime management.
+The execution controller owns task dispatch, while the management endpoint allows worker discovery and lazy debugger startup without taking over the pool.
+Both channels use OS-assigned loopback TCP ports for consistent Linux, macOS, and Windows behavior.
 
 Startup performs a capability handshake containing:
 
@@ -52,6 +53,9 @@ Startup performs a capability handshake containing:
 - managed environment identity.
 
 The pool rejects incompatible workers before accepting execution.
+
+Starting a debugger through the management endpoint launches a loopback `debugpy` adapter in that worker.
+The resulting Debug Adapter Protocol endpoint is not authenticated by Wetlands and is intended only for trusted local use.
 
 ## Execution
 

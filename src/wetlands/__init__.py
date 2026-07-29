@@ -3,6 +3,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from wetlands._internal.value_codec import ValueDecodingError, ValueEncodingError
+from wetlands.debugging import DebugEndpoint, RunningWorker
 from wetlands.environment_manager import EnvironmentManager, EnvironmentNotReadyError
 from wetlands.lifecycle import (
     EnvironmentGenerationChangedError,
@@ -28,7 +29,6 @@ from wetlands.operation import (
     ProvisioningOperation,
 )
 from wetlands.provisioning import PixiInfo, ProvisioningStage, ProvisioningStep
-from wetlands.protocol import CodecCapability, WorkerCapabilities
 from wetlands.specs import (
     EnvironmentSpec,
     LocalPackage,
@@ -50,7 +50,7 @@ except PackageNotFoundError:
     __version__ = "0+unknown"
 
 __all__ = [
-    "CodecCapability",
+    "DebugEndpoint",
     "EnvironmentManager",
     "EnvironmentGenerationChangedError",
     "EnvironmentInUseError",
@@ -83,10 +83,10 @@ __all__ = [
     "ProvisioningOperation",
     "ProvisioningStage",
     "ProvisioningStep",
+    "RunningWorker",
     "ValueDecodingError",
     "ValueEncodingError",
     "UnmanagedTargetError",
-    "WorkerCapabilities",
     "WorkerPool",
     "WorkerStartError",
     "__version__",

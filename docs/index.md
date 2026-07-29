@@ -20,6 +20,7 @@ It can be embedded in desktop applications, servers, and plugin systems.
 - Reports preparation and installation progress and supports cancellation.
 - Runs installed Python functions without importing their dependencies into the main environment.
 - Keeps workers warm and replaces them when they fail or ignore cancellation.
+- Attaches a debugger to an already-running worker when a problem needs investigation.
 - Transfers simple Python values and NumPy arrays automatically.
 - Works in blocking, callback-based, and `asyncio` applications.
 
@@ -30,6 +31,8 @@ Follow [Getting started](getting_started.md) for a complete provision-and-execut
 Read [Environment specifications](dependencies.md) for dependency and lockfile behavior.
 
 Read [Operations and tasks](tasks.md) for cancellation, events, and async integration.
+
+Read [Debugging running workers](debugging.md) to attach after a problem appears, and [Persistent workers and reconnection](persistent_workers.md) to keep warm workers across controller processes.
 
 Existing Wetlands 1 users should start with the [Wetlands 2 migration guide](migration_v2.md).
 

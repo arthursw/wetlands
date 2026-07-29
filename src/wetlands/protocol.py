@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 EXECUTION_PROTOCOL_VERSION = 1
+MANAGEMENT_PROTOCOL_VERSION = 1
 WORKER_RUNTIME_VERSION = "2.0.0"
 
 ACTION_HELLO = "hello"
@@ -294,7 +295,7 @@ def validate_worker_capabilities(
         "recipe_hash",
     }
     persistent_fields = {"pool_id", "worker_index"}
-    startup_fields = {"event", "schema_version", "port", "debug_port", "token"}
+    startup_fields = {"event", "schema_version", "port", "management_port", "token"}
     extra_fields = set(payload) - base_fields
     if extra_fields & persistent_fields and not persistent_fields.issubset(extra_fields):
         raise ProtocolCompatibilityError("Worker handshake has an incomplete persistent identity")

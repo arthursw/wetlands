@@ -162,7 +162,11 @@ spec = EnvironmentSpec(
 
 When `pixi_lock` is supplied, Wetlands provisions from those exact locked dependencies.
 If the recipe contains local packages, the supplied lockfile must already resolve those same local sources and editable settings.
+It must also include Wetlands' exact managed worker-runtime dependencies, including its `debugpy` pin.
 Without one, Pixi resolves the generated project and Wetlands preserves the resulting lockfile in the managed environment.
+
+Wetlands owns the managed `debugpy` version, so applications must not declare it in `EnvironmentSpec`.
+The managed runtime pin participates in recipe identity and causes environments to rebuild when it changes.
 
 An environment is ready only after every installation and validation step succeeds and Wetlands atomically publishes its ready metadata.
 Failed, canceled, or crash-interrupted provisioning is rebuilt on the next attempt rather than resumed.
@@ -193,6 +197,19 @@ task = workers.submit_path(
 ```
 
 Path targets are keyed by canonical path and content, so equal filename stems do not collide.
+
+## Debug running workers
+
+Wetlands can start a debugger after an application and its workers are already running.
+No debug flag or debugger call is required in application or worker code.
+
+```sh
+wetlands workers --root ./wetlands --environment cellpose
+wetlands debug --root ./wetlands --environment cellpose --worker WORKER_ID --editor vscode --source .
+```
+
+The debug adapter remains available for reconnection until its worker exits.
+See [Debugging running workers](docs/debugging.md) and [Persistent workers and reconnection](docs/persistent_workers.md).
 
 ## Supported values
 
@@ -249,6 +266,7 @@ uv build
 ## Documentation
 
 The complete documentation is available at [arthursw.github.io/wetlands](https://arthursw.github.io/wetlands/latest/).
+Contributor-facing architecture and codec boundaries are described in the [developer guide](docs/developer/architecture.md).
 
 ## License
 

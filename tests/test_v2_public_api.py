@@ -9,7 +9,7 @@ import wetlands
 
 def test_public_api_exports_only_v2_lifecycle_types() -> None:
     expected = {
-        "CodecCapability",
+        "DebugEndpoint",
         "EnvironmentGenerationChangedError",
         "EnvironmentInUseError",
         "EnvironmentRecipeConflictError",
@@ -42,10 +42,10 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "ProvisioningOperation",
         "ProvisioningStage",
         "ProvisioningStep",
+        "RunningWorker",
         "ValueDecodingError",
         "ValueEncodingError",
         "UnmanagedTargetError",
-        "WorkerCapabilities",
         "WorkerPool",
         "WorkerStartError",
         "__version__",

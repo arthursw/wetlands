@@ -38,6 +38,16 @@ Duplicate entries are removed.
 `pixi_lock`
 : Optional bytes or a path containing an existing `pixi.lock`.
 
+## Managed worker runtime
+
+Wetlands adds its own pinned worker-runtime dependencies to every generated Pixi project.
+The runtime currently includes `debugpy`, which remains inactive until post-hoc debugger attachment is requested.
+Do not declare or override `debugpy` in `EnvironmentSpec`; Wetlands owns its compatible version.
+
+The managed runtime and its exact pins participate in recipe identity.
+Changing them requires a rebuild rather than silently reusing an older ready environment.
+After post-install commands finish, provisioning verifies the installed managed-runtime versions before publishing the environment as ready.
+
 ## Local packages
 
 ```python
@@ -99,6 +109,8 @@ Without `pixi_lock`, Wetlands materializes `pixi.toml`, asks Pixi to resolve the
 
 With `pixi_lock`, Wetlands copies the supplied bytes into the project and uses locked installation semantics.
 Local packages are registered in the Pixi manifest before installation, so a supplied lockfile must already resolve the same local dependency sources and editable settings.
+It must also contain the exact Wetlands-managed runtime dependencies, including the managed `debugpy` pin.
+Pixi validates the supplied lock against the complete generated manifest during locked installation.
 Wetlands rejects any lockfile change during locked provisioning.
 
 ```python

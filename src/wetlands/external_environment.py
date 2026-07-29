@@ -222,9 +222,9 @@ def _validate_startup_payload(payload: dict[str, Any], token: str) -> dict[str, 
     if not isinstance(port, int) or not (0 < port <= 65535):
         raise ValueError("startup payload had an invalid worker port")
 
-    debug_port = payload.get("debug_port")
-    if debug_port is not None and (not isinstance(debug_port, int) or not (0 < debug_port <= 65535)):
-        raise ValueError("startup payload had an invalid debug port")
+    management_port = payload.get("management_port")
+    if not isinstance(management_port, int) or not (0 < management_port <= 65535):
+        raise ValueError("startup payload had an invalid management port")
 
     validate_worker_capabilities(payload, required_codecs=REQUIRED_WORKER_CODECS)
     return payload
@@ -590,6 +590,7 @@ class ExternalEnvironment:
         startup_socket = _open_startup_socket()
         startup_host, startup_port = startup_socket.getsockname()
         startup_token = secrets.token_urlsafe(32)
+        worker_id = uuid.uuid4().hex
         wetlands_instance_path = self.environment_manager.wetlands_instance_path.resolve()
         argv = [
             str(self._environment_python()),
@@ -604,21 +605,19 @@ class ExternalEnvironment:
             str(ready["generation_id"]),
             "--recipe_hash",
             str(ready["recipe_hash"]),
+            "--worker_index",
+            str(index),
+            "--worker_id",
+            worker_id,
+            "--pool_id",
+            str(self._pool_id),
             "--startup_host",
             str(startup_host),
             "--startup_port",
             str(startup_port),
         ]
         if self._persistent:
-            argv.extend(
-                [
-                    "--persistent",
-                    "--pool_id",
-                    str(self._pool_id),
-                    "--worker_index",
-                    str(index),
-                ]
-            )
+            argv.append("--persistent")
             if self._pool_commissioned:
                 argv.append("--commissioned")
             else:
@@ -677,6 +676,7 @@ class ExternalEnvironment:
                     f"{self._worker_startup_failure_details(process, process_logger)}"
                 )
             port = int(startup_payload["port"])
+            management_port = int(startup_payload["management_port"])
             if port == 0:
                 raise Exception(
                     f"Could not find the server port for worker {index}."
@@ -715,6 +715,8 @@ class ExternalEnvironment:
                 worker_runtime_version=WORKER_RUNTIME_VERSION,
                 protocol_version=EXECUTION_PROTOCOL_VERSION,
                 pool_id=self._pool_id,
+                worker_id=worker_id,
+                management_port=management_port,
             )
             recorded = True
 

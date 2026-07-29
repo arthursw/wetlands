@@ -65,6 +65,7 @@ _protocol = import_from_path(
 if _protocol is None:
     raise RuntimeError("Could not load the Wetlands execution protocol")
 EXECUTION_PROTOCOL_VERSION = _protocol.EXECUTION_PROTOCOL_VERSION
+MANAGEMENT_PROTOCOL_VERSION = _protocol.MANAGEMENT_PROTOCOL_VERSION
 WORKER_RUNTIME_VERSION = _protocol.WORKER_RUNTIME_VERSION
 protocol_message = _protocol.protocol_message
 validate_task_message = _protocol.validate_task_message
@@ -91,7 +92,6 @@ port = 0
 logger = logging.getLogger("module_executor")
 _detached_stdio = False
 args: argparse.Namespace | None = None
-active_debug_port: int | None = None
 STARTUP_EVENT = "wetlands.worker.ready"
 STARTUP_SCHEMA_VERSION = 1
 STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
@@ -103,6 +103,7 @@ _active_tasks_lock = threading.RLock()
 CONNECTION_LOSS_GRACE = 5.0
 UNCOMMISSIONED_EXIT_CODE = 70
 REMOTE_EXCEPTION_CHAIN_LIMIT = 32
+DEBUG_HOST = "127.0.0.1"
 
 
 class _MaxLevelFilter(logging.Filter):
@@ -207,9 +208,6 @@ if __name__ == "__main__":
     parser.add_argument("environment", help="The name of the execution environment.")
     parser.add_argument("-p", "--port", help="The port to listen to.", default=0, type=int)
     parser.add_argument(
-        "-dp", "--debug_port", help="The debugpy port to listen to. Only provide in debug mode.", default=None, type=int
-    )
-    parser.add_argument(
         "-wip",
         "--wetlands_instance_path",
         help="Path to the folder containing the state of the wetlands instance to debug. Only provide in debug mode.",
@@ -237,6 +235,7 @@ if __name__ == "__main__":
     parser.add_argument("--recipe_hash", default=None)
     parser.add_argument("--pool_id", default=None)
     parser.add_argument("--worker_index", default=None, type=int)
+    parser.add_argument("--worker_id", default=None)
     parser.add_argument("--commission_timeout", default=None, type=float)
     parser.add_argument("--commissioned", action="store_true")
     args = parser.parse_args()
@@ -245,16 +244,6 @@ if __name__ == "__main__":
     port = args.port
     configure_logging(args.wetlands_instance_path)
     logger = logging.getLogger(args.environment)
-    if args.debug_port is not None:
-        logger.setLevel(logging.DEBUG)
-        try:
-            import debugpy  # type: ignore[unused-import]
-
-            logger.debug(f"Starting {args.environment} with python {sys.version}")
-            _, active_debug_port = debugpy.listen(args.debug_port)
-        except ImportError as ie:
-            logger.error("debugpy is not installed in this environment. Debugging is not available.")
-            logger.error(str(ie))
 
 
 def send_message(lock: threading.Lock, connection: Connection, message: dict):
@@ -567,6 +556,113 @@ def load_root_authkey(wetlands_instance_path: Path) -> bytes:
     return (Path(wetlands_instance_path).resolve() / "state" / "auth.key").read_bytes()
 
 
+class _DebuggerState:
+    """Serialize lazy debug-adapter startup for one worker process."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._port: int | None = None
+
+    def start(self) -> int:
+        with self._lock:
+            if self._port is not None:
+                return self._port
+            try:
+                import debugpy  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise RuntimeError("debugpy is unavailable in the managed worker runtime") from error
+            debugpy.configure(subProcess=False)
+            endpoint = debugpy.listen((DEBUG_HOST, 0))
+            host, port = endpoint
+            if host != DEBUG_HOST or type(port) is not int or not (0 < port <= 65535):
+                raise RuntimeError("debugpy returned an invalid loopback endpoint")
+            self._port = port
+            logger.info("Debug adapter started on %s:%s", DEBUG_HOST, port)
+            return port
+
+    @property
+    def port(self) -> int | None:
+        with self._lock:
+            return self._port
+
+
+def _serve_management(
+    listener: Listener,
+    debugger: _DebuggerState,
+    identity: dict[str, object],
+) -> None:
+    """Serve the deliberately small debugger-management protocol."""
+    while True:
+        try:
+            connection_context = listener.accept()
+        except (AuthenticationError, EOFError):
+            logger.warning("Rejected unauthenticated or abandoned management client")
+            continue
+        except OSError:
+            return
+        with connection_context as connection:
+            try:
+                connection.send(
+                    {
+                        "action": "management_hello",
+                        "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                        **identity,
+                    }
+                )
+                if not connection.poll(5.0):
+                    raise TimeoutError("Timed out waiting for management request")
+                message = connection.recv()
+                if not isinstance(message, dict):
+                    raise ValueError("Management request must be an object")
+                if message.get("management_protocol_version") != MANAGEMENT_PROTOCOL_VERSION:
+                    raise ValueError("Management protocol version is incompatible")
+                if message.get("worker_id") != identity["worker_id"]:
+                    raise ValueError("Management request used the wrong worker ID")
+                action = message.get("action")
+                if action == "status":
+                    port = debugger.port
+                    connection.send(
+                        {
+                            "action": "status",
+                            "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                            **identity,
+                            "debugger": (
+                                None
+                                if port is None
+                                else {
+                                    "adapter": "debugpy",
+                                    "host": DEBUG_HOST,
+                                    "port": port,
+                                }
+                            ),
+                        }
+                    )
+                elif action == "start_debugger":
+                    port = debugger.start()
+                    connection.send(
+                        {
+                            "action": "debugger_started",
+                            "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                            **identity,
+                            "adapter": "debugpy",
+                            "host": DEBUG_HOST,
+                            "port": port,
+                        }
+                    )
+                else:
+                    raise ValueError(f"Unknown management action: {action!r}")
+            except Exception as error:
+                with contextlib.suppress(OSError, EOFError):
+                    connection.send(
+                        {
+                            "action": "error",
+                            "management_protocol_version": MANAGEMENT_PROTOCOL_VERSION,
+                            **identity,
+                            "message": str(error),
+                        }
+                    )
+
+
 def launch_listener(
     authkey: bytes | None = None,
     persistent: bool = False,
@@ -574,12 +670,12 @@ def launch_listener(
     startup_host: str | None = None,
     startup_port: int | None = None,
     startup_token: str | None = None,
-    debug_port: int | None = None,
     environment_path: str | None = None,
     generation_id: str | None = None,
     recipe_hash: str | None = None,
     pool_id: str | None = None,
     worker_index: int | None = None,
+    worker_id: str | None = None,
     commission_timeout: float | None = None,
     commissioned: bool = False,
 ):
@@ -594,6 +690,10 @@ def launch_listener(
     }.items():
         if not isinstance(value, str) or not value:
             raise ValueError(f"{field} is required for the worker handshake")
+    if not isinstance(worker_id, str) or not worker_id:
+        raise ValueError("worker_id is required for the management handshake")
+    if type(worker_index) is not int or worker_index < 0:
+        raise ValueError("worker_index is required for the management handshake")
     if persistent:
         if not isinstance(pool_id, str) or not pool_id:
             raise ValueError("pool_id is required for a persistent worker")
@@ -612,7 +712,28 @@ def launch_listener(
     if persistent:
         hello.update({"pool_id": pool_id, "worker_index": worker_index})
     lock = threading.Lock()
-    with Listener(("127.0.0.1", port), authkey=authkey) as listener:
+    debugger = _DebuggerState()
+    management_identity = {
+        "worker_id": worker_id,
+        "pid": os.getpid(),
+        "environment_path": environment_path,
+        "generation_id": generation_id,
+        "recipe_hash": recipe_hash,
+        "worker_runtime_version": WORKER_RUNTIME_VERSION,
+        "execution_protocol_version": EXECUTION_PROTOCOL_VERSION,
+        "pool_id": pool_id,
+        "worker_index": worker_index,
+    }
+    with (
+        Listener((DEBUG_HOST, 0), authkey=authkey) as management_listener,
+        Listener((DEBUG_HOST, port), authkey=authkey) as listener,
+    ):
+        threading.Thread(
+            target=_serve_management,
+            args=(management_listener, debugger, management_identity),
+            daemon=True,
+            name="wetlands-worker-management",
+        ).start()
         task_threads: list[threading.Thread] = []
         commission_event = threading.Event()
         if commissioned:
@@ -638,7 +759,7 @@ def launch_listener(
                     "event": STARTUP_EVENT,
                     "schema_version": STARTUP_SCHEMA_VERSION,
                     "port": listener.address[1],
-                    "debug_port": debug_port,
+                    "management_port": management_listener.address[1],
                 },
             )
         if persistent:
@@ -804,12 +925,12 @@ if __name__ == "__main__":
         startup_host=args.startup_host,
         startup_port=args.startup_port,
         startup_token=os.environ.get(STARTUP_TOKEN_ENV),
-        debug_port=active_debug_port,
         environment_path=args.environment_path,
         generation_id=args.generation_id,
         recipe_hash=args.recipe_hash,
         pool_id=args.pool_id,
         worker_index=args.worker_index,
+        worker_id=args.worker_id,
         commission_timeout=args.commission_timeout,
         commissioned=args.commissioned,
     )

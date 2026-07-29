@@ -32,6 +32,9 @@ _WINDOWS_RESERVED = {
 }
 _WINDOWS_INVALID_CHARACTERS = frozenset('<>:"|?*')
 _PORTABLE_EXTRA = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+MANAGED_DEBUGPY_VERSION = "1.8.17"
+MANAGED_RUNTIME_PYPI = (f"debugpy=={MANAGED_DEBUGPY_VERSION}",)
+_MANAGED_RUNTIME_PACKAGE_NAMES = frozenset({"debugpy"})
 
 
 class LocalPackageValidationError(ValueError):
@@ -187,6 +190,8 @@ class EnvironmentSpec:
             if match is None:
                 raise ValueError(f"Invalid Conda dependency: {dependency!r}")
             package = canonicalize_name(match.group(1))
+            if package in _MANAGED_RUNTIME_PACKAGE_NAMES:
+                raise ValueError(f"Conda package {match.group(1)!r} is managed by the Wetlands worker runtime")
             if package in conda_names:
                 raise ValueError(f"Duplicate Conda dependency for package {match.group(1)!r}")
             conda_names.add(package)
@@ -204,6 +209,8 @@ class EnvironmentSpec:
                 if parsed_url.username or parsed_url.password or parsed_url.query:
                     raise ValueError("PyPI direct URLs cannot contain credentials or query parameters")
             package = canonicalize_name(requirement.name)
+            if package in _MANAGED_RUNTIME_PACKAGE_NAMES:
+                raise ValueError(f"PyPI package {requirement.name!r} is managed by the Wetlands worker runtime")
             if package in pypi_names:
                 raise ValueError(f"Duplicate PyPI dependency for package {requirement.name!r}")
             pypi_names.add(package)
@@ -213,6 +220,11 @@ class EnvironmentSpec:
         local = tuple(self.local)
         if any(not isinstance(package, LocalPackage) for package in local):
             raise TypeError("local entries must be LocalPackage instances")
+        for package in local:
+            if package.distribution_name in _MANAGED_RUNTIME_PACKAGE_NAMES:
+                raise ValueError(
+                    f"Local package {package.distribution_name!r} is managed by the Wetlands worker runtime"
+                )
         post_install = tuple(self.post_install)
         if any(not isinstance(command, PostInstallCommand) for command in post_install):
             raise TypeError("post_install entries must be PostInstallCommand instances")
@@ -262,6 +274,9 @@ class EnvironmentSpec:
             "pixi_lock_sha256": (
                 hashlib.sha256(self._lock_bytes).hexdigest() if self._lock_bytes is not None else None
             ),
+            "managed_runtime": {
+                "pypi": list(MANAGED_RUNTIME_PYPI),
+            },
         }
 
     @property

@@ -15,6 +15,8 @@ The migration separates construction, provisioning, and execution and removes ap
 | Filename-stem module imports | Qualified package targets or explicit path targets |
 | Manual `NDArray` transport | Automatic ordinary-value and NumPy transport |
 | Ad hoc provisioning commands | Structured stages, events, cancellation, and failures |
+| Debug mode selected before worker startup | Post-hoc debugger attachment to a running worker |
+| Reconnection through legacy environment state | Explicit persistent-pool `detach()` and `attach_pool()` |
 
 ## Manager construction
 
@@ -81,6 +83,7 @@ environment = manager.provision("cellpose-v1", spec).wait_for()
 
 Use tuples and typed `LocalPackage` or `PostInstallCommand` values instead of manager-specific dictionary keys.
 Use `pixi_lock=` when an application supplies a pre-resolved lockfile.
+Regenerate older lockfiles with the Wetlands 2 manifest because supplied locks must include Wetlands' managed worker-runtime dependency.
 
 ## Execution
 
@@ -147,6 +150,25 @@ Wetlands copies inputs, owns shared-memory leases, copies results into caller-ow
 
 Object-dtype arrays and unsupported Python objects now fail explicitly at submission.
 
+## Debugging running workers
+
+Do not pass a debug flag to `EnvironmentManager`, declare `debugpy` in the recipe, or call `debugpy.listen()` from worker code.
+Run the application normally and attach after a problem appears:
+
+```console
+wetlands workers --root ./wetlands --environment cellpose-v1
+wetlands debug --root ./wetlands --environment cellpose-v1 --worker WORKER_ID --editor vscode --source .
+```
+
+Wetlands owns the worker-compatible `debugpy` version and starts its adapter lazily through an authenticated management connection.
+See [Debugging running workers](debugging.md) for editor configuration and reconnection behavior.
+
+## Persistent worker reconnection
+
+Start a pool with `persistent=True`, call `pool.detach()` to leave its workers alive, and use `environment.attach_pool()` from a later controller.
+Only one process may own task dispatch at a time; debugger attachment is independent of that execution-controller claim.
+See [Persistent workers and reconnection](persistent_workers.md) for the complete lifecycle.
+
 ## Non-blocking and asyncio use
 
 Callbacks and blocking waits:
@@ -195,3 +217,4 @@ Applications that require rollback should include a recipe or release identity i
 - Loading an unmanaged same-name environment is not part of the managed API.
 - Worker packages do not import Wetlands transport types.
 - Installed-package execution does not infer modules from filenames.
+- Debugging does not require an application-wide mode chosen before worker startup.
