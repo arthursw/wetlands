@@ -40,7 +40,7 @@ Existing Wetlands 1 users should start with the [Wetlands 2 migration guide](mig
 
 Wetlands may need to download Pixi and your declared packages.
 The first provisioning can therefore require network access and take several minutes.
-Pixi, environments, locks, logs, and runtime state are stored below the `EnvironmentManager` root you configure.
+Pixi, environments, locks, and runtime state are stored below the `EnvironmentManager` root you configure.
 
 ## Trusted code only
 

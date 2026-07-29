@@ -10,9 +10,9 @@ from wetlands._internal import runtime_state
 from wetlands._internal.provisioning import (
     OWNER_MARKER,
     _discard_matching_journals,
-    _file_identity,
     _find_name_alias,
     _is_link_or_reparse,
+    _path_identity,
     _read_ready,
     _remove_target,
     _target_has_valid_owner_marker,
@@ -192,7 +192,7 @@ def remove_managed_environment(
                 stage=_REMOVAL_STAGE,
                 environment=name,
             )
-            target_identity = _file_identity(target.lstat())
+            target_identity = _path_identity(target)
             try:
                 _remove_target(
                     manager.environments_root,

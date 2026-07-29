@@ -1,5 +1,6 @@
 import contextlib
 import json
+import multiprocessing
 import os
 import signal
 import stat
@@ -25,6 +26,11 @@ _WORKER_IDENTITY = {
 }
 
 
+def _load_authkey_in_process(root: Path, start, results) -> None:
+    start.wait()
+    results.put(runtime_state.load_or_create_root_authkey(root))
+
+
 def test_authkey_created_once_and_reused(tmp_path):
     root = tmp_path / "wetlands"
 
@@ -37,6 +43,84 @@ def test_authkey_created_once_and_reused(tmp_path):
     assert key_path.read_bytes() == first
     if os.name != "nt":
         assert stat.S_IMODE(key_path.stat().st_mode) & 0o777 == 0o600
+
+
+def test_authkey_creation_is_atomic_across_processes(tmp_path):
+    root = tmp_path / "wetlands"
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_load_authkey_in_process,
+            args=(root, start, results),
+        )
+        for _ in range(8)
+    ]
+    for process in processes:
+        process.start()
+    start.set()
+    keys = [results.get(timeout=15) for _ in processes]
+    for process in processes:
+        process.join(timeout=15)
+        assert process.exitcode == 0
+
+    assert len(set(keys)) == 1
+    assert len(keys[0]) == runtime_state.AUTH_KEY_SIZE
+    assert (root / "state" / runtime_state.AUTH_KEY_FILE).read_bytes() == keys[0]
+
+
+@pytest.mark.parametrize("invalid_key", [b"", b"partial", b"x" * 31, b"x" * 33])
+def test_invalid_authkey_from_interrupted_legacy_creation_is_replaced(tmp_path, invalid_key):
+    directory = runtime_state.state_dir(tmp_path)
+    path = directory / runtime_state.AUTH_KEY_FILE
+    path.write_bytes(invalid_key)
+
+    with patch.object(
+        runtime_state.secrets,
+        "token_bytes",
+        return_value=b"k" * runtime_state.AUTH_KEY_SIZE,
+    ):
+        key = runtime_state.load_or_create_root_authkey(tmp_path)
+
+    assert key == b"k" * runtime_state.AUTH_KEY_SIZE
+    assert path.read_bytes() == key
+
+
+def test_stale_authkey_temp_is_ignored_and_removed(tmp_path):
+    directory = runtime_state.state_dir(tmp_path)
+    stale = directory / f"{runtime_state.AUTH_KEY_TEMP_PREFIX}crashed"
+    stale.write_bytes(b"partial")
+
+    key = runtime_state.load_or_create_root_authkey(tmp_path)
+
+    assert len(key) == runtime_state.AUTH_KEY_SIZE
+    assert not stale.exists()
+
+
+def test_failed_authkey_publication_leaves_no_partial_destination_or_temp(tmp_path):
+    root = tmp_path / "wetlands"
+
+    with (
+        patch.object(runtime_state.os, "replace", side_effect=OSError("simulated crash")),
+        pytest.raises(OSError, match="simulated crash"),
+    ):
+        runtime_state.load_or_create_root_authkey(root)
+
+    directory = root / runtime_state.STATE_DIR_NAME
+    assert not (directory / runtime_state.AUTH_KEY_FILE).exists()
+    assert not list(directory.glob(f"{runtime_state.AUTH_KEY_TEMP_PREFIX}*"))
+
+    key = runtime_state.load_or_create_root_authkey(root)
+    assert len(key) == runtime_state.AUTH_KEY_SIZE
+
+
+def test_authkey_rejects_nonregular_destination(tmp_path):
+    path = runtime_state.state_dir(tmp_path) / runtime_state.AUTH_KEY_FILE
+    path.mkdir()
+
+    with pytest.raises(runtime_state.RuntimeStateError, match="not a regular file"):
+        runtime_state.load_or_create_root_authkey(tmp_path)
 
 
 def test_missing_worker_registry_is_the_only_empty_registry_case(tmp_path):

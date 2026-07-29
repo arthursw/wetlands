@@ -6,7 +6,8 @@ The public user model remains environments, operations, worker pools, and execut
 ## Components
 
 `EnvironmentManager` owns one Wetlands root and coordinates Pixi preparation, provisioning operations, managed-environment handles, runtime state, and shutdown.
-Its constructor validates and stores configuration without performing network, filesystem, or subprocess work.
+Its constructor validates and stores configuration without network access, subprocess activity, filesystem writes, or runtime-state creation.
+It may perform limited filesystem inspection while resolving and validating configured paths.
 
 `ManagedEnvironment` represents one successfully published environment generation.
 It can start a new worker pool or attach to a detached persistent pool from the same generation.

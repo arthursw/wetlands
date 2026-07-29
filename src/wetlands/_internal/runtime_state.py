@@ -6,6 +6,7 @@ import json
 import math
 import os
 import secrets
+import stat
 import tempfile
 import time
 from collections.abc import Iterator
@@ -25,6 +26,8 @@ from wetlands._internal.process_termination import (
 SCHEMA_VERSION = 5
 STATE_DIR_NAME = "state"
 AUTH_KEY_FILE = "auth.key"
+AUTH_KEY_SIZE = 32
+AUTH_KEY_TEMP_PREFIX = f".{AUTH_KEY_FILE}."
 WORKERS_FILE = "workers.json"
 LOCK_FILE = "workers.lock"
 
@@ -58,24 +61,86 @@ def state_dir(root: str | Path) -> Path:
     return path
 
 
-def load_or_create_root_authkey(root: str | Path) -> bytes:
-    """Load or create the root-local multiprocessing auth key."""
-    path = state_dir(root) / AUTH_KEY_FILE
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return path.read_bytes()
+def _discard_stale_authkey_temps(directory: Path) -> None:
+    """Remove regular temporary key files left by interrupted publication."""
 
-    key = secrets.token_bytes(32)
-    with os.fdopen(fd, "wb") as f:
-        f.write(key)
-        f.flush()
-        os.fsync(f.fileno())
     try:
-        path.chmod(0o600)
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if not entry.name.startswith(AUTH_KEY_TEMP_PREFIX):
+                    continue
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                    if stat.S_ISREG(metadata.st_mode):
+                        os.unlink(entry.path)
+                except OSError:
+                    pass
     except OSError:
         pass
-    return key
+
+
+def _publish_authkey(path: Path, key: bytes) -> None:
+    """Atomically publish a complete root authentication key."""
+
+    if len(key) != AUTH_KEY_SIZE:
+        raise ValueError(f"Root authentication keys must contain exactly {AUTH_KEY_SIZE} bytes")
+    fd, temp_name = tempfile.mkstemp(prefix=AUTH_KEY_TEMP_PREFIX, dir=path.parent)
+    try:
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(key)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        raise
+
+
+def load_or_create_root_authkey(root: str | Path) -> bytes:
+    """Load or atomically create the root-local multiprocessing auth key."""
+
+    with root_lock(root):
+        directory = state_dir(root)
+        path = directory / AUTH_KEY_FILE
+        _discard_stale_authkey_temps(directory)
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            key = secrets.token_bytes(AUTH_KEY_SIZE)
+            _publish_authkey(path, key)
+            return key
+        except OSError as error:
+            raise RuntimeStateError(f"Cannot inspect root authentication key {path}") from error
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeStateError(f"Root authentication key is not a regular file: {path}")
+        try:
+            key = path.read_bytes()
+        except OSError as error:
+            raise RuntimeStateError(f"Cannot read root authentication key {path}") from error
+        if len(key) != AUTH_KEY_SIZE:
+            key = secrets.token_bytes(AUTH_KEY_SIZE)
+            _publish_authkey(path, key)
+        else:
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass
+        return key
 
 
 @contextlib.contextmanager

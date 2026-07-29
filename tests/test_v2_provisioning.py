@@ -31,6 +31,8 @@ from wetlands._internal.provisioning import (
     OWNER_MARKER,
     ProvisioningStage,
     _create_managed_target,
+    _descriptor_identity,
+    _path_identity,
     _publish_ready,
     _read_ready,
     _remove_target,
@@ -580,6 +582,26 @@ def test_linked_owner_marker_is_unmanaged_and_never_followed(tmp_path: Path) -> 
 
     assert outside_marker.read_text(encoding="utf-8") == "owned\n"
     assert (target / OWNER_MARKER).is_symlink()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native file IDs")
+def test_windows_native_file_identity_matches_open_descriptor(tmp_path: Path) -> None:
+    path = tmp_path / "artifact"
+    path.write_bytes(b"content")
+
+    path_identity = _path_identity(path)
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    try:
+        descriptor_identity = _descriptor_identity(descriptor)
+    finally:
+        os.close(descriptor)
+
+    assert path_identity == descriptor_identity
+    assert path_identity[0] != 0
+    assert path_identity[2] != 0
+    directory_identity = _path_identity(tmp_path)
+    assert directory_identity[0] != 0
+    assert directory_identity[2] != 0
 
 
 @pytest.mark.parametrize("artifact", [OWNER_MARKER, "pixi.toml"])

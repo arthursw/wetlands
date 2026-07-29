@@ -30,7 +30,7 @@ Wetlands 2 provides:
 
 The first preparation may download a verified Pixi executable, and the first provisioning of an environment downloads its declared packages.
 These operations require network access and can take several minutes.
-Wetlands stores Pixi, managed environments, locks, logs, and runtime state below the manager root you choose.
+Wetlands stores Pixi, managed environments, locks, and runtime state below the manager root you choose.
 
 ## Installation
 
@@ -98,30 +98,36 @@ from wetlands import EnvironmentManager, EnvironmentSpec
 
 async def main() -> None:
     manager = EnvironmentManager(root="wetlands")
+    try:
+        preparation = manager.prepare()
+        async for event in preparation.events():
+            print(event.kind.value, event.message)
+        await preparation
 
-    preparation = manager.prepare()
-    async for event in preparation.events():
-        print(event.kind.value, event.message)
-    await preparation
-
-    environment = await manager.provision(
-        "analysis",
-        EnvironmentSpec(python="3.12.*", conda=("numpy",)),
-    )
-
-    with environment.start(workers=2) as workers:
-        task = workers.submit_import(
-            "numpy:negative",
-            args=([1.0, 2.0, 3.0],),
+        environment = await manager.provision(
+            "analysis",
+            EnvironmentSpec(python="3.12.*", conda=("numpy",)),
         )
-        result = await task
-        print(result)
 
-    manager.close()
+        workers = await asyncio.to_thread(environment.start, workers=2)
+        try:
+            task = workers.submit_import(
+                "numpy:negative",
+                args=([1.0, 2.0, 3.0],),
+            )
+            result = await task
+            print(result)
+        finally:
+            await asyncio.to_thread(workers.close)
+    finally:
+        await asyncio.to_thread(manager.close)
 
 
 asyncio.run(main())
 ```
+
+Starting, attaching, detaching, and closing worker pools, and closing a manager, are blocking lifecycle calls.
+Async applications should run those calls with `asyncio.to_thread()` as shown above.
 
 Cancel an operation or execution task with `cancel()`.
 A canceled provisioning operation becomes terminal only after its active process tree has stopped and its incomplete environment has been cleaned up.

@@ -1031,16 +1031,149 @@ def _regular_file(path: Path) -> bool:
     return stat.S_ISREG(metadata.st_mode) and not _is_link_or_reparse(path)
 
 
-_FileIdentity = tuple[int, int]
+_FileIdentity = tuple[int, int, int]
 _DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _READ_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+_POSIX_FILE_IDENTITY = 0
+_WINDOWS_FILE_IDENTITY = 1
+_WINDOWS_LEGACY_FILE_IDENTITY = 2
 
 
 def _file_identity(metadata: os.stat_result) -> _FileIdentity:
-    if os.name == "nt" and not metadata.st_ino:
-        raise RuntimeError("Windows file identity is unavailable; refusing an unsafe operation")
-    return metadata.st_dev, metadata.st_ino
+    return _POSIX_FILE_IDENTITY, metadata.st_dev, metadata.st_ino
+
+
+def _windows_handle_identity(handle: int) -> _FileIdentity:
+    """Return the volume and file ID for an already-open Windows handle."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _FileId128(ctypes.Structure):
+        _fields_ = (("identifier", ctypes.c_ubyte * 16),)
+
+    class _FileIdInfo(ctypes.Structure):
+        _fields_ = (
+            ("volume_serial_number", ctypes.c_ulonglong),
+            ("file_id", _FileId128),
+        )
+
+    class _ByHandleFileInformation(ctypes.Structure):
+        _fields_ = (
+            ("file_attributes", wintypes.DWORD),
+            ("creation_time", wintypes.FILETIME),
+            ("last_access_time", wintypes.FILETIME),
+            ("last_write_time", wintypes.FILETIME),
+            ("volume_serial_number", wintypes.DWORD),
+            ("file_size_high", wintypes.DWORD),
+            ("file_size_low", wintypes.DWORD),
+            ("number_of_links", wintypes.DWORD),
+            ("file_index_high", wintypes.DWORD),
+            ("file_index_low", wintypes.DWORD),
+        )
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    native_handle = wintypes.HANDLE(handle)
+    get_information_ex = kernel32.GetFileInformationByHandleEx
+    get_information_ex.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    )
+    get_information_ex.restype = wintypes.BOOL
+    information = _FileIdInfo()
+    # FileIdInfo is the 128-bit identifier required for ReFS and other modern
+    # Windows filesystems. The older 64-bit file index can legitimately be zero.
+    if get_information_ex(
+        native_handle,
+        18,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+    ):
+        file_id = int.from_bytes(bytes(information.file_id.identifier), "little")
+        if file_id:
+            return (
+                _WINDOWS_FILE_IDENTITY,
+                int(information.volume_serial_number),
+                file_id,
+            )
+
+    # Retain compatibility with filesystems or old Windows releases that do not
+    # implement FileIdInfo but do provide the traditional 64-bit file index.
+    get_information = kernel32.GetFileInformationByHandle
+    get_information.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    )
+    get_information.restype = wintypes.BOOL
+    legacy = _ByHandleFileInformation()
+    if get_information(native_handle, ctypes.byref(legacy)):
+        file_index = (int(legacy.file_index_high) << 32) | int(legacy.file_index_low)
+        if file_index:
+            return (
+                _WINDOWS_LEGACY_FILE_IDENTITY,
+                int(legacy.volume_serial_number),
+                file_index,
+            )
+
+    error = getattr(ctypes, "get_last_error")()
+    detail = getattr(ctypes, "FormatError")(error) if error else "no stable file ID was reported"
+    raise RuntimeError(f"Windows file identity is unavailable: {detail}")
+
+
+def _windows_path_identity(path: Path) -> _FileIdentity:
+    """Open *path* without following a reparse point and read its file ID."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    handle = create_file(
+        os.path.abspath(path),
+        0,
+        0x00000001 | 0x00000002 | 0x00000004,
+        None,
+        3,
+        0x00200000 | 0x02000000,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle in (None, invalid_handle):
+        error = getattr(ctypes, "get_last_error")()
+        raise OSError(error, getattr(ctypes, "FormatError")(error), path)
+    try:
+        return _windows_handle_identity(int(handle))
+    finally:
+        close_handle(handle)
+
+
+def _path_identity(path: Path) -> _FileIdentity:
+    if os.name == "nt":
+        return _windows_path_identity(path)
+    return _file_identity(path.lstat())
+
+
+def _descriptor_identity(descriptor: int) -> _FileIdentity:
+    if os.name == "nt":
+        import msvcrt
+
+        return _windows_handle_identity(msvcrt.get_osfhandle(descriptor))  # type: ignore[attr-defined]
+    return _file_identity(os.fstat(descriptor))
 
 
 def _require_identity(
@@ -1062,12 +1195,13 @@ def _require_direct_target(root: Path, target: Path) -> None:
 
 def _revalidate_path(path: Path, expected: _FileIdentity, *, description: str) -> None:
     try:
-        metadata = os.stat(path, follow_symlinks=False)
+        identity = _path_identity(path)
     except OSError as error:
         raise RuntimeError(f"{description} is no longer reachable at {path}") from error
     if _is_link_or_reparse(path):
         raise RuntimeError(f"{description} became a link or reparse point: {path}")
-    _require_identity(metadata, expected, description=description)
+    if identity != expected:
+        raise RuntimeError(f"{description} changed identity")
 
 
 def _revalidate_entry(
@@ -1260,7 +1394,7 @@ def _ensure_managed_root(root: Path) -> None:
     if _is_link_or_reparse(parent):
         raise RuntimeError(f"Refusing to create an environment root below a linked parent: {parent}")
     if os.name == "nt":
-        parent_identity = _file_identity(parent.lstat())
+        parent_identity = _path_identity(parent)
         root.mkdir()
         _revalidate_path(parent, parent_identity, description="environment root parent")
         if _is_link_or_reparse(root):
@@ -1287,13 +1421,13 @@ def _create_managed_target(root: Path, target: Path) -> _FileIdentity:
     _require_direct_target(root, target)
     _ensure_managed_root(root)
     if os.name == "nt":
-        root_identity = _file_identity(root.lstat())
+        root_identity = _path_identity(root)
         if _is_link_or_reparse(root):
             raise RuntimeError(f"Refusing to use linked managed environment root: {root}")
         target.mkdir()
         if _is_link_or_reparse(target):
             raise RuntimeError(f"New environment target is a reparse point: {target}")
-        identity = _file_identity(target.lstat())
+        identity = _path_identity(target)
         _revalidate_path(root, root_identity, description="managed environment root")
         _revalidate_path(target, identity, description="managed environment target")
         return identity
@@ -1387,11 +1521,12 @@ def _read_target_file(
 def _read_regular_file_windows(path: Path, *, maximum_bytes: int | None = None) -> bytes:
     if not _regular_file(path):
         raise RuntimeError(f"Refusing to read linked or non-regular file: {path}")
-    before = path.lstat()
+    before = _path_identity(path)
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
     try:
-        opened = os.fstat(descriptor)
-        _require_identity(before, _file_identity(opened), description=f"file {path}")
+        opened = _descriptor_identity(descriptor)
+        if before != opened:
+            raise RuntimeError(f"file {path} changed identity")
         chunks: list[bytes] = []
         size = 0
         while True:
@@ -1402,7 +1537,7 @@ def _read_regular_file_windows(path: Path, *, maximum_bytes: int | None = None) 
             if maximum_bytes is not None and size > maximum_bytes:
                 raise RuntimeError(f"File {path} exceeds its safe size limit")
             chunks.append(chunk)
-        _revalidate_path(path, _file_identity(opened), description=f"file {path}")
+        _revalidate_path(path, opened, description=f"file {path}")
         return b"".join(chunks)
     finally:
         os.close(descriptor)
@@ -1450,8 +1585,8 @@ def _read_ready(target: Path) -> dict[str, Any] | None:
             metadata_directory = target / READY_DIRECTORY
             if _is_link_or_reparse(metadata_directory) or not metadata_directory.is_dir():
                 return None
-            target_identity = _file_identity(target.lstat())
-            metadata_identity = _file_identity(metadata_directory.lstat())
+            target_identity = _path_identity(target)
+            metadata_identity = _path_identity(metadata_directory)
             ready_bytes = _read_regular_file_windows(
                 metadata_directory / READY_FILENAME,
                 maximum_bytes=1024 * 1024,
@@ -1562,8 +1697,8 @@ def _assert_managed_target(
         raise RuntimeError(f"Managed environment root is not a directory: {root}")
     if _is_link_or_reparse(target) or not target.is_dir():
         raise RuntimeError(f"Refusing to traverse a link, reparse point, or non-directory: {target}")
-    root_identity = _file_identity(root.lstat())
-    target_identity = _file_identity(target.lstat())
+    root_identity = _path_identity(root)
+    target_identity = _path_identity(target)
     if expected_identity is not None and target_identity != expected_identity:
         raise RuntimeError(f"Managed environment target changed identity: {target}")
     _revalidate_path(root, root_identity, description="managed environment root")
@@ -1585,7 +1720,7 @@ def _assert_managed_target(
 def _safe_remove_tree(target: Path, *, expected_identity: _FileIdentity | None = None) -> None:
     if _is_link_or_reparse(target) or not target.is_dir():
         raise RuntimeError(f"Refusing to recurse into linked or non-directory target: {target}")
-    identity = _file_identity(target.lstat())
+    identity = _path_identity(target)
     if expected_identity is not None and identity != expected_identity:
         raise RuntimeError(f"Directory changed identity before removal: {target}")
     with os.scandir(target) as entries:
@@ -1599,10 +1734,10 @@ def _safe_remove_tree(target: Path, *, expected_identity: _FileIdentity | None =
                         raise
                     os.rmdir(path)
             elif entry.is_dir(follow_symlinks=False):
-                child_identity = _file_identity(entry.stat(follow_symlinks=False))
+                child_identity = _path_identity(path)
                 _safe_remove_tree(path, expected_identity=child_identity)
             else:
-                before = _file_identity(entry.stat(follow_symlinks=False))
+                before = _path_identity(path)
                 _revalidate_path(path, before, description="managed environment file")
                 path.unlink()
             _revalidate_path(target, identity, description="managed environment directory")
@@ -1691,7 +1826,7 @@ def _remove_target(
             require_marker=True,
             expected_identity=expected_identity,
         )
-        identity = _file_identity(target.lstat())
+        identity = _path_identity(target)
         _safe_remove_tree(target, expected_identity=identity)
     else:
         _remove_target_posix(root, target, expected_identity=expected_identity)
@@ -1743,7 +1878,7 @@ def _publish_ready(
                 raise RuntimeError(f"Ready metadata parent is linked or unsafe: {metadata_directory}")
         else:
             metadata_directory.mkdir()
-        metadata_identity = _file_identity(metadata_directory.lstat())
+        metadata_identity = _path_identity(metadata_directory)
         _revalidate_path(
             metadata_directory,
             metadata_identity,

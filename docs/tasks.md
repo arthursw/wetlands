@@ -159,14 +159,23 @@ If a worker becomes unhealthy or disconnects, Wetlands fails its assigned task a
 Operations and tasks can be awaited directly:
 
 ```python
+import asyncio
+
+
 environment = await manager.provision("analysis", spec)
 
-with environment.start() as pool:
+pool = await asyncio.to_thread(environment.start)
+try:
     result = await pool.submit_import(
         "analysis_package.pipeline:run",
         kwargs={"input_data": data},
     )
+finally:
+    await asyncio.to_thread(pool.close)
 ```
+
+Starting, attaching, detaching, and closing pools are blocking lifecycle operations.
+Async applications should move them to a thread as shown above.
 
 Events are available through an async iterator:
 
@@ -195,6 +204,8 @@ with environment.start(workers=4, worker_timeout=300) as pool:
 Workers are warm and process tasks from the pool queue.
 Health monitoring detects disconnects and inactivity.
 A replacement worker is started when a pool worker fails.
+`worker_timeout` is an inactivity timeout that resets whenever the worker sends an IPC message.
+It detects an unresponsive worker; it is not a wall-clock limit on task execution.
 
 `persistent=True` keeps trusted local workers alive when a controller detaches.
 Persistent pools use authenticated loopback connections and exclusive controller ownership.

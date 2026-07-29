@@ -45,7 +45,7 @@ The returned `PixiInfo` reports the executable path, version, and whether Wetlan
 
 The first managed preparation requires network access and may take a few minutes.
 Provisioning also downloads the packages declared by the environment recipe.
-Wetlands stores its Pixi installation, managed environments, locks, logs, and runtime state below the manager root.
+Wetlands stores its Pixi installation, managed environments, locks, and runtime state below the manager root.
 
 Calling `provision()` without a preceding `prepare()` is also valid.
 Provisioning performs preparation as its first coordinated stage.
@@ -152,32 +152,37 @@ from wetlands import EnvironmentManager, EnvironmentSpec
 
 async def run() -> None:
     manager = EnvironmentManager(root="wetlands")
+    try:
+        preparation = manager.prepare()
 
-    preparation = manager.prepare()
+        async def report() -> None:
+            async for event in preparation.events():
+                print(event.message)
 
-    async def report() -> None:
-        async for event in preparation.events():
-            print(event.message)
+        reporter = asyncio.create_task(report())
+        await preparation
+        await reporter
 
-    reporter = asyncio.create_task(report())
-    await preparation
-    await reporter
-
-    environment = await manager.provision(
-        "numpy-example",
-        EnvironmentSpec(
-            python="3.12.*",
-            conda=("numpy>=2",),
-        ),
-    )
-
-    with environment.start() as pool:
-        image = np.arange(16, dtype=np.float32).reshape(4, 4)
-        result = await pool.submit_import(
-            "numpy:negative",
-            args=(image,),
+        environment = await manager.provision(
+            "numpy-example",
+            EnvironmentSpec(
+                python="3.12.*",
+                conda=("numpy>=2",),
+            ),
         )
-        print(result)
+
+        pool = await asyncio.to_thread(environment.start)
+        try:
+            image = np.arange(16, dtype=np.float32).reshape(4, 4)
+            result = await pool.submit_import(
+                "numpy:negative",
+                args=(image,),
+            )
+            print(result)
+        finally:
+            await asyncio.to_thread(pool.close)
+    finally:
+        await asyncio.to_thread(manager.close)
 
 
 asyncio.run(run())
@@ -185,6 +190,8 @@ asyncio.run(run())
 
 Wetlands adapts its thread- and process-based internals to the caller's running event loop.
 It does not create, run, or stop the application's loop.
+Worker-pool startup, attachment, detachment, and shutdown, and manager shutdown, are blocking lifecycle calls.
+Use `asyncio.to_thread()` for them so they do not block the application event loop.
 
 Cancel through the returned object:
 

@@ -106,7 +106,9 @@ class ManagedEnvironment:
         Args:
             workers: Number of worker processes in the pool.
             persistent: Keep workers alive when the controller deliberately detaches.
-            worker_timeout: Optional maximum execution time in seconds for each task.
+            worker_timeout: Optional worker inactivity timeout in seconds.
+                Each IPC message resets the timer, so this is a health check rather
+                than a maximum task execution time.
         """
         with self._manager._manager_work():
             if workers < 1:

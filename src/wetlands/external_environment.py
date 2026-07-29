@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, TYPE_CHECKING
 
 from wetlands.logger import logger, LOG_SOURCE_EXECUTION
-from wetlands.diagnostics import ExecutionFailure as ExecutionFailure, WorkerInfo
+from wetlands.diagnostics import ExecutionFailure, WorkerInfo
 from wetlands._internal.process_termination import (
     ProcessIdentityError,
     ProcessTerminationError,
@@ -442,8 +442,10 @@ class ExternalEnvironment:
             worker_timeout: Optional inactivity timeout in seconds. If set and a
                 worker sends no IPC message within this duration, it is treated as
                 hung: the active task is failed, the worker is killed and replaced.
+                Each IPC message resets the timer, so this is not a maximum task
+                execution time.
             persistent: If True, workers are recorded in the root registry and can
-                later be reconnected with EnvironmentManager.attach().
+                later be reconnected with ManagedEnvironment.attach_pool().
         """
         self._raise_if_failed()
         if worker_timeout is not None and (
