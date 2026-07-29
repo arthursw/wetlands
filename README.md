@@ -17,6 +17,10 @@ It can be used in desktop applications, servers, and plugin systems.
 > Wetlands is intended for code you trust.
 > Isolated environments prevent dependency conflicts, but they do not restrict what code can access on your computer.
 
+[Appose](https://github.com/apposed/appose) is an alternative for applications that need interprocess cooperation across Python, Java, or Groovy, including explicit zero-copy tensor sharing between languages.
+Wetlands is focused on running Python functions and adds automatic NumPy transport, managed worker pools, and post-hoc debugger attachment.
+See [Wetlands and Appose](docs/appose.md) for a short comparison, or visit the [Appose documentation](https://docs.apposed.org/).
+
 Wetlands 2 provides:
 
 - side-effect-light manager construction;

@@ -38,6 +38,7 @@ nav:
   - Values and NumPy arrays: shared_memory.md
   - Debugging running workers: debugging.md
   - Compatibility and releases: compatibility.md
+  - Wetlands and Appose: appose.md
   - Release checklist: releasing.md
   - Migration to Wetlands 2: migration_v2.md
   - Events and logging: logging.md

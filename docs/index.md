@@ -36,6 +36,12 @@ Read [Debugging running workers](debugging.md) to attach after a problem appears
 
 Existing Wetlands 1 users should start with the [Wetlands 2 migration guide](migration_v2.md).
 
+## Appose
+
+[Appose](https://github.com/apposed/appose) is an alternative for applications that need interprocess cooperation across Python, Java, or Groovy, including explicit zero-copy tensor sharing between languages.
+Wetlands is focused on running Python functions and adds automatic NumPy transport, managed worker pools, and post-hoc debugger attachment.
+Read [Wetlands and Appose](appose.md) for a short comparison, or visit the [Appose documentation](https://docs.apposed.org/).
+
 ## Before the first run
 
 Wetlands may need to download Pixi and your declared packages.
