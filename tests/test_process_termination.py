@@ -16,6 +16,7 @@ from wetlands._internal.process_termination import (
     ProcessTerminationError,
     _terminate_posix_group,
     _terminate_windows_tree,
+    _wait_for_posix_group_exit,
     capture_process_identity,
     terminate_attached_process_tree,
     terminate_launched_process_tree,
@@ -164,6 +165,77 @@ def test_surviving_process_group_is_reported_after_term_and_kill() -> None:
         call(42, signal.SIGTERM),
         call(42, signal.SIGKILL),
     ]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_attached_group_leader_is_reaped_when_owned() -> None:
+    with (
+        patch("wetlands._internal.process_termination.os.waitpid", return_value=(42, 0)) as waitpid,
+        patch("wetlands._internal.process_termination._posix_group_exists", return_value=False),
+        patch("wetlands._internal.process_termination.psutil.process_iter") as process_iter,
+    ):
+        assert _wait_for_posix_group_exit(42, process=None, timeout=0)
+
+    waitpid.assert_called_once_with(42, os.WNOHANG)
+    process_iter.assert_not_called()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_attached_zombie_only_group_is_terminated_when_not_owned() -> None:
+    inaccessible = MagicMock()
+    inaccessible.pid = 7
+    zombie = MagicMock()
+    zombie.pid = 42
+    zombie.info = {"status": psutil.STATUS_ZOMBIE}
+    with (
+        patch("wetlands._internal.process_termination.os.waitpid", side_effect=ChildProcessError) as waitpid,
+        patch("wetlands._internal.process_termination._posix_group_exists", return_value=True),
+        patch(
+            "wetlands._internal.process_termination.psutil.process_iter",
+            return_value=[inaccessible, zombie],
+        ),
+        patch(
+            "wetlands._internal.process_termination.os.getpgid",
+            side_effect=[PermissionError, 42],
+        ),
+    ):
+        assert _wait_for_posix_group_exit(42, process=None, timeout=0)
+
+    waitpid.assert_called_once_with(42, os.WNOHANG)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_attached_group_with_unknown_member_status_is_not_reported_terminated() -> None:
+    unknown = MagicMock()
+    unknown.pid = 42
+    unknown.info = {"status": None}
+    with (
+        patch("wetlands._internal.process_termination.os.waitpid", side_effect=ChildProcessError),
+        patch("wetlands._internal.process_termination._posix_group_exists", return_value=True),
+        patch("wetlands._internal.process_termination.psutil.process_iter", return_value=[unknown]),
+        patch("wetlands._internal.process_termination.os.getpgid", return_value=42),
+    ):
+        assert not _wait_for_posix_group_exit(42, process=None, timeout=0)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_attached_group_with_live_member_is_not_reported_terminated() -> None:
+    zombie = MagicMock()
+    zombie.pid = 42
+    zombie.info = {"status": psutil.STATUS_ZOMBIE}
+    live_child = MagicMock()
+    live_child.pid = 43
+    live_child.info = {"status": psutil.STATUS_SLEEPING}
+    with (
+        patch("wetlands._internal.process_termination.os.waitpid", side_effect=ChildProcessError),
+        patch("wetlands._internal.process_termination._posix_group_exists", return_value=True),
+        patch(
+            "wetlands._internal.process_termination.psutil.process_iter",
+            return_value=[zombie, live_child],
+        ),
+        patch("wetlands._internal.process_termination.os.getpgid", return_value=42),
+    ):
+        assert not _wait_for_posix_group_exit(42, process=None, timeout=0)
 
 
 def test_windows_launched_worker_uses_job_aware_tree_termination() -> None:

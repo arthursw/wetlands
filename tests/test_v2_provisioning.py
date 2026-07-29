@@ -25,6 +25,7 @@ from wetlands import (
     PostInstallCommand,
     PreparationError,
     ProvisioningError,
+    ProvisioningOperation,
     UnmanagedTargetError,
 )
 from wetlands._internal.provisioning import (
@@ -432,19 +433,16 @@ def test_cancel_is_rejected_after_ready_publication_is_sealed(
 ) -> None:
     executable = _fake_pixi(tmp_path)
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
-    original_atomic_write_at = provisioning_module._atomic_write_at
+    original_seal_cancellation = ProvisioningOperation._seal_cancellation
     cancel_results: list[bool] = []
-    operation_holder: dict[str, object] = {}
 
-    def write_then_cancel(directory_fd, name, content, *, guard) -> None:
-        original_atomic_write_at(directory_fd, name, content, guard=guard)
-        if name == provisioning_module.READY_FILENAME:
-            operation = operation_holder["operation"]
-            cancel_results.append(operation.cancel())  # type: ignore[attr-defined]
+    def seal_then_cancel(operation: ProvisioningOperation[object]) -> bool:
+        sealed = original_seal_cancellation(operation)
+        cancel_results.append(operation.cancel())
+        return sealed
 
-    monkeypatch.setattr(provisioning_module, "_atomic_write_at", write_then_cancel)
+    monkeypatch.setattr(ProvisioningOperation, "_seal_cancellation", seal_then_cancel)
     operation = manager.provision("example", EnvironmentSpec())
-    operation_holder["operation"] = operation
     environment = operation.wait_for()
 
     assert cancel_results == [False]

@@ -252,8 +252,13 @@ def _wait_for_posix_group_exit(
 ) -> bool:
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        _reap(process)
-        if not _posix_group_exists(process_group_id):
+        if process is None:
+            # A pool detached and reattached in this process no longer retains
+            # its Popen, but the worker is still our child and must be reaped.
+            _reap_attached_child(process_group_id)
+        else:
+            _reap(process)
+        if _posix_group_is_terminated(process_group_id):
             return True
         if time.monotonic() >= deadline:
             return False
@@ -268,6 +273,29 @@ def _posix_group_exists(process_group_id: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _posix_group_is_terminated(process_group_id: int) -> bool:
+    if not _posix_group_exists(process_group_id):
+        return True
+
+    # A zombie-only group may remain visible until its original parent reaps it,
+    # but none of its members can execute or retain descendant resources.
+    found_member = False
+    for process in psutil.process_iter(["pid", "status"]):
+        try:
+            member_process_group_id = os.getpgid(process.pid)
+        except OSError:
+            # The process may be unrelated and inaccessible, or may have exited
+            # during enumeration. It cannot be classified as a group member.
+            continue
+        if member_process_group_id != process_group_id:
+            continue
+        found_member = True
+        if process.info.get("status") != psutil.STATUS_ZOMBIE:
+            # None and any unknown status fail closed once membership is known.
+            return False
+    return found_member
 
 
 def _posix_group_members(process_group_id: int) -> list[int]:
@@ -286,6 +314,11 @@ def _reap(process: subprocess.Popen | None) -> None:
         return
     with contextlib.suppress(subprocess.TimeoutExpired, OSError):
         process.wait(timeout=0)
+
+
+def _reap_attached_child(pid: int) -> None:
+    with contextlib.suppress(ChildProcessError, OSError):
+        os.waitpid(pid, os.WNOHANG)
 
 
 def _terminate_windows_tree(
