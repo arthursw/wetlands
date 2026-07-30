@@ -107,6 +107,103 @@ def test_manifest_renders_pypi_extras_and_direct_urls() -> None:
     assert "[project]" not in manifest
 
 
+def test_manifest_renders_pinned_git_dependency_for_pixi() -> None:
+    revision = "2b90b9f5ceec907a663497b9df6b8a1d7b5bd94d"
+    manifest = render_pixi_manifest(
+        "example",
+        EnvironmentSpec(
+            pypi=(f"sam-2[notebooks] @ git+https://github.com/facebookresearch/sam2.git@{revision}",),
+        ),
+    ).decode()
+
+    assert (
+        f'"sam-2" = {{ git = "https://github.com/facebookresearch/sam2.git", '
+        f'rev = "{revision}", extras = ["notebooks"] }}'
+    ) in manifest
+
+
+@pytest.mark.parametrize(
+    ("requirement", "message"),
+    [
+        (
+            "example @ git+http://example.invalid/repository.git@main",
+            r"must use git\+https",
+        ),
+        (
+            "example @ git+ssh://example.invalid/repository.git@main",
+            r"must use git\+https",
+        ),
+        (
+            "example @ git+https://example.invalid/repository.git",
+            "explicit revision",
+        ),
+        (
+            "example @ git+https://example.invalid/repository.git@main#subdirectory=package",
+            "fragments",
+        ),
+        (
+            "example @ git+https://user:secret@example.invalid/repository.git@main",
+            "credentials",
+        ),
+        (
+            "example @ git+https://example.invalid/repository.git@main?token=secret",
+            "query",
+        ),
+    ],
+)
+def test_environment_spec_rejects_unsafe_or_ambiguous_git_dependencies(
+    requirement: str,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        EnvironmentSpec(pypi=(requirement,))
+
+
+def test_manifest_materializes_local_packages_before_install(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "package with spaces"
+    package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "Local_Package"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+
+    manifest = render_pixi_manifest(
+        "example",
+        EnvironmentSpec(
+            pypi=("requests>=2",),
+            local=(LocalPackage(package, editable=True, extras=("test",)),),
+        ),
+    ).decode()
+
+    assert '"requests" = ">=2"' in manifest
+    assert f'"local-package" = {{ path = "{package.resolve()}", editable = true, extras = ["test"] }}' in manifest
+
+
+def test_environment_spec_rejects_local_dependency_name_collisions(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for package in (first, second):
+        package.mkdir()
+        (package / "pyproject.toml").write_text(
+            '[project]\nname = "Same_Package"\nversion = "1.0"\n',
+            encoding="utf-8",
+        )
+
+    with pytest.raises(ValueError, match="duplicates a declared PyPI"):
+        EnvironmentSpec(
+            pypi=("same-package>=1",),
+            local=(LocalPackage(first),),
+        )
+    with pytest.raises(ValueError, match="Duplicate local package"):
+        EnvironmentSpec(
+            local=(LocalPackage(first), LocalPackage(second)),
+        )
+
+
 def test_managed_debugger_dependency_cannot_be_overridden(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="managed by the Wetlands worker runtime"):
         EnvironmentSpec(pypi=("debugpy>=1",))

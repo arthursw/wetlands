@@ -213,6 +213,14 @@ class EnvironmentSpec:
                 parsed_url = urllib.parse.urlsplit(requirement.url)
                 if parsed_url.username or parsed_url.password or parsed_url.query:
                     raise ValueError("PyPI direct URLs cannot contain credentials or query parameters")
+                if parsed_url.scheme.startswith("git+"):
+                    if parsed_url.scheme != "git+https":
+                        raise ValueError("PyPI Git dependencies must use git+https URLs")
+                    if parsed_url.fragment:
+                        raise ValueError("PyPI Git dependencies cannot contain URL fragments")
+                    repository_path, separator, revision = parsed_url.path.rpartition("@")
+                    if not separator or not repository_path or not revision:
+                        raise ValueError("PyPI Git dependencies must include an explicit revision after '@'")
             package = canonicalize_name(requirement.name)
             if package in _MANAGED_RUNTIME_PACKAGE_NAMES:
                 raise ValueError(f"PyPI package {requirement.name!r} is managed by the Wetlands worker runtime")
@@ -225,11 +233,19 @@ class EnvironmentSpec:
         local = tuple(self.local)
         if any(not isinstance(package, LocalPackage) for package in local):
             raise TypeError("local entries must be LocalPackage instances")
+        local_names: set[str] = set()
         for local_package in local:
             if local_package.distribution_name in _MANAGED_RUNTIME_PACKAGE_NAMES:
                 raise ValueError(
                     f"Local package {local_package.distribution_name!r} is managed by the Wetlands worker runtime"
                 )
+            if local_package.distribution_name in pypi_names:
+                raise ValueError(
+                    f"Local package {local_package.distribution_name!r} duplicates a declared PyPI dependency"
+                )
+            if local_package.distribution_name in local_names:
+                raise ValueError(f"Duplicate local package {local_package.distribution_name!r}")
+            local_names.add(local_package.distribution_name)
         post_install = tuple(self.post_install)
         if any(not isinstance(command, PostInstallCommand) for command in post_install):
             raise TypeError("post_install entries must be PostInstallCommand instances")

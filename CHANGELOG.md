@@ -14,6 +14,7 @@ Wetlands 2 is a breaking redesign focused on reliable Pixi environment provision
 - Added post-hoc debugger attachment to live workers and restored a Wetlands CLI for worker discovery and VS Code attachment.
 - Added explicit persistent-pool detachment and reconnection documentation.
 - Added a compact developer guide for the execution protocol and internal codec boundary.
+- Fixed local-package and pinned Git source provisioning by materializing complete Pixi manifests before installation.
 - Removed the Wetlands 1 manager backends, execution APIs, and explicit shared-memory array types.
 - Removed preconfigured debug mode and the host-side debug extra; Wetlands now manages the worker debugger runtime.
 
