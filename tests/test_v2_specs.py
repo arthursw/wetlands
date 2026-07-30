@@ -122,31 +122,61 @@ def test_manifest_renders_pinned_git_dependency_for_pixi() -> None:
     ) in manifest
 
 
+def test_manifest_accepts_full_sha256_git_commit() -> None:
+    revision = "0123456789abcdef" * 4
+    manifest = render_pixi_manifest(
+        "example",
+        EnvironmentSpec(
+            pypi=(f"example @ git+https://example.invalid/repository.git@{revision}",),
+        ),
+    ).decode()
+
+    assert f'rev = "{revision}"' in manifest
+
+
 @pytest.mark.parametrize(
     ("requirement", "message"),
     [
         (
-            "example @ git+http://example.invalid/repository.git@main",
+            "example @ git+http://example.invalid/repository.git@0123456789abcdef0123456789abcdef01234567",
             r"must use git\+https",
         ),
         (
-            "example @ git+ssh://example.invalid/repository.git@main",
+            "example @ git+ssh://example.invalid/repository.git@0123456789abcdef0123456789abcdef01234567",
             r"must use git\+https",
         ),
         (
             "example @ git+https://example.invalid/repository.git",
-            "explicit revision",
+            "full 40- or 64-character hexadecimal commit SHA",
         ),
         (
-            "example @ git+https://example.invalid/repository.git@main#subdirectory=package",
+            "example @ git+https://example.invalid/repository.git@main",
+            "full 40- or 64-character hexadecimal commit SHA",
+        ),
+        (
+            "example @ git+https://example.invalid/repository.git@v1.2.3",
+            "full 40- or 64-character hexadecimal commit SHA",
+        ),
+        (
+            "example @ git+https://example.invalid/repository.git@0123456789abcdef",
+            "full 40- or 64-character hexadecimal commit SHA",
+        ),
+        (
+            "example @ git+https://example.invalid/repository.git@0123456789abcdef0123456789abcdef0123456g",
+            "full 40- or 64-character hexadecimal commit SHA",
+        ),
+        (
+            "example @ git+https://example.invalid/repository.git@0123456789abcdef0123456789abcdef01234567"
+            "#subdirectory=package",
             "fragments",
         ),
         (
-            "example @ git+https://user:secret@example.invalid/repository.git@main",
+            "example @ git+https://user:secret@example.invalid/repository.git@0123456789abcdef0123456789abcdef01234567",
             "credentials",
         ),
         (
-            "example @ git+https://example.invalid/repository.git@main?token=secret",
+            "example @ git+https://example.invalid/repository.git@"
+            "0123456789abcdef0123456789abcdef01234567?token=secret",
             "query",
         ),
     ],

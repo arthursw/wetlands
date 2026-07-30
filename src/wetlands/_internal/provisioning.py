@@ -57,6 +57,7 @@ from wetlands.specs import (
     EnvironmentSpec,
     PixiInfo,
     ProvisioningStage,
+    _parse_pinned_git_url,
     environment_name_key,
     validate_environment_name,
 )
@@ -922,18 +923,7 @@ def _render_pypi_dependency(dependency: str) -> tuple[str, str]:
     if requirement.url:
         parsed_url = urllib.parse.urlsplit(requirement.url)
         if parsed_url.scheme == "git+https":
-            repository_path, separator, revision = parsed_url.path.rpartition("@")
-            if not separator or not repository_path or not revision:
-                raise ValueError("PyPI Git dependencies must include an explicit revision after '@'")
-            repository_url = urllib.parse.urlunsplit(
-                (
-                    "https",
-                    parsed_url.netloc,
-                    repository_path,
-                    "",
-                    "",
-                )
-            )
+            repository_url, revision = _parse_pinned_git_url(requirement.url)
             fields = [
                 f"git = {_toml_quote(repository_url)}",
                 f"rev = {_toml_quote(revision)}",
@@ -2084,7 +2074,7 @@ def provision_environment(
                 matches = (
                     ready.get("schema_version") == READY_SCHEMA_VERSION
                     and ready.get("recipe_hash") == spec.recipe_hash
-                    and (bool(spec.local) or ready.get("manifest_sha256") == generated_manifest_hash)
+                    and ready.get("manifest_sha256") == generated_manifest_hash
                     and ready.get("pixi_version") == pixi.version
                     and ready.get("pixi_executable") == str(pixi.executable)
                     and (supplied_lock_hash is None or ready.get("lock_sha256") == supplied_lock_hash)

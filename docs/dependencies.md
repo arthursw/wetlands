@@ -48,6 +48,22 @@ The managed runtime and its exact pins participate in recipe identity.
 Changing them requires a rebuild rather than silently reusing an older ready environment.
 After post-install commands finish, provisioning verifies the installed managed-runtime versions before publishing the environment as ready.
 
+## Pinned Git packages
+
+Declare a Git-hosted Python package with a `git+https` direct reference pinned to its full commit SHA:
+
+```python
+from wetlands import EnvironmentSpec
+
+spec = EnvironmentSpec(
+    pypi=("sampleproject @ git+https://github.com/pypa/sampleproject.git@621e4974ca25ce531773def586ba3ed8e736b3fc",),
+)
+```
+
+Wetlands accepts full 40-character SHA-1 and 64-character SHA-256 commit identifiers.
+Branches, tags, abbreviated hashes, embedded credentials, query parameters, URL fragments, and non-HTTPS Git transports are rejected.
+Pinning makes the selected repository state immutable, but does not establish that its code is trustworthy; review Git dependencies before provisioning them.
+
 ## Local packages
 
 ```python
