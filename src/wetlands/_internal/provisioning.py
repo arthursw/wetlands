@@ -112,6 +112,21 @@ def _safe_command(argv: tuple[str, ...], display: str | None = None) -> str:
     return rendered
 
 
+def _windows_git_long_paths_overrides(inherited: Mapping[str, str]) -> dict[str, str]:
+    raw_count = inherited.get("GIT_CONFIG_COUNT", "0")
+    try:
+        count = int(raw_count)
+    except ValueError:
+        count = 0
+    if count < 0:
+        count = 0
+    return {
+        "GIT_CONFIG_COUNT": str(count + 1),
+        f"GIT_CONFIG_KEY_{count}": "core.longpaths",
+        f"GIT_CONFIG_VALUE_{count}": "true",
+    }
+
+
 class CancelableFileLock:
     def __init__(
         self,
@@ -2206,6 +2221,8 @@ def provision_environment(
                     for scheme, value in (manager.network or {}).items()
                 },
             }
+            if platform.system() == "Windows":
+                pixi_environment.update(_windows_git_long_paths_overrides(os.environ))
             install_argv = [
                 str(pixi.executable),
                 "install",

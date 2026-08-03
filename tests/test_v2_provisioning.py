@@ -39,6 +39,7 @@ from wetlands._internal.provisioning import (
     _read_ready,
     _remove_target,
     _safe_command,
+    _windows_git_long_paths_overrides,
     _write_target_file,
     environment_lifecycle_gate,
 )
@@ -143,6 +144,33 @@ def test_network_configuration_accepts_only_proxy_settings(tmp_path: Path) -> No
     }
     with pytest.raises(ValueError, match="network keys"):
         EnvironmentManager(tmp_path / "other", network={"PATH": "/untrusted"})
+
+
+def test_windows_git_long_paths_preserve_inherited_command_configuration() -> None:
+    inherited = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.version",
+        "GIT_CONFIG_VALUE_0": "HTTP/1.1",
+    }
+
+    effective = {**inherited, **_windows_git_long_paths_overrides(inherited)}
+
+    assert effective == {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "http.version",
+        "GIT_CONFIG_VALUE_0": "HTTP/1.1",
+        "GIT_CONFIG_KEY_1": "core.longpaths",
+        "GIT_CONFIG_VALUE_1": "true",
+    }
+
+
+@pytest.mark.parametrize("count", ["invalid", "-1"])
+def test_windows_git_long_paths_recovers_from_invalid_inherited_count(count: str) -> None:
+    assert _windows_git_long_paths_overrides({"GIT_CONFIG_COUNT": count}) == {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.longpaths",
+        "GIT_CONFIG_VALUE_0": "true",
+    }
 
 
 def test_commands_and_output_are_redacted() -> None:

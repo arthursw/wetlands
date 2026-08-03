@@ -6,6 +6,7 @@ All notable changes to Wetlands are documented here.
 
 - Fixed local-package and pinned Git source provisioning by materializing complete Pixi manifests before installation.
 - Added validation and documentation for immutable Git package references pinned to full commit SHAs.
+- Enabled long-path handling for Git subprocesses launched by Pixi on Windows without changing the user's global Git configuration.
 
 ## 2.1.0
 
