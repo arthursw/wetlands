@@ -14,6 +14,11 @@ from wetlands.specs import (
 )
 from wetlands._internal.provisioning import render_pixi_manifest
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by Python 3.9/3.10 compatibility jobs
+    import tomli as tomllib
+
 
 @pytest.mark.parametrize(
     "name",
@@ -199,16 +204,22 @@ def test_manifest_materializes_local_packages_before_install(
         encoding="utf-8",
     )
 
-    manifest = render_pixi_manifest(
-        "example",
-        EnvironmentSpec(
-            pypi=("requests>=2",),
-            local=(LocalPackage(package, editable=True, extras=("test",)),),
-        ),
-    ).decode()
+    manifest = tomllib.loads(
+        render_pixi_manifest(
+            "example",
+            EnvironmentSpec(
+                pypi=("requests>=2",),
+                local=(LocalPackage(package, editable=True, extras=("test",)),),
+            ),
+        ).decode()
+    )
 
-    assert '"requests" = ">=2"' in manifest
-    assert f'"local-package" = {{ path = "{package.resolve()}", editable = true, extras = ["test"] }}' in manifest
+    assert manifest["pypi-dependencies"]["requests"] == ">=2"
+    assert manifest["pypi-dependencies"]["local-package"] == {
+        "path": str(package.resolve()),
+        "editable": True,
+        "extras": ["test"],
+    }
 
 
 def test_environment_spec_rejects_local_dependency_name_collisions(

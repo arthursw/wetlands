@@ -45,6 +45,11 @@ from wetlands._internal.provisioning import (
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
 from wetlands.specs import MANAGED_DEBUGPY_VERSION
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by Python 3.9/3.10 compatibility jobs
+    import tomli as tomllib
+
 
 def _fake_pixi(
     tmp_path: Path,
@@ -310,10 +315,12 @@ def test_local_package_is_materialized_before_install_and_reused(
     first = manager.provision("example", spec).wait_for()
     second = manager.provision("example", spec).wait_for()
 
-    assert (
-        f'"example-local-package" = {{ path = "{package.resolve()}", editable = true, extras = ["test"] }}'
-        in first.pixi_manifest_path.read_text(encoding="utf-8")
-    )
+    manifest = tomllib.loads(first.pixi_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["pypi-dependencies"]["example-local-package"] == {
+        "path": str(package.resolve()),
+        "editable": True,
+        "extras": ["test"],
+    }
     assert first.generation_id == second.generation_id
 
 
@@ -337,10 +344,11 @@ def test_local_package_can_use_a_supplied_lock_without_modifying_it(tmp_path: Pa
     ).wait_for()
 
     assert environment.pixi_lock_path.read_bytes() == lock
-    assert (
-        f'"locked-local" = {{ path = "{package.resolve()}", editable = true }}'
-        in environment.pixi_manifest_path.read_text(encoding="utf-8")
-    )
+    manifest = tomllib.loads(environment.pixi_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["pypi-dependencies"]["locked-local"] == {
+        "path": str(package.resolve()),
+        "editable": True,
+    }
 
 
 def test_modified_supplied_lock_fails_and_removes_incomplete_target(tmp_path: Path) -> None:
