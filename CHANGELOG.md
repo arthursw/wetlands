@@ -2,6 +2,12 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.1.0
+
+- Added validated per-index worker environment variables through `ManagedEnvironment.start(worker_environment=...)`.
+- Preserved worker indices and their snapshotted environment mappings across automatic replacement.
+- Defined indexed worker environments as incompatible with persistent pools until their configuration can be durably verified during attachment.
+
 ## 2.0.0
 
 Wetlands 2 is a breaking redesign focused on reliable Pixi environment provisioning and ordinary Python function execution.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from unittest.mock import patch
 
 import pytest
 
@@ -75,6 +76,37 @@ def test_manager_constructor_has_no_manager_selection_or_legacy_paths() -> None:
     assert not hasattr(wetlands.EnvironmentManager, "load")
     assert not hasattr(wetlands.EnvironmentManager, "execute_commands")
     assert not hasattr(wetlands.EnvironmentManager, "get_process_logger")
+
+
+def test_worker_environment_is_a_public_start_option() -> None:
+    parameters = inspect.signature(wetlands.ManagedEnvironment.start).parameters
+
+    assert "worker_environment" in parameters
+    assert parameters["worker_environment"].default is None
+
+
+def test_public_worker_environment_validation_precedes_runtime_reconciliation(tmp_path) -> None:
+    manager = wetlands.EnvironmentManager(tmp_path)
+    environment = wetlands.ManagedEnvironment._from_ready(
+        manager,
+        "example",
+        tmp_path / "environments" / "example",
+        {
+            "pixi_version": "0.1.0",
+            "pixi_executable": str(tmp_path / "pixi"),
+            "generation_id": "generation-1",
+            "recipe_hash": "recipe-1",
+            "lock_sha256": "lock-1",
+        },
+    )
+
+    with (
+        patch("wetlands.managed_environment.runtime_state.reconcile_persistent_pool") as reconcile,
+        pytest.raises(TypeError, match="keys and values must be strings"),
+    ):
+        environment.start(worker_environment=lambda _index: {"NAME": 1})
+
+    reconcile.assert_not_called()
 
 
 def test_manager_configuration_is_read_only(tmp_path) -> None:

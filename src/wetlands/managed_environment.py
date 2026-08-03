@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import math
 import threading
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from wetlands._internal import runtime_state
 from wetlands._internal.provisioning import _read_ready, environment_lifecycle_gate
-from wetlands.external_environment import ExternalEnvironment
+from wetlands.external_environment import ExternalEnvironment, _validate_worker_environments
 from wetlands.lifecycle import EnvironmentGenerationChangedError, ManagerCloseError
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
 from wetlands.task import ExecutionTask
@@ -99,6 +100,7 @@ class ManagedEnvironment:
         *,
         workers: int = 1,
         persistent: bool = False,
+        worker_environment: Callable[[int], Mapping[str, str]] | None = None,
         worker_timeout: float | None = None,
     ) -> WorkerPool:
         """Start a new warm worker pool for this environment generation.
@@ -106,6 +108,11 @@ class ManagedEnvironment:
         Args:
             workers: Number of worker processes in the pool.
             persistent: Keep workers alive when the controller deliberately detaches.
+            worker_environment: Optional callable receiving each zero-based worker
+                index and returning environment variables for that worker. Wetlands
+                snapshots the mappings before launch and reuses the mapping for the
+                same index when replacing a worker. This cannot be combined with
+                ``persistent=True``.
             worker_timeout: Optional worker inactivity timeout in seconds.
                 Each IPC message resets the timer, so this is a health check rather
                 than a maximum task execution time.
@@ -113,6 +120,10 @@ class ManagedEnvironment:
         with self._manager._manager_work():
             if workers < 1:
                 raise ValueError("workers must be at least one")
+            if persistent and worker_environment is not None:
+                raise ValueError("worker_environment cannot be combined with persistent=True")
+            worker_environments = _validate_worker_environments(workers, worker_environment)
+            snapshotted_worker_environment = worker_environments.__getitem__ if worker_environment is not None else None
             with self._lock:
                 existing_pools = tuple(self._pools)
             for existing_pool in existing_pools:
@@ -139,6 +150,7 @@ class ManagedEnvironment:
                     runtime.launch(
                         max_workers=workers,
                         persistent=persistent,
+                        worker_environment=snapshotted_worker_environment,
                         worker_timeout=worker_timeout,
                     )
                 except BaseException:

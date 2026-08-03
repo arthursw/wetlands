@@ -5,13 +5,13 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from wetlands.diagnostics import ExecutionFailureCategory
 from wetlands._internal.process_termination import ProcessTerminationError
-from wetlands.external_environment import ExternalEnvironment, _Worker
+from wetlands.external_environment import ExternalEnvironment, _validate_worker_environments, _Worker
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
 from wetlands.managed_environment import WorkerPool
 from wetlands.operation import ExecutionError
@@ -223,6 +223,121 @@ def test_replacement_worker_is_added_and_made_available(tmp_path):
 
     assert environment._workers == [replacement]
     assert environment._idle_workers.get_nowait() is replacement
+
+
+def test_replacement_reuses_snapshotted_environment_for_stable_index(tmp_path):
+    environment = _environment(tmp_path)
+    source = {"CUDA_VISIBLE_DEVICES": "0"}
+    calls: list[int] = []
+
+    def configure(index: int):
+        calls.append(index)
+        return source
+
+    environment._worker_environments = _validate_worker_environments(1, configure)
+    source["CUDA_VISIBLE_DEVICES"] = "changed"
+    replacement = _worker()
+
+    with patch.object(environment, "_launch_worker", return_value=replacement) as launch:
+        environment._try_replace_worker(0)
+
+    assert calls == [0]
+    launch.assert_called_once_with(0, {"CUDA_VISIBLE_DEVICES": "0"})
+
+
+@pytest.mark.parametrize(
+    ("worker_environment", "error", "message"),
+    [
+        (object(), TypeError, "callable"),
+        (lambda _index: None, TypeError, "return a mapping"),
+        (lambda _index: {1: "value"}, TypeError, "keys and values must be strings"),
+        (lambda _index: {"NAME": 1}, TypeError, "keys and values must be strings"),
+        (lambda _index: {"": "value"}, ValueError, "invalid variable name"),
+        (lambda _index: {"BAD=NAME": "value"}, ValueError, "invalid variable name"),
+        (lambda _index: {"BAD\0NAME": "value"}, ValueError, "null bytes"),
+        (lambda _index: {"NAME": "bad\0value"}, ValueError, "null bytes"),
+        (lambda _index: {"WETLANDS_STARTUP_TOKEN": "value"}, ValueError, "reserved variable"),
+        (lambda _index: {"wetlands_future_value": "value"}, ValueError, "reserved variable"),
+        (lambda _index: {"PYTHONPATH": "value"}, ValueError, "reserved variable"),
+        (lambda _index: {"pythonhome": "value"}, ValueError, "reserved variable"),
+    ],
+)
+def test_worker_environment_validation_is_failure_atomic(
+    tmp_path,
+    worker_environment,
+    error,
+    message,
+):
+    environment = _environment(tmp_path)
+
+    with (
+        patch("wetlands.external_environment.reconcile_shared_memory_leases") as reconcile,
+        patch.object(environment, "_launch_worker") as launch,
+        pytest.raises(error, match=message),
+    ):
+        environment.launch(worker_environment=worker_environment)
+
+    reconcile.assert_not_called()
+    launch.assert_not_called()
+
+
+def test_worker_environment_callback_runs_once_per_index_before_launch(tmp_path):
+    environment = _environment(tmp_path)
+    environments = [
+        {"CUDA_VISIBLE_DEVICES": "0"},
+        {"CUDA_VISIBLE_DEVICES": "1"},
+    ]
+    calls: list[int] = []
+    workers = [_worker(0), _worker(1)]
+
+    def configure(index: int):
+        calls.append(index)
+        return environments[index]
+
+    with (
+        patch("wetlands.external_environment.reconcile_shared_memory_leases"),
+        patch.object(environment, "_launch_worker", side_effect=workers) as launch,
+        patch("wetlands.external_environment.runtime_state.load_or_create_root_authkey", return_value=b"key"),
+        patch("wetlands.external_environment.threading.Thread") as thread,
+    ):
+        environment.launch(max_workers=2, worker_environment=configure)
+
+    assert calls == [0, 1]
+    assert launch.call_args_list == [
+        call(0, {"CUDA_VISIBLE_DEVICES": "0"}),
+        call(1, {"CUDA_VISIBLE_DEVICES": "1"}),
+    ]
+    thread.return_value.start.assert_called_once_with()
+
+
+def test_worker_environment_callback_error_propagates_before_launch_side_effects(tmp_path):
+    environment = _environment(tmp_path)
+    failure = RuntimeError("configuration failed")
+
+    with (
+        patch("wetlands.external_environment.reconcile_shared_memory_leases") as reconcile,
+        patch.object(environment, "_launch_worker") as launch,
+        pytest.raises(RuntimeError) as caught,
+    ):
+        environment.launch(worker_environment=MagicMock(side_effect=failure))
+
+    assert caught.value is failure
+    reconcile.assert_not_called()
+    launch.assert_not_called()
+
+
+def test_persistent_worker_environment_is_rejected_without_invoking_callback(tmp_path):
+    environment = _environment(tmp_path)
+    callback = MagicMock(return_value={})
+
+    with (
+        patch("wetlands.external_environment.reconcile_shared_memory_leases") as reconcile,
+        pytest.raises(ValueError, match="persistent=True"),
+    ):
+        environment.launch(persistent=True, worker_environment=callback)
+
+    callback.assert_not_called()
+    reconcile.assert_not_called()
 
 
 def test_replacement_failure_is_structurally_reported_by_pool(tmp_path, caplog):
@@ -776,7 +891,7 @@ def test_failed_recorded_launch_retains_worker_until_death_is_verified(
         ),
         pytest.raises(WorkerStartError) as caught,
     ):
-        environment._launch_worker(0, None)
+        environment._launch_worker(0, {})
 
     record.assert_called_once()
     remove.assert_not_called()

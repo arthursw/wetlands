@@ -208,6 +208,7 @@ version = "1.0.0"
     )
     (module / "__init__.py").write_text(
         """
+import os
 import time
 
 import numpy as np
@@ -215,6 +216,10 @@ import numpy as np
 
 def add(left, right):
     return left + right
+
+
+def read_environment(name):
+    return os.environ.get(name)
 
 
 def transform_array(array):
@@ -330,7 +335,17 @@ def test_real_pixi_release_acceptance(tmp_path: Path) -> None:
         ).wait_for(600)
         assert environment.pixi_lock_path.read_bytes() == generated_lock
 
-        with environment.start() as pool:
+        with environment.start(
+            worker_environment=lambda index: {"CUDA_VISIBLE_DEVICES": str(index)},
+        ) as pool:
+            assert (
+                pool.execute_import(
+                    "wetlands_acceptance_worker:read_environment",
+                    args=("CUDA_VISIBLE_DEVICES",),
+                    timeout=60,
+                )
+                == "0"
+            )
             original = np.arange(20, dtype=np.float64)[::2]
             original_snapshot = original.copy()
             result = pool.execute_import(
@@ -371,6 +386,14 @@ def test_real_pixi_release_acceptance(tmp_path: Path) -> None:
                 stubborn.wait_for(60)
             assert stubborn.state is ExecutionState.CANCELED
             assert pool.execute_import("wetlands_acceptance_worker:add", args=(19, 23), timeout=60) == 42
+            assert (
+                pool.execute_import(
+                    "wetlands_acceptance_worker:read_environment",
+                    args=("CUDA_VISIBLE_DEVICES",),
+                    timeout=60,
+                )
+                == "0"
+            )
 
         child_pid_file = tmp_path / "post-install-child.pid"
         interrupted_script = (

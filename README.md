@@ -28,6 +28,7 @@ Wetlands 2 provides:
 - reproducible Pixi projects and `pixi.lock` files;
 - managed-environment discovery and safe asynchronous removal;
 - warm worker pools;
+- validated environment variables for individual worker indices;
 - qualified installed-package targets and path targets for local development;
 - automatic transport of ordinary Python values and NumPy arrays;
 - blocking, callback-based, and `asyncio`-friendly execution.

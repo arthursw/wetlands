@@ -17,7 +17,7 @@ import functools
 import hmac
 import threading
 import queue
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TYPE_CHECKING
 
 from wetlands.logger import logger, LOG_SOURCE_EXECUTION
@@ -73,6 +73,8 @@ ATTACH_CONNECT_TIMEOUT = 5.0
 STARTUP_EVENT = "wetlands.worker.ready"
 STARTUP_SCHEMA_VERSION = 1
 STARTUP_TOKEN_ENV = "WETLANDS_STARTUP_TOKEN"
+RESERVED_WORKER_ENVIRONMENT_PREFIX = "WETLANDS_"
+RESERVED_PYTHON_ENVIRONMENT_VARIABLES = frozenset({"PYTHONEXECUTABLE", "PYTHONHOME", "PYTHONPATH"})
 STARTUP_CALLBACK_TIMEOUT = 30.0
 STARTUP_CONNECTION_READ_TIMEOUT = 0.5
 STARTUP_MAX_PAYLOAD_BYTES = 64 * 1024
@@ -276,6 +278,38 @@ def synchronized(method):
     return wrapper
 
 
+def _validate_worker_environments(
+    max_workers: int,
+    worker_environment: Callable[[int], Mapping[str, str]] | None,
+) -> tuple[dict[str, str], ...]:
+    if worker_environment is None:
+        return tuple({} for _ in range(max_workers))
+    if not callable(worker_environment):
+        raise TypeError("worker_environment must be callable or None")
+
+    worker_environments: list[dict[str, str]] = []
+    for index in range(max_workers):
+        raw_environment = worker_environment(index)
+        if not isinstance(raw_environment, Mapping):
+            raise TypeError(f"worker_environment({index}) must return a mapping")
+        environment: dict[str, str] = {}
+        for key, value in raw_environment.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise TypeError(f"worker_environment({index}) keys and values must be strings")
+            if not key or "=" in key:
+                raise ValueError(f"worker_environment({index}) contains invalid variable name {key!r}")
+            if "\0" in key or "\0" in value:
+                raise ValueError(f"worker_environment({index}) keys and values must not contain null bytes")
+            normalized_key = key.upper()
+            if normalized_key.startswith(RESERVED_WORKER_ENVIRONMENT_PREFIX):
+                raise ValueError(f"worker_environment({index}) cannot set reserved variable {key!r}")
+            if normalized_key in RESERVED_PYTHON_ENVIRONMENT_VARIABLES:
+                raise ValueError(f"worker_environment({index}) cannot set reserved variable {key!r}")
+            environment[key] = value
+        worker_environments.append(environment)
+    return tuple(worker_environments)
+
+
 class _Worker:
     """Holds state for a single module_executor process."""
 
@@ -381,7 +415,7 @@ class ExternalEnvironment:
         self._workers: list[_Worker] = []
         self._idle_workers: queue.Queue[_Worker] = queue.Queue()
         self._task_queue: queue.Queue[ExecutionTask[Any]] = queue.Queue()
-        self._worker_env: Callable[[int], dict[str, str]] | None = None
+        self._worker_environments: tuple[dict[str, str], ...] = ()
         self._worker_timeout: float | None = None
         self._persistent: bool = False
         self._pool_commissioned = False
@@ -428,7 +462,7 @@ class ExternalEnvironment:
         self,
         *,
         max_workers: int = 1,
-        worker_env: Callable[[int], dict[str, str]] | None = None,
+        worker_environment: Callable[[int], Mapping[str, str]] | None = None,
         worker_timeout: float | None = None,
         persistent: bool = False,
     ) -> None:
@@ -437,8 +471,9 @@ class ExternalEnvironment:
         Args:
             max_workers: Number of worker processes to start.
                 All workers share the same Pixi environment.
-            worker_env: Optional callable receiving worker index (0-based),
-                returning extra environment variables for that worker.
+            worker_environment: Optional callable receiving worker index (0-based),
+                returning extra environment variables for that worker. The returned
+                mappings are validated and snapshotted before workers launch.
             worker_timeout: Optional inactivity timeout in seconds. If set and a
                 worker sends no IPC message within this duration, it is treated as
                 hung: the active task is failed, the worker is killed and replaced.
@@ -456,9 +491,12 @@ class ExternalEnvironment:
             return
         if max_workers < 1:
             raise ValueError("max_workers must be at least one")
+        if persistent and worker_environment is not None:
+            raise ValueError("worker_environment cannot be combined with persistent=True")
+        worker_environments = _validate_worker_environments(max_workers, worker_environment)
         reconcile_shared_memory_leases(self.environment_manager.root)
 
-        self._worker_env = worker_env
+        self._worker_environments = worker_environments
         self._worker_timeout = worker_timeout
         self._persistent = persistent
         self._pool_commissioned = False
@@ -511,7 +549,7 @@ class ExternalEnvironment:
         started: list[_Worker] = []
         try:
             for i in range(max_workers):
-                worker = self._launch_worker(i, worker_env)
+                worker = self._launch_worker(i, worker_environments[i])
                 started.append(worker)
             if self._persistent:
                 self._commission_workers(started)
@@ -591,7 +629,7 @@ class ExternalEnvironment:
     def _launch_worker(
         self,
         index: int,
-        worker_env: Callable[[int], dict[str, str]] | None,
+        worker_environment: Mapping[str, str],
     ) -> _Worker:
         """Launch a single module_executor process and return a _Worker."""
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
@@ -637,8 +675,7 @@ class ExternalEnvironment:
             log_context["worker_index"] = str(index)
 
         env = os.environ.copy()
-        if worker_env is not None:
-            env.update(worker_env(index))
+        env.update(worker_environment)
         env[STARTUP_TOKEN_ENV] = startup_token
         for variable in ("PYTHONEXECUTABLE", "PYTHONHOME", "PYTHONPATH"):
             env.pop(variable, None)
@@ -1315,7 +1352,8 @@ class ExternalEnvironment:
                 with self._lock:
                     if self._shutdown_event.is_set() or any(worker.index == index for worker in self._workers):
                         return
-                worker = self._launch_worker(index, self._worker_env)
+                worker_environment = self._worker_environments[index] if index < len(self._worker_environments) else {}
+                worker = self._launch_worker(index, worker_environment)
                 with self._lock:
                     if self._shutdown_event.is_set() or any(existing.index == index for existing in self._workers):
                         if worker.process is None:

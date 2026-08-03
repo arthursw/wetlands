@@ -95,6 +95,32 @@ Nested class attributes such as `package.module:Processor.run` are valid.
 The host input array is copied into transport storage, so worker mutation cannot change the caller's array.
 The returned array is a normal independently owned NumPy array.
 
+## Configure individual workers
+
+Use `worker_environment` when workers in the same Pixi environment need different process-level settings, such as GPU assignments:
+
+```python
+with environment.start(
+    workers=2,
+    worker_environment=lambda index: {
+        "CUDA_VISIBLE_DEVICES": str(index),
+    },
+) as pool:
+    # Worker 0 sees CUDA_VISIBLE_DEVICES=0 and worker 1 sees 1.
+    ...
+```
+
+Wetlands calls the callback once for each zero-based worker index before launching any worker and copies the returned mappings.
+If a worker is replaced after failure or forced cancellation, its replacement keeps the same index and receives the same copied mapping; the callback is not called again.
+Each copied mapping overrides same-name variables inherited from the controller process.
+
+Each result must be a mapping with string keys and string values.
+Variable names must be nonempty, cannot contain `=` or null bytes, and values cannot contain null bytes.
+The case-insensitive `WETLANDS_*` namespace is reserved for Wetlands, and `PYTHONEXECUTABLE`, `PYTHONHOME`, and `PYTHONPATH` cannot be set explicitly because Wetlands removes those variables from worker startup environments.
+
+Indexed worker environments cannot currently be combined with `persistent=True` because a later attaching controller does not possess the original callback configuration.
+Persistent pools without `worker_environment` continue to support detachment and reconnection.
+
 ## Call your own worker package
 
 Worker packages expose ordinary Python functions and declare their dependencies normally:

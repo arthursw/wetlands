@@ -50,6 +50,13 @@ finally:
 
 Use `pool.close()` in the `finally` block when the workers are no longer needed.
 
+## Indexed worker environments
+
+Persistent pools cannot currently be started with `worker_environment`.
+Wetlands rejects that combination before invoking the callback or launching workers because an attaching controller cannot reconstruct and verify the original per-index configuration.
+
+Use a non-persistent pool when workers need indexed settings such as `CUDA_VISIBLE_DEVICES`, or configure equivalent process-independent behavior inside the worker package.
+
 ## Exclusive execution ownership
 
 A persistent pool has exactly one execution controller.
