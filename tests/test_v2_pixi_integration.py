@@ -30,6 +30,8 @@ pytestmark = [
     pytest.mark.slow,
 ]
 
+SAMPLEPROJECT_COMMIT = "621e4974ca25ce531773def586ba3ed8e736b3fc"
+
 
 def _wait_until(predicate: Callable[[], bool], timeout: float, description: str) -> None:
     deadline = time.monotonic() + timeout
@@ -297,7 +299,10 @@ def test_real_pixi_release_acceptance(tmp_path: Path) -> None:
         base_spec = EnvironmentSpec(
             python=python_requirement,
             conda=("numpy", "packaging"),
-            pypi=("typing-extensions",),
+            pypi=(
+                "typing-extensions",
+                f"sampleproject @ git+https://github.com/pypa/sampleproject.git@{SAMPLEPROJECT_COMMIT}",
+            ),
             local=(LocalPackage(package, editable=True),),
             post_install=(
                 PostInstallCommand(
@@ -346,6 +351,14 @@ def test_real_pixi_release_acceptance(tmp_path: Path) -> None:
                 )
                 == "0"
             )
+            installed_sample_version = pool.execute_import(
+                "importlib.metadata:version",
+                args=("sampleproject",),
+                timeout=60,
+            )
+            assert isinstance(installed_sample_version, str)
+            assert installed_sample_version
+
             original = np.arange(20, dtype=np.float64)[::2]
             original_snapshot = original.copy()
             result = pool.execute_import(

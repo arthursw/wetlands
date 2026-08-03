@@ -2,6 +2,11 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.2.0
+
+- Fixed local-package and pinned Git source provisioning by materializing complete Pixi manifests before installation.
+- Added validation and documentation for immutable Git package references pinned to full commit SHAs.
+
 ## 2.1.0
 
 - Added validated per-index worker environment variables through `ManagedEnvironment.start(worker_environment=...)`.

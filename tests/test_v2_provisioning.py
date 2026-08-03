@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -81,12 +82,6 @@ elif arguments and arguments[0] == "install":
         lock.write_text("version: 6\\n", encoding="utf-8")
 elif arguments and arguments[0] == "shell-hook":
     pass
-elif arguments and arguments[0] == "add":
-    manifest = pathlib.Path(arguments[arguments.index("--manifest-path") + 1])
-    with manifest.open("a", encoding="utf-8") as stream:
-        stream.write("# local " + arguments[-1] + "\\n")
-    if "--locked" not in arguments:
-        (manifest.parent / "pixi.lock").write_text("version: 6\\nlocal: true\\n", encoding="utf-8")
 elif arguments and arguments[0] == "run":
     manifest_index = arguments.index("--manifest-path")
     command = arguments[manifest_index + 2:]
@@ -297,7 +292,9 @@ def test_supplied_lock_is_preserved_and_published(tmp_path: Path) -> None:
     assert environment.pixi_lock_path.read_bytes() == lock
 
 
-def test_local_package_is_added_by_pixi_and_reused(tmp_path: Path) -> None:
+def test_local_package_is_materialized_before_install_and_reused(
+    tmp_path: Path,
+) -> None:
     executable = _fake_pixi(tmp_path)
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
     package = tmp_path / "package with spaces"
@@ -313,8 +310,9 @@ def test_local_package_is_added_by_pixi_and_reused(tmp_path: Path) -> None:
     first = manager.provision("example", spec).wait_for()
     second = manager.provision("example", spec).wait_for()
 
-    assert f"# local example-local-package[test] @ {package.resolve().as_uri()}" in first.pixi_manifest_path.read_text(
-        encoding="utf-8"
+    assert (
+        f'"example-local-package" = {{ path = "{package.resolve()}", editable = true, extras = ["test"] }}'
+        in first.pixi_manifest_path.read_text(encoding="utf-8")
     )
     assert first.generation_id == second.generation_id
 
@@ -339,8 +337,9 @@ def test_local_package_can_use_a_supplied_lock_without_modifying_it(tmp_path: Pa
     ).wait_for()
 
     assert environment.pixi_lock_path.read_bytes() == lock
-    assert f"# local locked-local @ {package.resolve().as_uri()}" in environment.pixi_manifest_path.read_text(
-        encoding="utf-8"
+    assert (
+        f'"locked-local" = {{ path = "{package.resolve()}", editable = true }}'
+        in environment.pixi_manifest_path.read_text(encoding="utf-8")
     )
 
 
@@ -742,6 +741,31 @@ def test_tampered_ready_artifact_is_not_reused(tmp_path: Path) -> None:
     first.pixi_manifest_path.write_text("tampered = true\n", encoding="utf-8")
 
     second = manager.provision("example", spec).wait_for()
+
+    assert second.generation_id != first.generation_id
+
+
+def test_local_environment_manifest_must_match_generated_recipe(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    package = tmp_path / "local-package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "local-package"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+    spec = EnvironmentSpec(local=(LocalPackage(package, editable=True),))
+    first = manager.provision("example", spec).wait_for()
+    manifest = first.pixi_manifest_path.read_bytes() + b"# unexpected manifest mutation\n"
+    first.pixi_manifest_path.write_bytes(manifest)
+    ready_path = first.path / ".wetlands" / "ready.json"
+    ready = json.loads(ready_path.read_text(encoding="utf-8"))
+    ready["manifest_sha256"] = hashlib.sha256(manifest).hexdigest()
+    ready_path.write_text(json.dumps(ready), encoding="utf-8")
+
+    with pytest.raises(ProvisioningError, match="different recipe or Pixi identity"):
+        manager.provision("example", spec).wait_for()
+    second = manager.provision("example", spec, replace_existing=True).wait_for()
 
     assert second.generation_id != first.generation_id
 

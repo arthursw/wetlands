@@ -31,9 +31,33 @@ _WINDOWS_RESERVED = {
 }
 _WINDOWS_INVALID_CHARACTERS = frozenset('<>:"|?*')
 _PORTABLE_EXTRA = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_FULL_GIT_COMMIT_SHA = re.compile(r"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})")
 MANAGED_DEBUGPY_VERSION = "1.8.20"
 MANAGED_RUNTIME_PYPI = (f"debugpy=={MANAGED_DEBUGPY_VERSION}",)
 _MANAGED_RUNTIME_PACKAGE_NAMES = frozenset({"debugpy"})
+
+
+def _parse_pinned_git_url(url: str) -> tuple[str, str]:
+    parsed_url = urllib.parse.urlsplit(url)
+    if parsed_url.username or parsed_url.password or parsed_url.query:
+        raise ValueError("PyPI direct URLs cannot contain credentials or query parameters")
+    if parsed_url.scheme != "git+https":
+        raise ValueError("PyPI Git dependencies must use git+https URLs")
+    if parsed_url.fragment:
+        raise ValueError("PyPI Git dependencies cannot contain URL fragments")
+    repository_path, separator, revision = parsed_url.path.rpartition("@")
+    if not separator or not repository_path or _FULL_GIT_COMMIT_SHA.fullmatch(revision) is None:
+        raise ValueError("PyPI Git dependencies must pin a full 40- or 64-character hexadecimal commit SHA after '@'")
+    repository_url = urllib.parse.urlunsplit(
+        (
+            "https",
+            parsed_url.netloc,
+            repository_path,
+            "",
+            "",
+        )
+    )
+    return repository_url, revision
 
 
 class LocalPackageValidationError(ValueError):
@@ -213,6 +237,8 @@ class EnvironmentSpec:
                 parsed_url = urllib.parse.urlsplit(requirement.url)
                 if parsed_url.username or parsed_url.password or parsed_url.query:
                     raise ValueError("PyPI direct URLs cannot contain credentials or query parameters")
+                if parsed_url.scheme.startswith("git+"):
+                    _parse_pinned_git_url(requirement.url)
             package = canonicalize_name(requirement.name)
             if package in _MANAGED_RUNTIME_PACKAGE_NAMES:
                 raise ValueError(f"PyPI package {requirement.name!r} is managed by the Wetlands worker runtime")
@@ -225,11 +251,19 @@ class EnvironmentSpec:
         local = tuple(self.local)
         if any(not isinstance(package, LocalPackage) for package in local):
             raise TypeError("local entries must be LocalPackage instances")
+        local_names: set[str] = set()
         for local_package in local:
             if local_package.distribution_name in _MANAGED_RUNTIME_PACKAGE_NAMES:
                 raise ValueError(
                     f"Local package {local_package.distribution_name!r} is managed by the Wetlands worker runtime"
                 )
+            if local_package.distribution_name in pypi_names:
+                raise ValueError(
+                    f"Local package {local_package.distribution_name!r} duplicates a declared PyPI dependency"
+                )
+            if local_package.distribution_name in local_names:
+                raise ValueError(f"Duplicate local package {local_package.distribution_name!r}")
+            local_names.add(local_package.distribution_name)
         post_install = tuple(self.post_install)
         if any(not isinstance(command, PostInstallCommand) for command in post_install):
             raise TypeError("post_install entries must be PostInstallCommand instances")

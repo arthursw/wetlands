@@ -57,6 +57,7 @@ from wetlands.specs import (
     EnvironmentSpec,
     PixiInfo,
     ProvisioningStage,
+    _parse_pinned_git_url,
     environment_name_key,
     validate_environment_name,
 )
@@ -64,6 +65,7 @@ from wetlands.specs import (
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
     from wetlands.managed_environment import ManagedEnvironment
+    from wetlands.specs import LocalPackage
 
 READY_SCHEMA_VERSION = 2
 OWNER_MARKER = ".wetlands-owned"
@@ -919,6 +921,17 @@ def _render_pypi_dependency(dependency: str) -> tuple[str, str]:
     if requirement.marker is not None:
         raise ValueError(f"PyPI environment markers are not supported in EnvironmentSpec: {dependency!r}")
     if requirement.url:
+        parsed_url = urllib.parse.urlsplit(requirement.url)
+        if parsed_url.scheme == "git+https":
+            repository_url, revision = _parse_pinned_git_url(requirement.url)
+            fields = [
+                f"git = {_toml_quote(repository_url)}",
+                f"rev = {_toml_quote(revision)}",
+            ]
+            if requirement.extras:
+                extras = ", ".join(_toml_quote(extra) for extra in sorted(requirement.extras))
+                fields.append(f"extras = [{extras}]")
+            return requirement.name, f"{{ {', '.join(fields)} }}"
         if requirement.extras:
             extras = ", ".join(_toml_quote(extra) for extra in sorted(requirement.extras))
             return requirement.name, f"{{ url = {_toml_quote(requirement.url)}, extras = [{extras}] }}"
@@ -928,6 +941,16 @@ def _render_pypi_dependency(dependency: str) -> tuple[str, str]:
         extras = ", ".join(_toml_quote(extra) for extra in sorted(requirement.extras))
         return requirement.name, f"{{ version = {_toml_quote(version)}, extras = [{extras}] }}"
     return requirement.name, _toml_quote(version)
+
+
+def _render_local_dependency(package: LocalPackage) -> str:
+    fields = [f"path = {_toml_quote(str(package.source))}"]
+    if package.editable:
+        fields.append("editable = true")
+    if package.extras:
+        extras = ", ".join(_toml_quote(extra) for extra in sorted(package.extras))
+        fields.append(f"extras = [{extras}]")
+    return f"{{ {', '.join(fields)} }}"
 
 
 def render_pixi_manifest(name: str, spec: EnvironmentSpec) -> bytes:
@@ -954,14 +977,19 @@ def render_pixi_manifest(name: str, spec: EnvironmentSpec) -> bytes:
         f"python = {_toml_quote(spec.python)}",
     ]
     for dependency in sorted(spec.conda):
-        package, constraint = _split_conda_dependency(dependency)
-        lines.append(f"{_toml_quote(package)} = {_toml_quote(constraint)}")
+        conda_package, constraint = _split_conda_dependency(dependency)
+        lines.append(f"{_toml_quote(conda_package)} = {_toml_quote(constraint)}")
     pypi_dependencies = (*spec.pypi, *MANAGED_RUNTIME_PYPI)
-    if pypi_dependencies:
+    if pypi_dependencies or spec.local:
         lines.extend(("", "[pypi-dependencies]"))
         for dependency in sorted(pypi_dependencies):
-            package, rendered = _render_pypi_dependency(dependency)
-            lines.append(f"{_toml_quote(package)} = {rendered}")
+            pypi_package, rendered = _render_pypi_dependency(dependency)
+            lines.append(f"{_toml_quote(pypi_package)} = {rendered}")
+        for local_package in sorted(
+            spec.local,
+            key=lambda item: item.distribution_name,
+        ):
+            lines.append(f"{_toml_quote(local_package.distribution_name)} = {_render_local_dependency(local_package)}")
     lines.append("")
     return "\n".join(lines).encode()
 
@@ -2046,7 +2074,7 @@ def provision_environment(
                 matches = (
                     ready.get("schema_version") == READY_SCHEMA_VERSION
                     and ready.get("recipe_hash") == spec.recipe_hash
-                    and (bool(spec.local) or ready.get("manifest_sha256") == generated_manifest_hash)
+                    and ready.get("manifest_sha256") == generated_manifest_hash
                     and ready.get("pixi_version") == pixi.version
                     and ready.get("pixi_executable") == str(pixi.executable)
                     and (supplied_lock_hash is None or ready.get("lock_sha256") == supplied_lock_hash)
@@ -2178,40 +2206,6 @@ def provision_environment(
                     for scheme, value in (manager.network or {}).items()
                 },
             }
-            for index, package in enumerate(spec.local):
-                current_stage = ProvisioningStage.LOCAL_INSTALL
-                requirement_name = package.distribution_name
-                if package.extras:
-                    requirement_name += f"[{','.join(package.extras)}]"
-                requirement = f"{requirement_name} @ {package.source.as_uri()}"
-                argv = [
-                    str(pixi.executable),
-                    "add",
-                    "--manifest-path",
-                    str(manifest_path),
-                    "--pypi",
-                    "--no-install",
-                ]
-                if spec.lock_bytes is not None:
-                    argv.append("--locked")
-                if package.editable:
-                    argv.append("--editable")
-                argv.append(requirement)
-                _assert_managed_target(
-                    manager.environments_root,
-                    target,
-                    require_marker=True,
-                    expected_identity=created_target_identity,
-                )
-                runner.run(
-                    ProvisioningStep(
-                        f"local-{index}",
-                        ProvisioningStage.LOCAL_INSTALL,
-                        tuple(argv),
-                        cwd=target,
-                        environment=pixi_environment,
-                    )
-                )
             install_argv = [
                 str(pixi.executable),
                 "install",
@@ -2249,9 +2243,13 @@ def provision_environment(
             operation._emit(
                 OperationEventKind.STEP,
                 (
-                    "Pixi installed the declared PyPI dependencies and managed worker runtime"
-                    if spec.pypi
-                    else "Pixi installed the managed worker runtime"
+                    "Pixi installed the declared Python dependencies, local packages, and managed worker runtime"
+                    if spec.local
+                    else (
+                        "Pixi installed the declared PyPI dependencies and managed worker runtime"
+                        if spec.pypi
+                        else "Pixi installed the managed worker runtime"
+                    )
                 ),
                 stage=ProvisioningStage.PYPI_INSTALL.value,
                 step_id="pixi-install",
