@@ -262,7 +262,10 @@ print(removed.name)
 Wetlands raises `EnvironmentNotFoundError` for a missing name and refuses to remove an unmanaged target or an environment with live workers.
 Close its worker pools first.
 Calling `cancel()` can stop removal while Wetlands is waiting or inspecting the target.
-Once Wetlands seals cancellation and begins destructive deletion, cancellation is refused and the operation completes the deletion instead of reporting a misleading canceled state.
+Once Wetlands seals cancellation and atomically detaches the environment into its internal quarantine, cancellation is refused and the operation completes instead of reporting a misleading canceled state.
+Completion means the original environment path is gone, cached handles are invalidated, and the name can be reused immediately.
+Wetlands reclaims the detached tree in the background, so disk space may be released after the removal operation completes.
+Interrupted or temporarily blocked reclamation remains durable and is retried by a later mutating manager operation.
 
 ## Close resources
 
@@ -284,6 +287,7 @@ with EnvironmentManager(root="wetlands") as manager:
 
 `execute_import()` and `execute_path()` are blocking conveniences around submission and `wait_for()`.
 
-Closing a manager first cancels and joins active preparation and provisioning operations, then attempts to close every known worker pool.
+Closing a manager first cancels and joins active preparation, provisioning, and removal operations, then attempts to close every known worker pool.
+Shutdown asks the background environment reclaimer to stop at a safe checkpoint but does not wait for all detached trees to be erased; unfinished reclamation is retried by a later manager.
 If any cleanup fails, `ManagerCloseError.errors` contains every collected failure.
 A later `close()` call retries pools that remain open, but a manager cannot be used again after shutdown begins.

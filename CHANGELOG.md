@@ -2,6 +2,12 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.3.0
+
+- Made managed-environment removal complete after an identity-safe atomic detach so the name is immediately reusable.
+- Added durable background disk reclamation with crash recovery, cross-process serialization, and fail-closed handling of malformed quarantine state.
+- Applied deferred reclamation to environment replacement and incomplete provisioning cleanup.
+
 ## 2.2.0
 
 - Fixed local-package and pinned Git source provisioning by materializing complete Pixi manifests before installation.

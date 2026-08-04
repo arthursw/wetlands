@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import wetlands._internal.environment_cleanup as cleanup_module
 import wetlands._internal.provisioning as provisioning_module
 from wetlands._internal import runtime_state
 from wetlands import (
@@ -483,6 +484,38 @@ def test_cancel_is_rejected_after_ready_publication_is_sealed(
     assert cancel_results == [False]
     assert operation.state is OperationState.COMPLETED
     assert manager.environment("example").generation_id == environment.generation_id
+
+
+def test_replacement_provisions_while_old_tree_is_reclaimed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    original = manager.provision("example", EnvironmentSpec(python="3.11")).wait_for()
+    entered = threading.Event()
+    release = threading.Event()
+    original_remove = cleanup_module._remove_target
+
+    def blocked_remove(*args, **kwargs) -> None:
+        entered.set()
+        assert release.wait(5)
+        original_remove(*args, **kwargs)
+
+    monkeypatch.setattr(cleanup_module, "_remove_target", blocked_remove)
+    replacement = manager.provision(
+        "example",
+        EnvironmentSpec(python="3.12"),
+        replace_existing=True,
+    )
+    assert entered.wait(2)
+    try:
+        rebuilt = replacement.wait_for(timeout=2)
+        assert rebuilt.generation_id != original.generation_id
+        assert rebuilt.path.is_dir()
+    finally:
+        release.set()
+    assert manager._environment_reclaimer.wait_idle(2)
 
 
 def test_cancel_while_waiting_for_shared_preparation(tmp_path: Path) -> None:

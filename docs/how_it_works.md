@@ -33,8 +33,19 @@ The ordered stages are:
 Provisioning and worker lifecycle operations share per-environment coordination.
 An environment is never published ready while provisioning is incomplete.
 
-Failures and cancellation stop the active process tree and remove the incomplete target.
+Failures and cancellation stop the active process tree and atomically detach the incomplete target from the managed-environment namespace.
 If the host crashes before cleanup, the next provisioning attempt treats missing ready metadata as incomplete and rebuilds.
+
+## Removal and disk reclamation
+
+Removal first proves Wetlands ownership, reconciles persistent-pool state, and refuses environments with live workers.
+It then writes a durable quarantine record and atomically renames the environment into a manager-owned sibling directory on the same filesystem.
+The rename is the logical removal commit point: the original name is absent and can be provisioned again without waiting for recursive deletion.
+
+A lazy background reclaimer serializes physical deletion and never follows symbolic links, Windows reparse points, or filesystem boundaries.
+The quarantine record stores the exact filesystem identity and a random token mirrored inside the target.
+If a host exits or deletion is temporarily blocked, another mutating manager operation discovers valid records and resumes reclamation.
+Malformed, unowned, linked, or identity-mismatched quarantine entries are left untouched and reported through logging.
 
 ## Workers
 

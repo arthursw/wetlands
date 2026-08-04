@@ -26,6 +26,17 @@ The ready metadata is written only after every preceding stage succeeds.
 Failure or cancellation terminates the active subprocess tree and removes the incomplete environment.
 After a host crash, the next attempt treats an environment without matching ready metadata as incomplete and rebuilds it.
 
+## Environment removal
+
+Logical removal and physical storage reclamation are separate phases.
+While holding the per-environment lifecycle gate, the manager proves ownership and worker liveness, persists a quarantine sidecar, and atomically renames the target into a manager-owned quarantine directory beside the environment root.
+The original name is reusable only after the rename and cache-epoch invalidation complete.
+
+One lazy reclaimer thread per manager scans and purges durable tombstones under a cross-process lock.
+The quarantine container, strict sidecar schema, random mirrored token, and exact filesystem identity authorize resumable deletion even when an interrupted purge has already removed the target's ordinary owner marker.
+Unknown or inconsistent state is never deleted automatically.
+Manager shutdown stops reclamation cooperatively rather than draining every tombstone, so a later mutating operation may resume the work.
+
 ## Execution connections
 
 Workers and controllers communicate through authenticated loopback `multiprocessing.connection` channels.
@@ -67,6 +78,8 @@ Operations and tasks adapt completion and event delivery to the caller's current
 
 Any new callback path must remain safe when invoked from a Wetlands background thread.
 Any new terminal path must complete mandatory process and transfer-resource cleanup before publishing its terminal state.
+Environment removal is terminal after its namespace detachment commits; recursive storage reclamation is explicitly deferred and does not emit events on the completed removal operation.
+If directory durability cannot be confirmed after the rename, Wetlands logs the condition and retains the recovery record instead of reporting a misleading pre-commit failure.
 
 ## Trust boundary
 

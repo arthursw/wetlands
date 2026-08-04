@@ -182,7 +182,12 @@ class CancelableFileLock:
                     self._file.seek(0)
                     msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
                     break
-                except Exception:
+                except OSError as error:
+                    winerror = getattr(error, "winerror", None)
+                    if (winerror is not None and winerror not in {33, 36}) or (
+                        winerror is None and error.errno not in {11, 13}
+                    ):
+                        raise
                     if self.operation is not None:
                         self.operation._emit(
                             OperationEventKind.STEP,
@@ -1760,7 +1765,12 @@ def _assert_managed_target(
     _revalidate_path(target, target_identity, description="managed environment target")
 
 
-def _safe_remove_tree(target: Path, *, expected_identity: _FileIdentity | None = None) -> None:
+def _safe_remove_tree(
+    target: Path,
+    *,
+    expected_identity: _FileIdentity | None = None,
+    stop_requested: Callable[[], bool] | None = None,
+) -> None:
     if _is_link_or_reparse(target) or not target.is_dir():
         raise RuntimeError(f"Refusing to recurse into linked or non-directory target: {target}")
     identity = _path_identity(target)
@@ -1768,6 +1778,8 @@ def _safe_remove_tree(target: Path, *, expected_identity: _FileIdentity | None =
         raise RuntimeError(f"Directory changed identity before removal: {target}")
     with os.scandir(target) as entries:
         for entry in entries:
+            if stop_requested is not None and stop_requested():
+                raise InterruptedError("Environment reclamation was paused")
             path = Path(entry.path)
             if _is_link_or_reparse(path):
                 try:
@@ -1778,7 +1790,11 @@ def _safe_remove_tree(target: Path, *, expected_identity: _FileIdentity | None =
                     os.rmdir(path)
             elif entry.is_dir(follow_symlinks=False):
                 child_identity = _path_identity(path)
-                _safe_remove_tree(path, expected_identity=child_identity)
+                _safe_remove_tree(
+                    path,
+                    expected_identity=child_identity,
+                    stop_requested=stop_requested,
+                )
             else:
                 before = _path_identity(path)
                 _revalidate_path(path, before, description="managed environment file")
@@ -1793,8 +1809,11 @@ def _remove_directory_contents_fd(
     root_device: int,
     *,
     guard: Callable[[], None],
+    stop_requested: Callable[[], bool] | None = None,
 ) -> None:
     for name in os.listdir(directory_fd):
+        if stop_requested is not None and stop_requested():
+            raise InterruptedError("Environment reclamation was paused")
         guard()
         metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
         if stat.S_ISDIR(metadata.st_mode):
@@ -1807,7 +1826,12 @@ def _remove_directory_contents_fd(
                     _file_identity(os.fstat(child_fd)),
                     description=f"directory {name!r}",
                 )
-                _remove_directory_contents_fd(child_fd, root_device, guard=guard)
+                _remove_directory_contents_fd(
+                    child_fd,
+                    root_device,
+                    guard=guard,
+                    stop_requested=stop_requested,
+                )
             finally:
                 os.close(child_fd)
             current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
@@ -1828,12 +1852,14 @@ def _remove_target_posix(
     target: Path,
     *,
     expected_identity: _FileIdentity | None = None,
+    require_marker: bool = True,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> None:
     with _open_posix_target(
         root,
         target,
         expected_identity=expected_identity,
-        require_marker=True,
+        require_marker=require_marker,
         revalidate_on_exit=False,
     ) as (root_fd, target_fd, root_identity, target_identity):
 
@@ -1851,6 +1877,7 @@ def _remove_target_posix(
             target_fd,
             os.fstat(target_fd).st_dev,
             guard=guard,
+            stop_requested=stop_requested,
         )
         guard()
         os.rmdir(target.name, dir_fd=root_fd)
@@ -1861,18 +1888,30 @@ def _remove_target(
     target: Path,
     *,
     expected_identity: _FileIdentity | None = None,
+    require_marker: bool = True,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> None:
     if os.name == "nt":
         _assert_managed_target(
             root,
             target,
-            require_marker=True,
+            require_marker=require_marker,
             expected_identity=expected_identity,
         )
         identity = _path_identity(target)
-        _safe_remove_tree(target, expected_identity=identity)
+        _safe_remove_tree(
+            target,
+            expected_identity=identity,
+            stop_requested=stop_requested,
+        )
     else:
-        _remove_target_posix(root, target, expected_identity=expected_identity)
+        _remove_target_posix(
+            root,
+            target,
+            expected_identity=expected_identity,
+            require_marker=require_marker,
+            stop_requested=stop_requested,
+        )
 
 
 def _remove_empty_target(
@@ -2035,6 +2074,11 @@ def _journal(manager: EnvironmentManager, operation: Operation[Any], payload: Ma
     return path
 
 
+def _raise_if_canceled(operation: Operation[Any]) -> None:
+    if operation.cancellation_requested:
+        raise OperationCanceled(operation.id)
+
+
 def provision_environment(
     manager: EnvironmentManager,
     operation: Operation[Any],
@@ -2133,7 +2177,12 @@ def provision_environment(
                         str(generation_id) if generation_id is not None else None,
                     )
                 current_stage = ProvisioningStage.INCOMPLETE_REMOVAL
-                _remove_target(manager.environments_root, target)
+                manager._quarantine_environment(
+                    target,
+                    operation_id=operation.id,
+                    before_commit=lambda: _raise_if_canceled(operation),
+                    lock_operation=operation,
+                )
             elif target_exists:
                 if not _target_has_valid_owner_marker(manager.environments_root, target):
                     raise UnmanagedTargetError(name, target)
@@ -2156,11 +2205,16 @@ def provision_environment(
                 current_stage = ProvisioningStage.INCOMPLETE_REMOVAL
                 operation._emit(
                     OperationEventKind.CLEANUP,
-                    f"Removing incomplete environment {name!r}",
+                    f"Detaching incomplete environment {name!r}",
                     stage=ProvisioningStage.INCOMPLETE_REMOVAL.value,
                     environment=name,
                 )
-                _remove_target(manager.environments_root, target)
+                manager._quarantine_environment(
+                    target,
+                    operation_id=operation.id,
+                    before_commit=lambda: _raise_if_canceled(operation),
+                    lock_operation=operation,
+                )
             _discard_matching_journals(manager, target)
 
             created_target_identity = _create_managed_target(
@@ -2427,9 +2481,9 @@ def provision_environment(
                 )
                 try:
                     if ownership_published:
-                        _remove_target(
-                            manager.environments_root,
+                        manager._quarantine_environment(
                             target,
+                            operation_id=operation.id,
                             expected_identity=created_target_identity,
                         )
                     else:

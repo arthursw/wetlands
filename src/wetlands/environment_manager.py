@@ -21,6 +21,11 @@ from wetlands._internal.environment_management import (
     discover_managed_environments,
     remove_managed_environment,
 )
+from wetlands._internal.environment_cleanup import (
+    EnvironmentReclaimer,
+    QuarantinedEnvironment,
+    quarantine_environment,
+)
 from wetlands._internal.value_codec import reconcile_shared_memory_leases
 from wetlands.debugging import DebugEndpoint, RunningWorker
 from wetlands.environment_info import ManagedEnvironmentInfo
@@ -82,6 +87,7 @@ class EnvironmentManager:
         self._active_manager_work = 0
         self._closed = False
         self._close_complete = False
+        self._environment_reclaimer = EnvironmentReclaimer(self)
 
     @property
     def root(self) -> Path:
@@ -114,6 +120,7 @@ class EnvironmentManager:
             lambda: self._prepare_sync(operation),
             thread_name=f"wetlands-prepare-{operation.id[:8]}",
         )
+        self._environment_reclaimer.wake()
         return operation
 
     def _prepare_sync(self, operation: Operation[Any]) -> PixiInfo:
@@ -175,6 +182,7 @@ class EnvironmentManager:
             run,
             thread_name=f"wetlands-provision-{normalized_name}-{operation.id[:8]}",
         )
+        self._environment_reclaimer.wake()
         return operation
 
     def environment(self, name: str) -> ManagedEnvironment:
@@ -218,7 +226,28 @@ class EnvironmentManager:
             lambda: remove_managed_environment(self, operation, normalized_name),
             thread_name=f"wetlands-remove-{normalized_name}-{operation.id[:8]}",
         )
+        self._environment_reclaimer.wake()
         return operation
+
+    def _quarantine_environment(
+        self,
+        target: Path,
+        *,
+        operation_id: str,
+        expected_identity: tuple[int, int, int] | None = None,
+        before_commit: Callable[[], None] | None = None,
+        lock_operation: Operation[Any] | None = None,
+    ) -> QuarantinedEnvironment:
+        record = quarantine_environment(
+            self,
+            target,
+            operation_id=operation_id,
+            expected_identity=expected_identity,
+            before_commit=before_commit,
+            lock_operation=lock_operation,
+        )
+        self._environment_reclaimer.enqueue(record)
+        return record
 
     def _running_worker_entries(self, name: str) -> list[dict[str, Any]]:
         environment = self.environment(name)
@@ -351,6 +380,7 @@ class EnvironmentManager:
             with self._lifecycle_condition:
                 remaining_pool = any(environment._has_open_pools() for environment in environments)
                 self._close_complete = not remaining_pool
+            self._environment_reclaimer.close()
             if errors:
                 raise ManagerCloseError(tuple(errors))
 

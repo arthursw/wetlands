@@ -1,6 +1,6 @@
 [project]
 name = "wetlands"
-version = "2.2.0"
+version = "2.3.0"
 description = "Create isolated Pixi environments and run Python functions without dependency conflicts."
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"

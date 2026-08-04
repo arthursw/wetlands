@@ -8,15 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 from wetlands._internal import runtime_state
 from wetlands._internal.provisioning import (
-    OWNER_MARKER,
     _discard_matching_journals,
     _find_name_alias,
     _is_link_or_reparse,
     _path_identity,
     _read_ready,
-    _remove_target,
     _target_has_valid_owner_marker,
-    _write_target_file,
     environment_lifecycle_gate,
 )
 from wetlands.environment_info import ManagedEnvironmentInfo, ManagedEnvironmentState
@@ -40,6 +37,11 @@ if TYPE_CHECKING:
 _INSPECTION_STAGE = "target_inspection"
 _REMOVAL_STAGE = "environment_removal"
 _CLEANUP_STAGE = "cleanup"
+
+
+def _seal_removal(operation: RemovalOperation[Any]) -> None:
+    if not operation._seal_cancellation():
+        raise OperationCanceled(operation.id)
 
 
 def _info_from_target(name: str, target: Path, ready: dict[str, Any] | None) -> ManagedEnvironmentInfo:
@@ -98,28 +100,6 @@ def _cached_environment_in_use(manager: EnvironmentManager, name: str) -> str | 
     if environment is None or environment.name != name or not environment._has_open_pools():
         return None
     return environment.generation_id
-
-
-def _restore_owner_marker_after_failed_removal(
-    manager: EnvironmentManager,
-    operation: RemovalOperation[ManagedEnvironmentInfo],
-    target: Path,
-    target_identity: Any,
-) -> str | None:
-    try:
-        if not os.path.lexists(target):
-            return None
-        _write_target_file(
-            manager.environments_root,
-            target,
-            OWNER_MARKER,
-            f"removal-recovery:{operation.id}\n".encode(),
-            expected_identity=target_identity,
-            require_marker=False,
-        )
-    except BaseException as error:
-        return str(error) or type(error).__name__
-    return None
 
 
 def remove_managed_environment(
@@ -183,36 +163,31 @@ def remove_managed_environment(
             )
             runtime_state.remove_workers_for_env(manager.root, name)
             _discard_matching_journals(manager, target)
-            if not operation._seal_cancellation():
-                raise OperationCanceled(operation.id)
             stage = _REMOVAL_STAGE
             operation._emit(
                 OperationEventKind.CLEANUP,
-                f"Removing managed environment {name!r}",
+                f"Detaching managed environment {name!r}",
                 stage=_REMOVAL_STAGE,
                 environment=name,
             )
             target_identity = _path_identity(target)
             try:
-                _remove_target(
-                    manager.environments_root,
+                manager._quarantine_environment(
                     target,
+                    operation_id=operation.id,
                     expected_identity=target_identity,
+                    before_commit=lambda: _seal_removal(operation),
+                    lock_operation=operation,
                 )
+            except OperationCanceled:
+                raise
             except BaseException as error:
-                marker_error = _restore_owner_marker_after_failed_removal(
-                    manager,
-                    operation,
-                    target,
-                    target_identity,
-                )
                 raise RemovalError(
                     OperationFailure(
                         operation_id=operation.id,
                         stage=stage,
                         environment=name,
                         message=f"Could not remove managed environment {name!r}: {error}",
-                        cleanup_error=marker_error,
                     )
                 ) from error
 
@@ -220,6 +195,12 @@ def remove_managed_environment(
             with manager._environment_lock:
                 manager._environment_epochs[key] = manager._environment_epochs.get(key, 0) + 1
                 manager._environments.pop(key, None)
+            operation._emit(
+                OperationEventKind.CLEANUP,
+                f"Queued removed environment {name!r} for background disk reclamation",
+                stage=_REMOVAL_STAGE,
+                environment=name,
+            )
             return info
         except (OperationCanceled, RemovalError, EnvironmentInUseError, EnvironmentNotFoundError, UnmanagedTargetError):
             raise
