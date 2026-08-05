@@ -5,6 +5,7 @@ All notable changes to Wetlands are documented here.
 ## 2.3.1
 
 - Fixed a POSIX process-group exit race that could report worker cleanup failure after graceful shutdown had already completed.
+- Made operation state transitions and event publication atomic so late listeners and replay iterators cannot miss terminal events.
 
 ## 2.3.0
 
