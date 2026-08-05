@@ -2,6 +2,10 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.3.1
+
+- Fixed a POSIX process-group exit race that could report worker cleanup failure after graceful shutdown had already completed.
+
 ## 2.3.0
 
 - Made managed-environment removal complete after an identity-safe atomic detach so the name is immediately reusable.
