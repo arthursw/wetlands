@@ -130,6 +130,10 @@ class Operation(Generic[T]):
         self._cancel_callback: Callable[[], None] | None = None
         self._listeners: list[tuple[Callable[[OperationEvent], None], Callable[[OperationEvent], None]]] = []
         self._events: deque[OperationEvent] = deque(maxlen=self._EVENT_HISTORY_LIMIT)
+        self._pending_notifications: deque[
+            tuple[OperationEvent, tuple[Callable[[OperationEvent], None], ...], threading.Event]
+        ] = deque()
+        self._notification_thread_id: int | None = None
         self._sequence = 0
         self._lock = threading.RLock()
         self._done = threading.Event()
@@ -156,11 +160,16 @@ class Operation(Generic[T]):
             first_request = not self._cancellation_requested
             self._cancellation_requested = True
             callback = self._cancel_callback
-        if first_request:
-            self._emit(
-                OperationEventKind.CANCELLATION_REQUESTED,
-                "Cancellation requested",
+            publication = (
+                self._queue_event_locked(
+                    OperationEventKind.CANCELLATION_REQUESTED,
+                    "Cancellation requested",
+                )
+                if first_request
+                else None
             )
+        if publication is not None:
+            self._finish_event_publication(publication)
         if callback is not None:
             try:
                 callback()
@@ -288,27 +297,83 @@ class Operation(Generic[T]):
         environment: str | None = None,
     ) -> OperationEvent:
         with self._lock:
-            self._sequence += 1
-            event = OperationEvent(
-                sequence=self._sequence,
-                timestamp=time.time(),
-                operation_id=self._id,
-                environment=environment if environment is not None else self._environment,
-                kind=kind,
-                state=self._state,
+            publication = self._queue_event_locked(
+                kind,
+                message,
                 stage=stage,
-                message=message,
                 step_id=step_id,
                 stream=stream,
                 line=line,
                 current=current,
                 maximum=maximum,
+                environment=environment,
             )
-            self._events.append(event)
-            listeners = tuple(receiver for _, receiver in self._listeners)
-        for listener in listeners:
-            self._notify_listener(listener, event)
+        return self._finish_event_publication(publication)
+
+    def _queue_event_locked(
+        self,
+        kind: OperationEventKind,
+        message: str,
+        *,
+        stage: str | None = None,
+        step_id: str | None = None,
+        stream: str | None = None,
+        line: str | None = None,
+        current: int | None = None,
+        maximum: int | None = None,
+        environment: str | None = None,
+    ) -> tuple[OperationEvent, threading.Event, bool, bool]:
+        self._sequence += 1
+        event = OperationEvent(
+            sequence=self._sequence,
+            timestamp=time.time(),
+            operation_id=self._id,
+            environment=environment if environment is not None else self._environment,
+            kind=kind,
+            state=self._state,
+            stage=stage,
+            message=message,
+            step_id=step_id,
+            stream=stream,
+            line=line,
+            current=current,
+            maximum=maximum,
+        )
+        self._events.append(event)
+        listeners = tuple(receiver for _, receiver in self._listeners)
+        delivered = threading.Event()
+        self._pending_notifications.append((event, listeners, delivered))
+
+        current_thread_id = threading.get_ident()
+        should_drain = self._notification_thread_id is None
+        if should_drain:
+            self._notification_thread_id = current_thread_id
+        should_wait = not should_drain and self._notification_thread_id != current_thread_id
+        return event, delivered, should_drain, should_wait
+
+    def _finish_event_publication(
+        self,
+        publication: tuple[OperationEvent, threading.Event, bool, bool],
+    ) -> OperationEvent:
+        event, delivered, should_drain, should_wait = publication
+        if should_drain:
+            self._drain_notifications()
+        elif should_wait:
+            delivered.wait()
         return event
+
+    def _drain_notifications(self) -> None:
+        while True:
+            with self._lock:
+                if not self._pending_notifications:
+                    self._notification_thread_id = None
+                    return
+                event, listeners, delivered = self._pending_notifications.popleft()
+            try:
+                for listener in listeners:
+                    self._notify_listener(listener, event)
+            finally:
+                delivered.set()
 
     def _notify_listener(self, listener: Callable[[OperationEvent], None], event: OperationEvent) -> None:
         try:
@@ -370,7 +435,8 @@ class Operation(Generic[T]):
             if self._state is not OperationState.PENDING:
                 return
             self._state = OperationState.RUNNING
-        self._emit(OperationEventKind.STATE, "Operation started")
+            publication = self._queue_event_locked(OperationEventKind.STATE, "Operation started")
+        self._finish_event_publication(publication)
 
     def _set_completed(self, result: T) -> None:
         with self._lock:
@@ -378,7 +444,8 @@ class Operation(Generic[T]):
                 return
             self._result = result
             self._state = OperationState.COMPLETED
-        self._emit(OperationEventKind.STATE, "Operation completed")
+            publication = self._queue_event_locked(OperationEventKind.STATE, "Operation completed")
+        self._finish_event_publication(publication)
         self._done.set()
 
     def _set_failed(self, error: BaseException) -> None:
@@ -387,7 +454,8 @@ class Operation(Generic[T]):
                 return
             self._exception = error
             self._state = OperationState.FAILED
-        self._emit(OperationEventKind.STATE, str(error) or type(error).__name__)
+            publication = self._queue_event_locked(OperationEventKind.STATE, str(error) or type(error).__name__)
+        self._finish_event_publication(publication)
         self._done.set()
 
     def _set_canceled(self, error: OperationCanceled | None = None) -> None:
@@ -396,7 +464,8 @@ class Operation(Generic[T]):
                 return
             self._exception = error or OperationCanceled(self.id)
             self._state = OperationState.CANCELED
-        self._emit(OperationEventKind.STATE, "Operation canceled")
+            publication = self._queue_event_locked(OperationEventKind.STATE, "Operation canceled")
+        self._finish_event_publication(publication)
         self._done.set()
 
 

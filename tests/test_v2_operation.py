@@ -206,3 +206,143 @@ def test_listener_replay_precedes_events_emitted_concurrently() -> None:
 
     assert not listening.is_alive()
     assert received == ["old", "new"]
+
+
+def test_terminal_state_and_event_are_published_atomically(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner_started = threading.Event()
+    allow_runner_to_finish = threading.Event()
+    publication_started = threading.Event()
+    allow_publication = threading.Event()
+    sync_observer_attempted = threading.Event()
+    async_observer_attempted = threading.Event()
+    sync_observer_finished = threading.Event()
+    async_observer_finished = threading.Event()
+    operation: Operation[int] = Operation()
+
+    def runner() -> int:
+        runner_started.set()
+        assert allow_runner_to_finish.wait(timeout=1)
+        return 1
+
+    operation._start_runner(runner, thread_name="test-atomic-terminal-operation")
+    assert runner_started.wait(timeout=1)
+
+    underlying_lock = operation._lock
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.current_thread().name == "test-sync-terminal-observer":
+                sync_observer_attempted.set()
+            elif threading.current_thread().name == "test-async-terminal-observer":
+                async_observer_attempted.set()
+            return underlying_lock.__enter__()
+
+        def __exit__(self, *args):
+            return underlying_lock.__exit__(*args)
+
+    monkeypatch.setattr(operation, "_lock", ObservedLock())
+    queue_event = operation._queue_event_locked
+
+    def pause_terminal_publication(kind, message, **kwargs):
+        if message == "Operation completed":
+            publication_started.set()
+            assert allow_publication.wait(timeout=1)
+        return queue_event(kind, message, **kwargs)
+
+    monkeypatch.setattr(operation, "_queue_event_locked", pause_terminal_publication)
+    allow_runner_to_finish.set()
+    assert publication_started.wait(timeout=1)
+
+    sync_events = []
+
+    def observe_synchronously() -> None:
+        operation.listen(sync_events.append)
+        sync_observer_finished.set()
+
+    async_events = []
+    async_errors: list[BaseException] = []
+
+    def observe_asynchronously() -> None:
+        async def collect() -> None:
+            async_events.extend([event async for event in operation.events()])
+
+        try:
+            asyncio.run(asyncio.wait_for(collect(), timeout=1))
+        except BaseException as error:
+            async_errors.append(error)
+        finally:
+            async_observer_finished.set()
+
+    sync_observer = threading.Thread(target=observe_synchronously, name="test-sync-terminal-observer")
+    async_observer = threading.Thread(target=observe_asynchronously, name="test-async-terminal-observer")
+    sync_observer.start()
+    async_observer.start()
+
+    assert sync_observer_attempted.wait(timeout=1)
+    assert async_observer_attempted.wait(timeout=1)
+    assert not sync_observer_finished.is_set()
+    assert not async_observer_finished.is_set()
+
+    allow_publication.set()
+    sync_observer.join(timeout=1)
+    async_observer.join(timeout=1)
+
+    assert not sync_observer.is_alive()
+    assert not async_observer.is_alive()
+    assert not async_errors
+    assert sync_events[-1].state is OperationState.COMPLETED
+    assert async_events[-1].state is OperationState.COMPLETED
+    assert operation.wait_for(timeout=1) == 1
+
+
+def test_cancellation_notification_precedes_terminal_notification(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner_started = threading.Event()
+    allow_runner_to_finish = threading.Event()
+    cancellation_delivery_started = threading.Event()
+    allow_cancellation_delivery = threading.Event()
+    terminal_event_queued = threading.Event()
+    terminal_event_delivered = threading.Event()
+    operation: Operation[None] = Operation()
+    received: list[OperationEventKind] = []
+
+    def listener(event) -> None:
+        if event.kind is OperationEventKind.CANCELLATION_REQUESTED:
+            cancellation_delivery_started.set()
+            assert allow_cancellation_delivery.wait(timeout=1)
+        received.append(event.kind)
+        if event.state.terminal:
+            terminal_event_delivered.set()
+
+    operation.listen(listener)
+
+    queue_event = operation._queue_event_locked
+
+    def observe_terminal_publication(kind, message, **kwargs):
+        publication = queue_event(kind, message, **kwargs)
+        if publication[0].state.terminal:
+            terminal_event_queued.set()
+        return publication
+
+    monkeypatch.setattr(operation, "_queue_event_locked", observe_terminal_publication)
+
+    def runner() -> None:
+        runner_started.set()
+        assert allow_runner_to_finish.wait(timeout=1)
+
+    operation._start_runner(runner, thread_name="test-cancellation-event-order-operation")
+    assert runner_started.wait(timeout=1)
+
+    canceling = threading.Thread(target=operation.cancel, name="test-cancellation-event-order-cancel")
+    canceling.start()
+    assert cancellation_delivery_started.wait(timeout=1)
+    allow_runner_to_finish.set()
+    assert terminal_event_queued.wait(timeout=1)
+    assert not terminal_event_delivered.is_set()
+
+    allow_cancellation_delivery.set()
+    canceling.join(timeout=1)
+
+    assert not canceling.is_alive()
+    with pytest.raises(OperationCanceled):
+        operation.wait_for(timeout=1)
+    assert received[-2:] == [OperationEventKind.CANCELLATION_REQUESTED, OperationEventKind.STATE]
