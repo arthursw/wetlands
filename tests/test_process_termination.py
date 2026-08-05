@@ -168,6 +168,79 @@ def test_surviving_process_group_is_reported_after_term_and_kill() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_term_error_is_ignored_when_group_disappeared() -> None:
+    process = MagicMock()
+    with (
+        patch(
+            "wetlands._internal.process_termination._posix_group_exists",
+            side_effect=[True, False],
+        ),
+        patch(
+            "wetlands._internal.process_termination.os.killpg",
+            side_effect=OSError("group disappeared"),
+        ) as kill_group,
+    ):
+        _terminate_posix_group(42, grace=0.01, process=process)
+
+    kill_group.assert_called_once_with(42, signal.SIGTERM)
+    process.wait.assert_called_once_with(timeout=0)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_term_error_is_reported_when_group_remains_unverified() -> None:
+    with (
+        patch(
+            "wetlands._internal.process_termination._posix_group_exists",
+            return_value=True,
+        ),
+        patch(
+            "wetlands._internal.process_termination._wait_for_posix_group_exit",
+            return_value=False,
+        ) as wait_for_exit,
+        patch(
+            "wetlands._internal.process_termination.os.killpg",
+            side_effect=OSError("permission denied"),
+        ),
+        pytest.raises(
+            ProcessTerminationError,
+            match="Could not terminate worker process group 42",
+        ),
+    ):
+        _terminate_posix_group(42, grace=0.01)
+
+    wait_for_exit.assert_called_once_with(42, process=None, timeout=0)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_kill_error_is_ignored_when_group_disappeared() -> None:
+    process = MagicMock()
+    with (
+        patch(
+            "wetlands._internal.process_termination._posix_group_exists",
+            return_value=True,
+        ),
+        patch(
+            "wetlands._internal.process_termination._wait_for_posix_group_exit",
+            side_effect=[False, True],
+        ) as wait_for_exit,
+        patch(
+            "wetlands._internal.process_termination.os.killpg",
+            side_effect=[None, OSError("group disappeared")],
+        ) as kill_group,
+    ):
+        _terminate_posix_group(42, grace=0.01, process=process)
+
+    assert kill_group.call_args_list == [
+        call(42, signal.SIGTERM),
+        call(42, signal.SIGKILL),
+    ]
+    assert wait_for_exit.call_args_list == [
+        call(42, process=process, timeout=0.01),
+        call(42, process=process, timeout=0),
+    ]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
 def test_attached_group_leader_is_reaped_when_owned() -> None:
     with (
         patch("wetlands._internal.process_termination.os.waitpid", return_value=(42, 0)) as waitpid,

@@ -224,6 +224,12 @@ def _terminate_posix_group(
         _reap(process)
         return
     except OSError as error:
+        if _wait_for_posix_group_exit(
+            process_group_id,
+            process=process,
+            timeout=0,
+        ):
+            return
         raise ProcessTerminationError(f"Could not terminate worker process group {process_group_id}") from error
 
     if _wait_for_posix_group_exit(process_group_id, process=process, timeout=grace):
@@ -235,6 +241,12 @@ def _terminate_posix_group(
         _reap(process)
         return
     except OSError as error:
+        if _wait_for_posix_group_exit(
+            process_group_id,
+            process=process,
+            timeout=0,
+        ):
+            return
         raise ProcessTerminationError(f"Could not force-kill worker process group {process_group_id}") from error
 
     if _wait_for_posix_group_exit(process_group_id, process=process, timeout=grace):
