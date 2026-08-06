@@ -38,7 +38,7 @@ MANAGED_RUNTIME_PYPI = (f"debugpy=={MANAGED_DEBUGPY_VERSION}",)
 _MANAGED_RUNTIME_PACKAGE_NAMES = frozenset({"debugpy"})
 _LOCAL_PACKAGE_IDENTITY_PREFIX = "sha256:"
 _LOCAL_PACKAGE_IDENTITY_PATTERN = re.compile(r"sha256:[0-9a-fA-F]{64}")
-_LOCAL_PACKAGE_HASH_DOMAIN = b"wetlands-local-package-v1\0"
+_LOCAL_PACKAGE_HASH_DOMAIN = b"wetlands-local-package-v2\0"
 
 
 def _parse_pinned_git_url(url: str) -> tuple[str, str]:
@@ -195,11 +195,13 @@ def _local_package_tree_identity(source: Path, destination: Path | None = None) 
 
     digest = hashlib.sha256(_LOCAL_PACKAGE_HASH_DOMAIN)
     for entry in entries:
-        if entry.is_directory:
-            continue
         relative_bytes = entry.relative.encode("utf-8")
+        digest.update(b"d" if entry.is_directory else b"f")
         digest.update(len(relative_bytes).to_bytes(8, "big"))
         digest.update(relative_bytes)
+        if entry.is_directory:
+            continue
+        digest.update(stat.S_IMODE(entry.signature[2]).to_bytes(4, "big"))
         digest.update(entry.signature[3].to_bytes(8, "big"))
         destination_stream: BinaryIO | None = None
         try:
@@ -225,9 +227,10 @@ def _local_package_tree_identity(source: Path, destination: Path | None = None) 
 def local_package_content_identity(source: str | os.PathLike[str]) -> str:
     """Return a deterministic content identity for an immutable local package tree.
 
-    Only regular files and directories are accepted. Paths and file contents are
-    hashed in a canonical order; links, special files, portable path collisions,
-    and concurrent source mutation are rejected.
+    Only regular files and directories are accepted. Directory entries, file
+    paths, file modes, and file contents are hashed in a canonical order; links,
+    special files, portable path collisions, and concurrent source mutation are
+    rejected.
     """
 
     path = Path(os.path.abspath(Path(source).expanduser()))

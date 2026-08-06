@@ -328,6 +328,44 @@ def test_local_package_content_identity_changes_with_path_or_content(tmp_path: P
     assert len({original, with_file, changed_content, changed_path}) == 4
 
 
+def test_local_package_content_identity_includes_empty_directories(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text('[project]\nname = "example"\n', encoding="utf-8")
+    without_empty_directory = local_package_content_identity(package)
+
+    empty = package / "empty"
+    empty.mkdir()
+    with_empty_directory = local_package_content_identity(package)
+    empty.rmdir()
+
+    assert with_empty_directory != without_empty_directory
+    assert local_package_content_identity(package) == without_empty_directory
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX executable modes are unavailable")
+def test_local_package_content_identity_and_copy_include_file_modes(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    pyproject = package / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "example"\n', encoding="utf-8")
+    pyproject.chmod(0o644)
+    regular_identity = local_package_content_identity(package)
+
+    (package / "empty").mkdir()
+    directory_identity = local_package_content_identity(package)
+    pyproject.chmod(0o755)
+    executable_identity = local_package_content_identity(package)
+    destination = tmp_path / "copy"
+    specs_module._copy_local_package_content(package, destination, executable_identity)
+
+    assert directory_identity != regular_identity
+    assert executable_identity != directory_identity
+    assert local_package_content_identity(destination) == executable_identity
+    assert (destination / "empty").is_dir()
+    assert (destination / "pyproject.toml").stat().st_mode & 0o777 == 0o755
+
+
 def test_content_identified_local_package_rejects_editable_or_invalid_identity(tmp_path: Path) -> None:
     package = tmp_path / "package"
     package.mkdir()
