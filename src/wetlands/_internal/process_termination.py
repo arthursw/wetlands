@@ -307,7 +307,14 @@ def _posix_group_is_terminated(process_group_id: int) -> bool:
         if process.info.get("status") != psutil.STATUS_ZOMBIE:
             # None and any unknown status fail closed once membership is known.
             return False
-    return found_member
+    if found_member:
+        return True
+
+    # The group may have disappeared after the existence probe but before
+    # process enumeration completed. Recheck the kernel-visible group instead
+    # of turning that ordinary exit race into an unverified-cleanup failure.
+    # If the group still exists without enumerable members, fail closed.
+    return not _posix_group_exists(process_group_id)
 
 
 def _posix_group_members(process_group_id: int) -> list[int]:
@@ -374,8 +381,25 @@ def _terminate_windows_tree(
             survivor.kill()
     _, survivors = psutil.wait_procs(survivors, timeout=max(0.0, grace))
     _reap(process)
+    survivors = _windows_processes_still_running(survivors)
     if survivors:
         survivor_pids = sorted(target.pid for target in survivors)
         raise ProcessTerminationError(
             f"Worker process tree rooted at PID {pid} survived forced termination; surviving PIDs: {survivor_pids}"
         )
+
+
+def _windows_processes_still_running(processes: list[psutil.Process]) -> list[psutil.Process]:
+    """Recheck processes returned by ``wait_procs`` at its timeout boundary."""
+    survivors: list[psutil.Process] = []
+    for process in processes:
+        try:
+            process.wait(timeout=0)
+        except psutil.TimeoutExpired:
+            survivors.append(process)
+        except psutil.AccessDenied:
+            # Lack of permission cannot prove termination.
+            survivors.append(process)
+        except psutil.NoSuchProcess:
+            pass
+    return survivors

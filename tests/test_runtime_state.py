@@ -396,6 +396,38 @@ def test_access_denied_preserves_worker_record_and_fails_closed(tmp_path):
     assert runtime_state.load_workers(tmp_path) == before
 
 
+def test_dead_nonpersistent_worker_record_is_reconciled_atomically(tmp_path):
+    runtime_state.record_worker(
+        tmp_path,
+        env_name="cellpose",
+        env_path=tmp_path / "environments" / "cellpose",
+        worker_index=0,
+        pid=os.getpid(),
+        port=5001,
+        worker_id="pool-a-worker-0",
+        management_port=5101,
+        persistent=False,
+        pool_id="pool-a",
+        **_WORKER_IDENTITY,
+    )
+
+    with patch.object(
+        runtime_state,
+        "_recorded_process_tree_state",
+        return_value=runtime_state._RecordedTreeState.DEAD,
+    ):
+        assert (
+            runtime_state.live_workers_for_env(
+                tmp_path,
+                "cellpose",
+                include_nonpersistent=True,
+            )
+            == []
+        )
+
+    assert runtime_state.load_workers(tmp_path)["workers"] == {}
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
 def test_reconciliation_kills_descendants_after_worker_leader_exits(tmp_path):
     child_marker = tmp_path / "child.pid"

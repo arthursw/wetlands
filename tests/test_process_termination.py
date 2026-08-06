@@ -17,6 +17,7 @@ from wetlands._internal.process_termination import (
     _terminate_posix_group,
     _terminate_windows_tree,
     _wait_for_posix_group_exit,
+    _windows_processes_still_running,
     capture_process_identity,
     terminate_attached_process_tree,
     terminate_launched_process_tree,
@@ -311,6 +312,38 @@ def test_attached_group_with_live_member_is_not_reported_terminated() -> None:
         assert not _wait_for_posix_group_exit(42, process=None, timeout=0)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_group_exit_during_member_enumeration_is_reported_terminated() -> None:
+    with (
+        patch(
+            "wetlands._internal.process_termination._posix_group_exists",
+            side_effect=[True, False],
+        ) as group_exists,
+        patch(
+            "wetlands._internal.process_termination.psutil.process_iter",
+            return_value=[],
+        ),
+    ):
+        assert _wait_for_posix_group_exit(42, process=None, timeout=0)
+
+    assert group_exists.call_count == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_uninspectable_existing_group_is_not_reported_terminated() -> None:
+    with (
+        patch(
+            "wetlands._internal.process_termination._posix_group_exists",
+            return_value=True,
+        ),
+        patch(
+            "wetlands._internal.process_termination.psutil.process_iter",
+            return_value=[],
+        ),
+    ):
+        assert not _wait_for_posix_group_exit(42, process=None, timeout=0)
+
+
 def test_windows_launched_worker_uses_job_aware_tree_termination() -> None:
     process = MagicMock()
     process.pid = 42
@@ -380,3 +413,20 @@ def test_windows_job_is_closed_even_when_worker_leader_already_exited() -> None:
         )
 
     close_job.assert_called_once_with(process)
+
+
+def test_windows_timeout_boundary_recheck_discards_just_exited_process() -> None:
+    process = MagicMock(spec=psutil.Process)
+    process.wait.return_value = 0
+
+    assert _windows_processes_still_running([process]) == []
+
+    process.wait.assert_called_once_with(timeout=0)
+
+
+@pytest.mark.parametrize("error", [psutil.TimeoutExpired(0), psutil.AccessDenied(42)])
+def test_windows_timeout_boundary_recheck_preserves_unverified_process(error) -> None:
+    process = MagicMock(spec=psutil.Process)
+    process.wait.side_effect = error
+
+    assert _windows_processes_still_running([process]) == [process]

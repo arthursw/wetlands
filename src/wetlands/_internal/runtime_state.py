@@ -679,47 +679,46 @@ def live_workers_for_env(
     expected_identity: dict[str, object] | None = None,
     include_nonpersistent: bool = False,
 ) -> list[dict[str, Any]]:
-    registry = load_workers(root)
-    persistent_pool = registry["persistent_pools"].get(env_name)
-    workers = []
-    for key, entry in list(registry["workers"].items()):
-        if entry.get("env_name") != env_name:
-            continue
-        if not include_nonpersistent and not entry.get("persistent", False):
-            continue
-        pid = entry.get("pid")
-        process_started_at = entry.get("process_started_at")
-        if not isinstance(pid, int) or not isinstance(process_started_at, (int, float)):
-            raise RuntimeRegistryError(f"Worker registry entry {key!r} has incomplete process identity")
-        tree_state = _recorded_process_tree_state(entry)
-        if tree_state is _RecordedTreeState.DEAD:
-            pool_id = entry.get("pool_id")
-            remove_worker(
-                root,
-                env_name,
-                int(entry.get("worker_index", -1)),
-                str(pool_id) if pool_id is not None else None,
-            )
-            continue
-        if tree_state is _RecordedTreeState.GROUP_ALIVE and not include_nonpersistent:
-            raise WorkerIdentityUnavailableError(
-                f"Recorded worker PID {pid} exited while its process group still has descendants"
-            )
-        if expected_identity is not None:
-            mismatches = {
-                field: (expected, entry.get(field))
-                for field, expected in expected_identity.items()
-                if entry.get(field) != expected
-            }
-            if mismatches:
-                details = ", ".join(
-                    f"{field}: expected {expected!r}, got {actual!r}"
-                    for field, (expected, actual) in sorted(mismatches.items())
+    with root_lock(root):
+        registry = load_workers(root)
+        persistent_pool = registry["persistent_pools"].get(env_name)
+        workers = []
+        changed = False
+        for key, entry in list(registry["workers"].items()):
+            if entry.get("env_name") != env_name:
+                continue
+            if not include_nonpersistent and not entry.get("persistent", False):
+                continue
+            pid = entry.get("pid")
+            process_started_at = entry.get("process_started_at")
+            if not isinstance(pid, int) or not isinstance(process_started_at, (int, float)):
+                raise RuntimeRegistryError(f"Worker registry entry {key!r} has incomplete process identity")
+            tree_state = _recorded_process_tree_state(entry)
+            if tree_state is _RecordedTreeState.DEAD:
+                registry["workers"].pop(key)
+                changed = True
+                continue
+            if tree_state is _RecordedTreeState.GROUP_ALIVE and not include_nonpersistent:
+                raise WorkerIdentityUnavailableError(
+                    f"Recorded worker PID {pid} exited while its process group still has descendants"
                 )
-                raise RuntimeError(f"Persistent worker identity mismatch ({details})")
-        entry = dict(entry)
-        entry["_key"] = key
-        workers.append(entry)
+            if expected_identity is not None:
+                mismatches = {
+                    field: (expected, entry.get(field))
+                    for field, expected in expected_identity.items()
+                    if entry.get(field) != expected
+                }
+                if mismatches:
+                    details = ", ".join(
+                        f"{field}: expected {expected!r}, got {actual!r}"
+                        for field, (expected, actual) in sorted(mismatches.items())
+                    )
+                    raise RuntimeError(f"Persistent worker identity mismatch ({details})")
+            worker = dict(entry)
+            worker["_key"] = key
+            workers.append(worker)
+        if changed:
+            atomic_write_json(state_dir(root) / WORKERS_FILE, registry)
     if not include_nonpersistent:
         if not isinstance(persistent_pool, dict) or not persistent_pool.get("commissioned"):
             return []

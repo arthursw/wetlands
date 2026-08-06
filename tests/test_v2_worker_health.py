@@ -170,6 +170,7 @@ def test_pool_close_is_retryable_until_worker_termination_is_verified(tmp_path):
     assert environment._workers == []
     remove.assert_called_once()
     assert terminate.call_count == 2
+    assert environment._fatal_error is None
 
 
 @patch("wetlands.external_environment.terminate_launched_process_tree")

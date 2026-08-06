@@ -2,6 +2,11 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.3.2
+
+- Fixed process-exit races at POSIX group enumeration and Windows wait timeout boundaries so completed shutdown is not reported as unverified.
+- Made dead worker-record reconciliation atomic and kept failed worker-pool close attempts retryable without retaining a stale fatal state after successful cleanup.
+
 ## 2.3.1
 
 - Fixed a POSIX process-group exit race that could report worker cleanup failure after graceful shutdown had already completed.

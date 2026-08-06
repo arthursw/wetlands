@@ -2363,6 +2363,8 @@ class ExternalEnvironment:
             with self._lock:
                 self._fatal_error = close_error
             raise close_error
+        with self._lock:
+            self._fatal_error = None
 
     @synchronized
     def detach(self) -> None:
