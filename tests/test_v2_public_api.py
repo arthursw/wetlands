@@ -28,6 +28,7 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "InvalidStateError",
         "LocalPackage",
         "LocalPackageValidationError",
+        "local_package_content_identity",
         "ManagedEnvironment",
         "ManagedEnvironmentInfo",
         "ManagedEnvironmentState",

@@ -39,6 +39,7 @@ from wetlands.specs import (
     LocalPackage,
     LocalPackageValidationError,
     PostInstallCommand,
+    local_package_content_identity,
 )
 from wetlands.task import (
     ExecutionEvent,
@@ -71,6 +72,7 @@ __all__ = [
     "ExecutionTask",
     "LocalPackage",
     "LocalPackageValidationError",
+    "local_package_content_identity",
     "ManagedEnvironment",
     "ManagedEnvironmentInfo",
     "ManagedEnvironmentState",

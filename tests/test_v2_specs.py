@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+
+import wetlands.specs as specs_module
 
 from wetlands.specs import (
     EnvironmentSpec,
@@ -10,6 +13,7 @@ from wetlands.specs import (
     LocalPackageValidationError,
     MANAGED_DEBUGPY_VERSION,
     PostInstallCommand,
+    local_package_content_identity,
     validate_environment_name,
 )
 from wetlands._internal.provisioning import render_pixi_manifest
@@ -284,6 +288,113 @@ def test_local_package_discovers_and_canonicalizes_distribution_name(tmp_path: P
     )
     renamed_recipe = EnvironmentSpec(local=(LocalPackage(package),)).recipe_hash
     assert renamed_recipe != original_recipe
+
+
+def test_local_package_content_identity_is_relocatable_and_recipe_stable(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for package in (first, second):
+        (package / "nested").mkdir(parents=True)
+        (package / "pyproject.toml").write_text(
+            '[project]\nname = "example"\nversion = "1.0"\n',
+            encoding="utf-8",
+        )
+        (package / "nested" / "data.txt").write_text("content", encoding="utf-8")
+
+    identity = local_package_content_identity(first)
+    first_package = LocalPackage(first, content_identity=identity)
+    second_package = LocalPackage(second, content_identity=identity.upper().replace("SHA256", "sha256"))
+
+    assert identity.startswith("sha256:")
+    assert local_package_content_identity(second) == identity
+    assert EnvironmentSpec(local=(first_package,)).recipe_hash == EnvironmentSpec(local=(second_package,)).recipe_hash
+    assert "source" not in EnvironmentSpec(local=(first_package,)).normalized()["local"][0]
+
+
+def test_local_package_content_identity_changes_with_path_or_content(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text('[project]\nname = "example"\n', encoding="utf-8")
+    original = local_package_content_identity(package)
+
+    (package / "data.txt").write_text("first", encoding="utf-8")
+    with_file = local_package_content_identity(package)
+    (package / "data.txt").write_text("second", encoding="utf-8")
+    changed_content = local_package_content_identity(package)
+    (package / "renamed.txt").write_bytes((package / "data.txt").read_bytes())
+    (package / "data.txt").unlink()
+    changed_path = local_package_content_identity(package)
+
+    assert len({original, with_file, changed_content, changed_path}) == 4
+
+
+def test_content_identified_local_package_rejects_editable_or_invalid_identity(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text('[project]\nname = "example"\n', encoding="utf-8")
+    identity = local_package_content_identity(package)
+
+    with pytest.raises(ValueError, match="cannot be editable"):
+        LocalPackage(package, editable=True, content_identity=identity)
+    with pytest.raises(ValueError, match="sha256"):
+        LocalPackage(package, content_identity="not-a-digest")
+
+
+def test_local_package_content_identity_rejects_links_and_special_files(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    link = package / "escape"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("Symbolic links are not available")
+
+    with pytest.raises(LocalPackageValidationError, match="links or reparse points"):
+        local_package_content_identity(package)
+
+    link.unlink()
+    if hasattr(__import__("os"), "mkfifo"):
+        import os
+
+        fifo = package / "pipe"
+        os.mkfifo(fifo)
+        with pytest.raises(LocalPackageValidationError, match="special files"):
+            local_package_content_identity(package)
+
+
+def test_local_package_content_identity_rejects_case_collisions(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    first = package / "entry"
+    second = package / "ENTRY"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    if first.samefile(second):
+        pytest.skip("The test filesystem is case-insensitive")
+
+    with pytest.raises(LocalPackageValidationError, match="case-colliding"):
+        local_package_content_identity(package)
+
+
+def test_local_package_content_identity_rejects_mutation_during_scan(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    source = package / "data.txt"
+    source.write_text("first", encoding="utf-8")
+    original_read = specs_module._read_local_file
+
+    def mutate_after_read(*args, **kwargs):
+        result = original_read(*args, **kwargs)
+        source.write_text("changed", encoding="utf-8")
+        return result
+
+    with (
+        patch.object(specs_module, "_read_local_file", side_effect=mutate_after_read),
+        pytest.raises(LocalPackageValidationError, match="changed"),
+    ):
+        local_package_content_identity(package)
 
 
 @pytest.mark.parametrize(

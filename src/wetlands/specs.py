@@ -7,11 +7,12 @@ import enum
 import json
 import os
 import re
+import stat
 import unicodedata
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import InvalidName, canonicalize_name
@@ -35,6 +36,9 @@ _FULL_GIT_COMMIT_SHA = re.compile(r"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})")
 MANAGED_DEBUGPY_VERSION = "1.8.20"
 MANAGED_RUNTIME_PYPI = (f"debugpy=={MANAGED_DEBUGPY_VERSION}",)
 _MANAGED_RUNTIME_PACKAGE_NAMES = frozenset({"debugpy"})
+_LOCAL_PACKAGE_IDENTITY_PREFIX = "sha256:"
+_LOCAL_PACKAGE_IDENTITY_PATTERN = re.compile(r"sha256:[0-9a-fA-F]{64}")
+_LOCAL_PACKAGE_HASH_DOMAIN = b"wetlands-local-package-v1\0"
 
 
 def _parse_pinned_git_url(url: str) -> tuple[str, str]:
@@ -62,6 +66,172 @@ def _parse_pinned_git_url(url: str) -> tuple[str, str]:
 
 class LocalPackageValidationError(ValueError):
     """A local package cannot be represented as a deterministic Pixi requirement."""
+
+
+@dataclass(frozen=True)
+class _LocalTreeEntry:
+    relative: str
+    is_directory: bool
+    signature: tuple[int, int, int, int, int, int]
+
+
+def _metadata_signature(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _is_link_or_reparse(metadata: os.stat_result) -> bool:
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+
+
+def _local_tree_entries(source: Path) -> tuple[tuple[int, int, int, int, int, int], tuple[_LocalTreeEntry, ...]]:
+    try:
+        root_metadata = source.lstat()
+    except OSError as error:
+        raise LocalPackageValidationError(f"Could not inspect local package source {source}: {error}") from error
+    if _is_link_or_reparse(root_metadata) or not stat.S_ISDIR(root_metadata.st_mode):
+        raise LocalPackageValidationError(f"Local package source must be an unlinked directory: {source}")
+
+    entries: list[_LocalTreeEntry] = []
+    portable_names: dict[str, str] = {}
+
+    def visit(directory: Path) -> None:
+        try:
+            children = tuple(os.scandir(directory))
+        except OSError as error:
+            raise LocalPackageValidationError(f"Could not inspect local package directory {directory}: {error}") from error
+        for child in sorted(children, key=lambda item: item.name):
+            path = Path(child.path)
+            try:
+                metadata = child.stat(follow_symlinks=False)
+                relative = path.relative_to(source).as_posix()
+                relative.encode("utf-8")
+            except (OSError, UnicodeError, ValueError) as error:
+                raise LocalPackageValidationError(f"Could not safely identify local package entry {path}: {error}") from error
+            if relative in {"", ".", ".."} or relative.startswith("../"):
+                raise LocalPackageValidationError(f"Local package entry escapes its source directory: {path}")
+            portable_key = unicodedata.normalize("NFC", relative).casefold()
+            collision = portable_names.get(portable_key)
+            if collision is not None and collision != relative:
+                raise LocalPackageValidationError(
+                    f"Local package contains case-colliding paths {collision!r} and {relative!r}"
+                )
+            portable_names[portable_key] = relative
+            if _is_link_or_reparse(metadata):
+                raise LocalPackageValidationError(f"Local package cannot contain links or reparse points: {relative}")
+            if stat.S_ISDIR(metadata.st_mode):
+                is_directory = True
+            elif stat.S_ISREG(metadata.st_mode):
+                is_directory = False
+            else:
+                raise LocalPackageValidationError(f"Local package cannot contain special files: {relative}")
+            entries.append(
+                _LocalTreeEntry(
+                    relative=relative,
+                    is_directory=is_directory,
+                    signature=_metadata_signature(metadata),
+                )
+            )
+            if is_directory:
+                visit(path)
+
+    visit(source)
+    return _metadata_signature(root_metadata), tuple(sorted(entries, key=lambda item: item.relative))
+
+
+def _read_local_file(source: Path, entry: _LocalTreeEntry, destination: BinaryIO | None) -> bytes:
+    path = source / Path(entry.relative)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise LocalPackageValidationError(f"Could not safely open local package file {entry.relative!r}: {error}") from error
+    digest = hashlib.sha256()
+    try:
+        if _metadata_signature(os.fstat(descriptor)) != entry.signature:
+            raise LocalPackageValidationError(f"Local package file changed during inspection: {entry.relative}")
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            if destination is not None:
+                destination.write(chunk)
+        if _metadata_signature(os.fstat(descriptor)) != entry.signature:
+            raise LocalPackageValidationError(f"Local package file changed while it was read: {entry.relative}")
+    finally:
+        os.close(descriptor)
+    try:
+        after = path.lstat()
+    except OSError as error:
+        raise LocalPackageValidationError(f"Local package file disappeared during inspection: {entry.relative}") from error
+    if _is_link_or_reparse(after) or _metadata_signature(after) != entry.signature:
+        raise LocalPackageValidationError(f"Local package file changed while it was read: {entry.relative}")
+    return digest.digest()
+
+
+def _local_package_tree_identity(source: Path, destination: Path | None = None) -> str:
+    root_signature, entries = _local_tree_entries(source)
+    if destination is not None:
+        destination.mkdir()
+        for entry in entries:
+            if entry.is_directory:
+                (destination / Path(entry.relative)).mkdir()
+
+    digest = hashlib.sha256(_LOCAL_PACKAGE_HASH_DOMAIN)
+    for entry in entries:
+        if entry.is_directory:
+            continue
+        relative_bytes = entry.relative.encode("utf-8")
+        digest.update(len(relative_bytes).to_bytes(8, "big"))
+        digest.update(relative_bytes)
+        digest.update(entry.signature[3].to_bytes(8, "big"))
+        destination_stream: BinaryIO | None = None
+        try:
+            if destination is not None:
+                destination_path = destination / Path(entry.relative)
+                destination_stream = destination_path.open("xb")
+            digest.update(_read_local_file(source, entry, destination_stream))
+        finally:
+            if destination_stream is not None:
+                destination_stream.close()
+        if destination is not None:
+            (destination / Path(entry.relative)).chmod(stat.S_IMODE(entry.signature[2]))
+
+    final_root_signature, final_entries = _local_tree_entries(source)
+    if final_root_signature != root_signature or final_entries != entries:
+        raise LocalPackageValidationError("Local package source changed while its content identity was computed")
+    identity = f"{_LOCAL_PACKAGE_IDENTITY_PREFIX}{digest.hexdigest()}"
+    if destination is not None and local_package_content_identity(destination) != identity:
+        raise LocalPackageValidationError("Copied local package content does not match its source identity")
+    return identity
+
+
+def local_package_content_identity(source: str | os.PathLike[str]) -> str:
+    """Return a deterministic content identity for an immutable local package tree.
+
+    Only regular files and directories are accepted. Paths and file contents are
+    hashed in a canonical order; links, special files, portable path collisions,
+    and concurrent source mutation are rejected.
+    """
+
+    path = Path(os.path.abspath(Path(source).expanduser()))
+    return _local_package_tree_identity(path)
+
+
+def _copy_local_package_content(source: Path, destination: Path, expected_identity: str) -> None:
+    actual_identity = _local_package_tree_identity(source, destination)
+    if actual_identity != expected_identity:
+        raise LocalPackageValidationError(
+            f"Local package content identity changed: expected {expected_identity}, found {actual_identity}"
+        )
 
 
 class ProvisioningStage(enum.Enum):
@@ -132,6 +302,7 @@ class LocalPackage:
     source: Path
     editable: bool = False
     extras: tuple[str, ...] = ()
+    content_identity: str | None = None
     distribution_name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -159,6 +330,13 @@ class LocalPackage:
             ) from error
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "distribution_name", distribution_name)
+        content_identity = self.content_identity
+        if content_identity is not None:
+            if not isinstance(content_identity, str) or _LOCAL_PACKAGE_IDENTITY_PATTERN.fullmatch(content_identity) is None:
+                raise ValueError("Local package content_identity must be 'sha256:' followed by 64 hexadecimal digits")
+            if self.editable:
+                raise ValueError("A content-identified local package cannot be editable")
+            object.__setattr__(self, "content_identity", content_identity.lower())
         if isinstance(self.extras, str):
             raise TypeError("Local package extras must be a sequence of names, not a string")
         extras = tuple(str(extra) for extra in self.extras)
@@ -297,7 +475,11 @@ class EnvironmentSpec:
             "channels": list(self.channels),
             "local": [
                 {
-                    "source": str(package.source),
+                    **(
+                        {"content_identity": package.content_identity}
+                        if package.content_identity is not None
+                        else {"source": str(package.source)}
+                    ),
                     "distribution_name": package.distribution_name,
                     "editable": package.editable,
                     "extras": list(package.extras),
