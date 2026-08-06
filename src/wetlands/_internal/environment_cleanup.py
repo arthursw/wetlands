@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -694,13 +695,19 @@ class EnvironmentReclaimer:
                     raise
                 time.sleep(0.05 * (attempt + 1))
 
-    def close(self) -> None:
+    def close(self, timeout: float | None = 0.25) -> bool:
+        """Request shutdown and report whether the reclaimer stopped in time."""
+
+        if timeout is not None and (type(timeout) not in {int, float} or not math.isfinite(timeout) or timeout < 0):
+            raise ValueError("timeout must be a finite non-negative number or None")
         with self._condition:
             self._stop = True
             self._condition.notify_all()
             thread = self._thread
         if thread is not None:
-            thread.join(timeout=0.25)
+            thread.join(timeout=timeout)
+            return not thread.is_alive()
+        return True
 
     def wait_idle(self, timeout: float = 5.0) -> bool:
         deadline = time.monotonic() + timeout

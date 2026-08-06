@@ -16,6 +16,15 @@ class ManagerCloseError(RuntimeError):
         super().__init__(f"EnvironmentManager cleanup did not complete: {details}")
 
 
+class ManagerCloseTimeoutError(TimeoutError):
+    """A manager shutdown phase exceeded its shared close deadline."""
+
+    def __init__(self, phase: str, timeout: float) -> None:
+        self.phase = phase
+        self.timeout = timeout
+        super().__init__(f"EnvironmentManager close timed out during {phase!r} after {timeout} seconds")
+
+
 class EnvironmentInUseError(RuntimeError):
     """A managed environment cannot be replaced while its workers are alive."""
 
@@ -119,6 +128,7 @@ __all__ = [
     "EnvironmentNotFoundError",
     "EnvironmentRecipeConflictError",
     "ManagerCloseError",
+    "ManagerCloseTimeoutError",
     "UnmanagedTargetError",
     "WorkerStartError",
 ]

@@ -4,19 +4,27 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from wetlands._internal import runtime_state
 from wetlands._internal.provisioning import _read_ready, environment_lifecycle_gate
 from wetlands.external_environment import ExternalEnvironment, _validate_worker_environments
-from wetlands.lifecycle import EnvironmentGenerationChangedError, ManagerCloseError
+from wetlands.lifecycle import EnvironmentGenerationChangedError, ManagerCloseError, ManagerCloseTimeoutError
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
 from wetlands.task import ExecutionTask
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
+
+
+@dataclass
+class _PoolCloseAttempt:
+    done: threading.Event = field(default_factory=threading.Event)
+    error: BaseException | None = None
 
 
 class ManagedEnvironment:
@@ -38,6 +46,7 @@ class ManagedEnvironment:
         self._path = path.resolve()
         self._metadata = dict(metadata)
         self._pools: list[WorkerPool] = []
+        self._pool_close_attempts: dict[int, _PoolCloseAttempt] = {}
         self._lock = threading.RLock()
 
     @classmethod
@@ -167,15 +176,49 @@ class ManagedEnvironment:
         if errors:
             raise ManagerCloseError(errors)
 
-    def _close_pools(self) -> tuple[BaseException, ...]:
+    def _close_pool(self, pool: WorkerPool, attempt: _PoolCloseAttempt) -> None:
+        try:
+            pool.close()
+        except BaseException as error:
+            attempt.error = error
+        finally:
+            attempt.done.set()
+
+    def _close_pools(
+        self,
+        *,
+        deadline: float | None = None,
+        timeout: float | None = None,
+    ) -> tuple[BaseException, ...]:
         with self._lock:
-            pools = tuple(self._pools)
+            attempts: list[tuple[WorkerPool, _PoolCloseAttempt]] = []
+            for pool in self._pools:
+                if pool._closed:
+                    continue
+                key = id(pool)
+                attempt = self._pool_close_attempts.get(key)
+                if attempt is None:
+                    attempt = _PoolCloseAttempt()
+                    self._pool_close_attempts[key] = attempt
+                    threading.Thread(
+                        target=self._close_pool,
+                        args=(pool, attempt),
+                        name=f"wetlands-pool-close-{self.name}",
+                        daemon=True,
+                    ).start()
+                attempts.append((pool, attempt))
         errors: list[BaseException] = []
-        for pool in pools:
-            try:
-                pool.close()
-            except BaseException as error:
-                errors.append(error)
+        for pool, attempt in attempts:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            if not attempt.done.wait(remaining):
+                assert timeout is not None
+                errors.append(ManagerCloseTimeoutError(f"worker pools for {self.name}", timeout))
+                continue
+            with self._lock:
+                if self._pool_close_attempts.get(id(pool)) is attempt:
+                    self._pool_close_attempts.pop(id(pool), None)
+            if attempt.error is not None:
+                errors.append(attempt.error)
         return tuple(errors)
 
     def _has_open_pools(self) -> bool:

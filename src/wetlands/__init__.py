@@ -13,6 +13,7 @@ from wetlands.lifecycle import (
     EnvironmentNotFoundError,
     EnvironmentRecipeConflictError,
     ManagerCloseError,
+    ManagerCloseTimeoutError,
     UnmanagedTargetError,
     WorkerStartError,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "ManagedEnvironmentInfo",
     "ManagedEnvironmentState",
     "ManagerCloseError",
+    "ManagerCloseTimeoutError",
     "InvalidStateError",
     "Operation",
     "OperationCanceled",

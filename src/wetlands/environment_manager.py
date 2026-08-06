@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,7 +30,7 @@ from wetlands._internal.environment_cleanup import (
 from wetlands._internal.value_codec import reconcile_shared_memory_leases
 from wetlands.debugging import DebugEndpoint, RunningWorker
 from wetlands.environment_info import ManagedEnvironmentInfo
-from wetlands.lifecycle import ManagerCloseError
+from wetlands.lifecycle import ManagerCloseError, ManagerCloseTimeoutError
 from wetlands.managed_environment import ManagedEnvironment
 from wetlands.operation import (
     Operation,
@@ -358,14 +359,22 @@ class EnvironmentManager:
             )
             return endpoint
 
-    def close(self) -> None:
+    def close(self, *, timeout: float | None = None) -> None:
         """Cancel active operations and close pools using bounded process cleanup.
 
         Failed pool cleanup is reported with :class:`ManagerCloseError`; a later
         call retries pools whose cleanup did not complete.
         """
+        if timeout is not None and (type(timeout) not in {int, float} or not math.isfinite(timeout) or timeout < 0):
+            raise ValueError("timeout must be a finite non-negative number or None")
+        normalized_timeout = None if timeout is None else float(timeout)
+        deadline = None if normalized_timeout is None else time.monotonic() + normalized_timeout
 
-        with self._close_lock:
+        lock_timeout = -1 if deadline is None else max(0.0, deadline - time.monotonic())
+        if not self._close_lock.acquire(timeout=lock_timeout):
+            assert normalized_timeout is not None
+            raise ManagerCloseError((ManagerCloseTimeoutError("close serialization", normalized_timeout),))
+        try:
             with self._lifecycle_condition:
                 if self._close_complete:
                     return
@@ -380,32 +389,60 @@ class EnvironmentManager:
             errors: list[BaseException] = []
             for operation in operations:
                 operation.cancel()
+            lifecycle_ready = True
             for operation in operations:
                 try:
-                    operation.wait_for()
+                    remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+                    operation.wait_for(remaining)
                 except OperationCanceled:
                     pass
+                except TimeoutError:
+                    assert normalized_timeout is not None
+                    errors.append(ManagerCloseTimeoutError("active operations", normalized_timeout))
+                    lifecycle_ready = False
+                    break
                 except BaseException as error:
                     errors.append(error)
 
-            with self._lifecycle_condition:
-                while self._active_manager_work:
-                    self._lifecycle_condition.wait()
+            if lifecycle_ready:
+                with self._lifecycle_condition:
+                    while self._active_manager_work:
+                        remaining = None if deadline is None else deadline - time.monotonic()
+                        if remaining is not None and remaining <= 0:
+                            assert normalized_timeout is not None
+                            errors.append(ManagerCloseTimeoutError("manager work", normalized_timeout))
+                            lifecycle_ready = False
+                            break
+                        self._lifecycle_condition.wait(remaining)
 
             # Provisioning publishes its ManagedEnvironment before it reaches a
             # terminal state, so taking this snapshot after joining operations
             # cannot miss an environment that completed concurrently with close.
-            with self._environment_lock:
-                environments = tuple(self._environments.values())
-            for environment in environments:
-                errors.extend(environment._close_pools())
+            environments: tuple[ManagedEnvironment, ...] = ()
+            if lifecycle_ready:
+                with self._environment_lock:
+                    environments = tuple(self._environments.values())
+                for environment in environments:
+                    errors.extend(
+                        environment._close_pools(
+                            deadline=deadline,
+                            timeout=normalized_timeout,
+                        )
+                    )
 
             with self._lifecycle_condition:
                 remaining_pool = any(environment._has_open_pools() for environment in environments)
-                self._close_complete = not remaining_pool
-            self._environment_reclaimer.close()
+            reclaimer_timeout = None if deadline is None else max(0.0, deadline - time.monotonic())
+            reclaimer_closed = self._environment_reclaimer.close(timeout=reclaimer_timeout)
+            if not reclaimer_closed:
+                assert normalized_timeout is not None
+                errors.append(ManagerCloseTimeoutError("environment reclaimer", normalized_timeout))
+            with self._lifecycle_condition:
+                self._close_complete = lifecycle_ready and not remaining_pool and reclaimer_closed
             if errors:
                 raise ManagerCloseError(tuple(errors))
+        finally:
+            self._close_lock.release()
 
     def _ensure_open(self) -> None:
         with self._lifecycle_condition:

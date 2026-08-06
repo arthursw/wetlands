@@ -33,6 +33,7 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "ManagedEnvironmentInfo",
         "ManagedEnvironmentState",
         "ManagerCloseError",
+        "ManagerCloseTimeoutError",
         "Operation",
         "OperationCanceled",
         "OperationError",
@@ -73,6 +74,14 @@ def test_manager_constructor_has_no_manager_selection_or_legacy_paths() -> None:
         "termination_grace",
     }
     assert not hasattr(wetlands.EnvironmentManager, "create")
+
+
+def test_manager_close_exposes_one_keyword_only_total_timeout() -> None:
+    parameters = inspect.signature(wetlands.EnvironmentManager.close).parameters
+
+    assert tuple(parameters) == ("self", "timeout")
+    assert parameters["timeout"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameters["timeout"].default is None
     assert not hasattr(wetlands.EnvironmentManager, "install")
     assert not hasattr(wetlands.EnvironmentManager, "load")
     assert not hasattr(wetlands.EnvironmentManager, "execute_commands")

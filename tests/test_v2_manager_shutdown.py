@@ -11,7 +11,7 @@ import pytest
 import wetlands.environment_manager as manager_module
 import wetlands.managed_environment as managed_module
 from wetlands.environment_manager import EnvironmentManager
-from wetlands.lifecycle import ManagerCloseError
+from wetlands.lifecycle import ManagerCloseError, ManagerCloseTimeoutError
 from wetlands.managed_environment import ManagedEnvironment
 from wetlands.operation import OperationCanceled, OperationEventKind, OperationState
 from wetlands.specs import EnvironmentSpec
@@ -117,7 +117,7 @@ def test_close_rejects_operation_runner_listener_without_closing_manager(
 def test_close_aggregates_active_operation_failure(monkeypatch, tmp_path: Path) -> None:
     started = threading.Event()
 
-    def provision(manager, operation, name, spec, replace_existing):
+    def provision(manager, operation, name, spec, replace_existing, on_mutation_started):
         started.set()
         while not operation.cancellation_requested:
             time.sleep(0.01)
@@ -153,7 +153,7 @@ def test_close_snapshots_environments_after_provisioning_finishes(monkeypatch, t
 
     environment._pools.append(Pool())
 
-    def provision(manager, operation, name, spec, replace_existing):
+    def provision(manager, operation, name, spec, replace_existing, on_mutation_started):
         started.set()
         assert release.wait(2)
         return environment
@@ -203,14 +203,150 @@ def test_close_attempts_every_pool_and_retries_incomplete_cleanup(tmp_path: Path
         manager.close()
 
     assert caught.value.errors == (first_error, second_error)
-    assert first.calls == second.calls == already_clean.calls == 1
+    assert first.calls == second.calls == 1
+    assert already_clean.calls == 0
 
     manager.close()
 
     assert first._closed and second._closed
-    assert first.calls == second.calls == already_clean.calls == 2
+    assert first.calls == second.calls == 2
+    assert already_clean.calls == 0
     manager.close()
-    assert first.calls == second.calls == already_clean.calls == 2
+    assert first.calls == second.calls == 2
+    assert already_clean.calls == 0
+
+
+@pytest.mark.parametrize(
+    "timeout",
+    [-1, float("nan"), float("inf"), float("-inf"), True, "1"],
+)
+def test_close_rejects_invalid_timeout(tmp_path: Path, timeout) -> None:
+    manager = EnvironmentManager(tmp_path)
+
+    with pytest.raises(ValueError, match="finite non-negative"):
+        manager.close(timeout=timeout)
+
+    manager.close()
+
+
+def test_close_timeout_is_one_deadline_for_active_operations(monkeypatch, tmp_path: Path) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def prepare(manager: EnvironmentManager, operation) -> Any:
+        started.set()
+        assert release.wait(2)
+        raise OperationCanceled(operation.id)
+
+    monkeypatch.setattr(manager_module, "reconcile_shared_memory_leases", lambda root: None)
+    monkeypatch.setattr(manager_module, "prepare_pixi", prepare)
+    manager = EnvironmentManager(tmp_path)
+    operation = manager.prepare()
+    assert started.wait(2)
+
+    before = time.monotonic()
+    with pytest.raises(ManagerCloseError) as caught:
+        manager.close(timeout=0.05)
+    elapsed = time.monotonic() - before
+
+    assert elapsed < 0.5
+    assert operation.cancellation_requested
+    timeout_error = next(error for error in caught.value.errors if isinstance(error, ManagerCloseTimeoutError))
+    assert timeout_error.phase == "active operations"
+    assert timeout_error.timeout == 0.05
+
+    release.set()
+    manager.close(timeout=1)
+
+
+def test_close_timeout_bounds_manager_work(tmp_path: Path) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    manager = EnvironmentManager(tmp_path)
+
+    def hold_manager_work() -> None:
+        with manager._manager_work():
+            entered.set()
+            assert release.wait(2)
+
+    work = threading.Thread(target=hold_manager_work)
+    work.start()
+    assert entered.wait(2)
+
+    before = time.monotonic()
+    with pytest.raises(ManagerCloseError) as caught:
+        manager.close(timeout=0.05)
+    assert time.monotonic() - before < 0.5
+    assert any(
+        isinstance(error, ManagerCloseTimeoutError) and error.phase == "manager work" for error in caught.value.errors
+    )
+
+    release.set()
+    work.join(2)
+    manager.close(timeout=1)
+
+
+def test_close_timeout_does_not_duplicate_pool_cleanup(tmp_path: Path) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    manager = EnvironmentManager(tmp_path)
+    environment = _environment(manager)
+
+    class Pool:
+        _closed = False
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def close(self) -> None:
+            self.calls += 1
+            entered.set()
+            assert release.wait(2)
+            self._closed = True
+
+    pool = Pool()
+    environment._pools.append(pool)
+    manager._environments["example"] = environment
+
+    with pytest.raises(ManagerCloseError) as first:
+        manager.close(timeout=0.05)
+    assert entered.is_set()
+    assert pool.calls == 1
+    assert any(isinstance(error, ManagerCloseTimeoutError) for error in first.value.errors)
+
+    with pytest.raises(ManagerCloseError):
+        manager.close(timeout=0.05)
+    assert pool.calls == 1
+
+    release.set()
+    manager.close(timeout=1)
+    assert pool.calls == 1
+    assert pool._closed
+
+
+def test_close_passes_only_remaining_deadline_to_reclaimer(monkeypatch, tmp_path: Path) -> None:
+    manager = EnvironmentManager(tmp_path)
+    received: list[float | None] = []
+
+    def timed_out_close(timeout: float | None = 0.25) -> bool:
+        received.append(timeout)
+        return False
+
+    monkeypatch.setattr(manager._environment_reclaimer, "close", timed_out_close)
+
+    with pytest.raises(ManagerCloseError) as caught:
+        manager.close(timeout=0.05)
+
+    assert len(received) == 1
+    assert received[0] is not None
+    assert 0 <= received[0] <= 0.05
+    assert any(
+        isinstance(error, ManagerCloseTimeoutError) and error.phase == "environment reclaimer"
+        for error in caught.value.errors
+    )
+
+    monkeypatch.setattr(manager._environment_reclaimer, "close", lambda timeout=0.25: True)
+    manager.close(timeout=1)
 
 
 def test_close_waits_for_worker_start_registration_and_rejects_new_work(
