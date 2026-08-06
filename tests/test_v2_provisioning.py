@@ -67,6 +67,7 @@ def _fake_pixi(
     managed_debugpy_version: str | None = MANAGED_DEBUGPY_VERSION,
     mutate_locked: bool = False,
     version_delay: float = 0,
+    version: str = "0.48.2",
 ) -> Path:
     bin_path = tmp_path / "pixi" / "bin"
     bin_path.mkdir(parents=True)
@@ -81,7 +82,7 @@ import time
 arguments = sys.argv[1:]
 if arguments == ["--version"]:
     time.sleep({version_delay!r})
-    print("pixi 0.48.2")
+    print("pixi {version}")
 elif arguments and arguments[0] == "install":
     manifest = pathlib.Path(arguments[arguments.index("--manifest-path") + 1])
     sentinel = pathlib.Path({str(tmp_path / "install-started")!r})
@@ -299,7 +300,10 @@ def test_first_managed_pixi_mutation_is_announced_before_download(
 
 
 def test_valid_managed_pixi_and_environment_reuse_is_silent(tmp_path: Path) -> None:
-    executable = _fake_pixi(tmp_path)
+    executable = _fake_pixi(
+        tmp_path,
+        version=provisioning_module.PIXI_VERSION.removeprefix("v"),
+    )
     marker = executable.parent / ".wetlands-pixi-version"
     marker.write_text(f"{provisioning_module.PIXI_VERSION}\n", encoding="utf-8")
     manager = EnvironmentManager(tmp_path)
