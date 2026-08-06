@@ -1,33 +1,9 @@
-# Compatibility and releases
+# Compatibility information moved
 
-## Supported platforms
+Compatibility information now lives with the task it helps you complete:
 
-Wetlands 2 supports:
+- [Supported platforms and values](reference/supported.md) lists supported Python versions, operating systems, and task values.
+- [Upgrade within Wetlands 2](how-to/upgrade_v2.md) explains persistent-worker compatibility and environment rebuilding.
+- [Trusted-code security model](concepts/security.md) links to the supported release and vulnerability-reporting policy.
 
-- Python 3.9 through 3.14;
-- Linux, macOS, and Windows;
-- the Pixi version whose executable and SHA-256 checksums are registered in the Wetlands release.
-
-The test suite covers every supported Python version on all three operating systems.
-Real-Pixi acceptance tests run on all three operating systems before changes are merged.
-
-Pixi version and checksum updates are deliberate source changes.
-They are accepted only after the real-Pixi acceptance suite passes on Linux, macOS, and Windows.
-
-## Versioning
-
-Wetlands uses [semantic versioning](https://semver.org/).
-Breaking public API, managed-metadata, or worker-protocol changes require a new major version.
-Backward-compatible features use a minor release, and backward-compatible fixes use a patch release.
-
-Host and worker execution- and management-protocol versions must match exactly.
-A host fails the corresponding connection clearly rather than attempting to communicate with an incompatible worker.
-The package version and managed worker-runtime version are released together and are required to be identical.
-
-Stop all persistent Wetlands workers before upgrading or downgrading Wetlands.
-An upgraded controller must not attach to workers created by another Wetlands release.
-
-## Supported release line
-
-The latest Wetlands 2.x release is supported.
-See the [security policy](https://github.com/arthursw/wetlands/security/policy) for the trusted-code model and vulnerability reporting.
+Maintainer versioning and release rules are in the repository's [`RELEASING.md`](https://github.com/arthursw/wetlands/blob/main/RELEASING.md).

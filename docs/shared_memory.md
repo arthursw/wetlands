@@ -1,4 +1,4 @@
-# Values and NumPy arrays
+# Values and NumPy ownership
 
 Wetlands transports NumPy arrays automatically through its value codec protocol.
 Application and worker code exchange normal `numpy.ndarray` objects and never manage shared-memory handles.
@@ -32,20 +32,10 @@ The result returned to the host is independently owned and remains valid after t
 
 ## Supported values
 
-The core codec supports:
+Wetlands accepts simple Python values, nested containers, and NumPy arrays at the task boundary.
+See [Supported platforms and values](reference/supported.md) for the exact list and validation rules.
 
-- `None`;
-- booleans;
-- integers;
-- floats;
-- strings;
-- bytes;
-- nested lists, tuples, and dictionaries;
-- NumPy arrays.
-
-Dictionary keys must be simple scalar values.
-Cyclic containers are rejected.
-Unsupported objects raise `ValueEncodingError` and identify the path to the unsupported value.
+Unsupported objects raise `ValueEncodingError` and identify where the unsupported value appeared in the submitted arguments.
 
 ## NumPy rules
 

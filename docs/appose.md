@@ -22,4 +22,4 @@ Both projects support asynchronous tasks, progress updates, cancellation, isolat
 Neither project's process or environment boundary is a security sandbox for untrusted code.
 
 See the [Appose documentation](https://docs.apposed.org/) for its current APIs and supported features.
-For Wetlands, continue with [Getting started](getting_started.md), [Values and NumPy arrays](shared_memory.md), or [Debugging running workers](debugging.md).
+For Wetlands, continue with [Run your first task](getting_started.md), [Values and NumPy arrays](shared_memory.md), or [Debug a running worker](debugging.md).

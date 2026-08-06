@@ -31,22 +31,42 @@ extra:
 
 nav:
   - Overview: index.md
-  - Getting started: getting_started.md
-  - Environment specifications: dependencies.md
-  - Operations and tasks: tasks.md
-  - Persistent workers and reconnection: persistent_workers.md
-  - Values and NumPy arrays: shared_memory.md
-  - Debugging running workers: debugging.md
-  - Compatibility and releases: compatibility.md
-  - Wetlands and Appose: appose.md
-  - Release checklist: releasing.md
-  - Migration to Wetlands 2: migration_v2.md
-  - Events and logging: logging.md
-  - Developer guide:
+  - Tutorials:
+      - Run your first task: getting_started.md
+      - Run code from your own package: tutorials/own_package.md
+  - How-to guides:
+      - Report progress, intermediate output, and worker logs: how-to/progress.md
+      - Cancel a task: how-to/cancel_tasks.md
+      - Handle execution and provisioning errors: how-to/errors.md
+      - Handle timeouts: how-to/timeouts.md
+      - Use Wetlands with asyncio: how-to/asyncio.md
+      - Configure workers and GPUs: how-to/worker_configuration.md
+      - Keep and reconnect to persistent workers: persistent_workers.md
+      - Debug a running worker: debugging.md
+      - Discover, replace, and remove environments: how-to/environment_management.md
+  - Concepts:
+      - The Wetlands mental model: concepts/mental_model.md
+      - Operations, tasks, and lifecycle states: tasks.md
+      - Environment identity, reuse, and rebuilding: concepts/environment_identity.md
+      - Values and NumPy ownership: shared_memory.md
+      - Trusted-code security model: concepts/security.md
+      - Choosing Wetlands or Appose: appose.md
+  - Reference:
+      - EnvironmentSpec and dependency fields: dependencies.md
+      - Events and logging: logging.md
+      - Injected task context: reference/task_context.md
+      - Errors and failure categories: reference/errors.md
+      - Supported platforms and values: reference/supported.md
+      - CLI: reference/cli.md
+      - Python API: reference/
+  - Upgrading:
+      - Upgrade within Wetlands 2: how-to/upgrade_v2.md
+      - Migrate from Wetlands 1: migration_v2.md
+  - Development:
+      - Contributor setup and validation: developer/contributing.md
       - How it works: how_it_works.md
       - Architecture and execution protocol: developer/architecture.md
       - Transport codecs: developer/codecs.md
-  - Code Reference: reference/
 
 plugins:
   - search
@@ -76,5 +96,8 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path:
+        - .
+      check_paths: true
   - pymdownx.superfences

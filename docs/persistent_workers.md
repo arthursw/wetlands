@@ -1,4 +1,4 @@
-# Persistent workers and reconnection
+# Keep and reconnect to persistent workers
 
 Ordinary worker pools stop when their controller closes them.
 A persistent pool can instead remain alive while one controller exits and a later controller reconnects.

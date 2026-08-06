@@ -1,293 +1,80 @@
-# Getting started
+# Run your first task
 
-This guide provisions a Pixi environment, starts a worker pool, and calls an installed Python function by qualified name.
-The complete example uses NumPy, so it does not require you to create or publish a separate worker package.
+This tutorial creates an isolated Python environment and asks a worker in that environment to add some numbers.
+
+You will finish with a working Wetlands installation and the result `42`.
+
+## Prerequisites
+
+You need Python 3.9 or newer and internet access for the first run.
+Wetlands downloads Pixi and the requested Python environment when they are not already available.
 
 ## Install Wetlands
 
 ```sh
-pip install "wetlands[shared-memory]"
+pip install wetlands
 ```
 
-The optional dependency installs NumPy in the host environment for automatic array transport.
-The worker environment must declare its own NumPy dependency.
+## Create and run the example
 
-## Construct the manager
-
-```python
-from wetlands import EnvironmentManager
-
-manager = EnvironmentManager(root="wetlands")
-```
-
-Construction validates and stores configuration only.
-It does not download Pixi, start a subprocess, create an environment, access the network, or create runtime state files.
-
-If an application supplies its own Pixi executable:
+Save this as `first_task.py`:
 
 ```python
-manager = EnvironmentManager(
-    root="wetlands",
-    pixi_executable="/opt/pixi/bin/pixi",
-)
-```
-
-## Prepare Pixi
-
-```python
-operation = manager.prepare()
-operation.listen(lambda event: print(event.stage, event.message))
-pixi = operation.wait_for()
-```
-
-Preparation discovers and validates the configured executable or downloads and verifies Wetlands' registered Pixi release.
-The returned `PixiInfo` reports the executable path, version, and whether Wetlands manages it.
-
-The first managed preparation requires network access and may take a few minutes.
-Provisioning also downloads the packages declared by the environment recipe.
-Wetlands stores its Pixi installation, managed environments, locks, and runtime state below the manager root.
-
-Calling `provision()` without a preceding `prepare()` is also valid.
-Provisioning performs preparation as its first coordinated stage.
-
-## Provision an environment
-
-```python
-from wetlands import EnvironmentSpec
-
-spec = EnvironmentSpec(
-    python="3.12.*",
-    conda=("numpy>=2",),
-)
-
-operation = manager.provision("numpy-example", spec)
-operation.listen(lambda event: print(event.kind.value, event.message))
-environment = operation.wait_for()
-```
-
-Provisioning creates a Pixi project under the manager root, resolves or validates `pixi.lock`, installs the declared dependencies, validates the result, and publishes managed metadata last.
-
-The operation emits ordered stages and subprocess output suitable for an activity UI or application log.
-
-Reuse is strict.
-A ready environment is reused only when its managed recipe and lockfile match.
-Pass `replace_existing=True` to remove and rebuild a different recipe under the same physical name.
-
-## Start workers and execute
-
-```python
-import numpy as np
-
-with environment.start(workers=2) as pool:
-    image = np.arange(16, dtype=np.float32).reshape(4, 4)
-    task = pool.submit_import(
-        "numpy:negative",
-        args=(image,),
-    )
-    result = task.wait_for()
-
-np.testing.assert_array_equal(result, -image)
-```
-
-`submit_import()` accepts `package.module:qualified.callable`.
-Nested class attributes such as `package.module:Processor.run` are valid.
-
-The host input array is copied into transport storage, so worker mutation cannot change the caller's array.
-The returned array is a normal independently owned NumPy array.
-
-## Configure individual workers
-
-Use `worker_environment` when workers in the same Pixi environment need different process-level settings, such as GPU assignments:
-
-```python
-with environment.start(
-    workers=2,
-    worker_environment=lambda index: {
-        "CUDA_VISIBLE_DEVICES": str(index),
-    },
-) as pool:
-    # Worker 0 sees CUDA_VISIBLE_DEVICES=0 and worker 1 sees 1.
-    ...
-```
-
-Wetlands calls the callback once for each zero-based worker index before launching any worker and copies the returned mappings.
-If a worker is replaced after failure or forced cancellation, its replacement keeps the same index and receives the same copied mapping; the callback is not called again.
-Each copied mapping overrides same-name variables inherited from the controller process.
-
-Each result must be a mapping with string keys and string values.
-Variable names must be nonempty, cannot contain `=` or null bytes, and values cannot contain null bytes.
-The case-insensitive `WETLANDS_*` namespace is reserved for Wetlands, and `PYTHONEXECUTABLE`, `PYTHONHOME`, and `PYTHONPATH` cannot be set explicitly because Wetlands removes those variables from worker startup environments.
-
-Indexed worker environments cannot currently be combined with `persistent=True` because a later attaching controller does not possess the original callback configuration.
-Persistent pools without `worker_environment` continue to support detachment and reconnection.
-
-## Call your own worker package
-
-Worker packages expose ordinary Python functions and declare their dependencies normally:
-
-```python
-def threshold(image: "numpy.ndarray", value: float) -> "numpy.ndarray":
-    return image > value
-```
-
-Install the package in the managed environment with a pinned PyPI requirement or a `LocalPackage`, then call it by qualified name:
-
-```python
-with environment.start() as pool:
-    task = pool.submit_import(
-        "my_worker_package.filters:threshold",
-        kwargs={"image": image, "value": 7.5},
-    )
-    mask = task.wait_for()
-```
-
-Wetlands imports the package inside the worker and never imports it into the host process.
-
-## Execute local source during development
-
-For a runnable path-target example, save this as `worker_code.py`:
-
-```python
-def threshold(image, value):
-    return image > value
-```
-
-```python
-with environment.start() as pool:
-    task = pool.submit_path(
-        "worker_code.py",
-        "threshold",
-        kwargs={"image": image, "value": 7.5},
-        cache=False,
-    )
-    mask = task.wait_for()
-```
-
-Use `submit_path()` for editable or local development only.
-Installed packages should use `submit_import()` so imports follow normal Python package rules.
-
-## Use asyncio
-
-```python
-import asyncio
-
-import numpy as np
-
 from wetlands import EnvironmentManager, EnvironmentSpec
 
 
-async def run() -> None:
-    manager = EnvironmentManager(root="wetlands")
-    try:
-        preparation = manager.prepare()
-
-        async def report() -> None:
-            async for event in preparation.events():
-                print(event.message)
-
-        reporter = asyncio.create_task(report())
-        await preparation
-        await reporter
-
-        environment = await manager.provision(
-            "numpy-example",
-            EnvironmentSpec(
-                python="3.12.*",
-                conda=("numpy>=2",),
-            ),
-        )
-
-        pool = await asyncio.to_thread(environment.start)
-        try:
-            image = np.arange(16, dtype=np.float32).reshape(4, 4)
-            result = await pool.submit_import(
-                "numpy:negative",
-                args=(image,),
-            )
-            print(result)
-        finally:
-            await asyncio.to_thread(pool.close)
-    finally:
-        await asyncio.to_thread(manager.close)
-
-
-asyncio.run(run())
-```
-
-Wetlands adapts its thread- and process-based internals to the caller's running event loop.
-It does not create, run, or stop the application's loop.
-Worker-pool startup, attachment, detachment, and shutdown, and manager shutdown, are blocking lifecycle calls.
-Use `asyncio.to_thread()` for them so they do not block the application event loop.
-
-Cancel through the returned object:
-
-```python
-operation.cancel()
-task.cancel()
-```
-
-Awaiting coroutine cancellation requests cancellation of the underlying operation or task and waits for its required cleanup before propagating `CancelledError`.
-
-Provisioning cancellation terminates the active subprocess tree and removes the incomplete environment before it becomes terminal.
-Task cancellation is cooperative during the configured grace period.
-If the worker does not finish in time, Wetlands terminates its process tree, marks the task canceled after cleanup, and starts a replacement worker.
-
-## Discover and remove environments
-
-Applications can inspect the environments owned by a manager root without scanning Wetlands directories:
-
-```python
-from wetlands import ManagedEnvironmentState
-
-for info in manager.managed_environments():
-    if info.state is ManagedEnvironmentState.READY:
-        print(f"{info.name} is ready at {info.path}")
-    else:
-        print(f"{info.name} is incomplete and can be removed or rebuilt")
-```
-
-`managed_environments()` returns immutable `ManagedEnvironmentInfo` snapshots in `READY` or `INCOMPLETE` state.
-Discovery reports incomplete owned targets left by an interrupted host process as well as ready environments.
-It ignores directories that Wetlands cannot prove it owns.
-
-Removal returns an awaitable and listenable `RemovalOperation`:
-
-```python
-removal = manager.remove("numpy-example")
-removal.listen(lambda event: print(event.kind.value, event.message))
-removed = removal.wait_for()
-print(removed.name)
-```
-
-Wetlands raises `EnvironmentNotFoundError` for a missing name and refuses to remove an unmanaged target or an environment with live workers.
-Close its worker pools first.
-Calling `cancel()` can stop removal while Wetlands is waiting or inspecting the target.
-Once Wetlands seals cancellation and atomically detaches the environment into its internal quarantine, cancellation is refused and the operation completes instead of reporting a misleading canceled state.
-Completion means the original environment path is gone, cached handles are invalidated, and the name can be reused immediately.
-Wetlands reclaims the detached tree in the background, so disk space may be released after the removal operation completes.
-Interrupted or temporarily blocked reclamation remains durable and is retried by a later mutating manager operation.
-
-## Close resources
-
-`WorkerPool` is a context manager.
-Exiting it stops its workers.
-
-`EnvironmentManager` is also a context manager and closes any pools it owns:
-
-```python
 with EnvironmentManager(root="wetlands") as manager:
-    environment = manager.provision("numpy-example", spec).wait_for()
-    with environment.start() as pool:
-        image = np.arange(16, dtype=np.float32).reshape(4, 4)
-        result = pool.execute_import(
-            "numpy:negative",
-            args=(image,),
+    environment = manager.provision(
+        "first-example",
+        EnvironmentSpec(python="3.12.*"),
+    ).wait_for()
+
+    with environment.start() as workers:
+        result = workers.execute_import(
+            "builtins:sum",
+            args=([20, 22],),
         )
+
+print(result)
 ```
 
-`execute_import()` and `execute_path()` are blocking conveniences around submission and `wait_for()`.
+Run it:
 
-Closing a manager first cancels and joins active preparation, provisioning, and removal operations, then attempts to close every known worker pool.
-Shutdown asks the background environment reclaimer to stop at a safe checkpoint but does not wait for all detached trees to be erased; unfinished reclamation is retried by a later manager.
-If any cleanup fails, `ManagerCloseError.errors` contains every collected failure.
-A later `close()` call retries pools that remain open, but a manager cannot be used again after shutdown begins.
+```console
+$ python first_task.py
+42
+```
+
+The first run may take several minutes while Wetlands downloads Pixi and Python.
+Later runs reuse the ready environment and are faster.
+
+## What happened?
+
+`EnvironmentManager` owns the `wetlands` directory and the resources stored below it.
+
+`EnvironmentSpec` describes the environment to create.
+This example requests Python 3.12 and no third-party packages.
+
+`manager.provision()` creates or reuses the environment.
+Provisioning means preparing an environment so it is ready to run code.
+
+`environment.start()` starts a worker process inside that environment.
+The context manager stops the worker when the block ends.
+
+`execute_import()` imports `builtins:sum` inside the worker, calls it with `[20, 22]`, waits for completion, and returns the result to the application.
+
+The outer context manager closes the manager even when an error occurs.
+
+## What remains on disk?
+
+Closing the manager and worker pool stops their processes, but it keeps the ready environment below the `wetlands` directory.
+The next run can reuse it instead of downloading and installing Python again.
+
+When you no longer need an environment, follow [Discover, replace, and remove environments](how-to/environment_management.md) to remove it safely.
+
+## Next step
+
+Continue with [Run code from your own package](tutorials/own_package.md).
+It replaces `builtins:sum` with a function that you provide and introduces NumPy arrays.
+
+If something failed during setup, read [Handle execution and provisioning errors](how-to/errors.md).

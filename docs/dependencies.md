@@ -155,7 +155,7 @@ A later provisioning attempt also detects and removes crash-interrupted state be
 Wetlands never returns an environment that lacks successful managed metadata.
 
 `replace_existing=True` may remove a currently ready environment before building its replacement.
-Applications that must preserve the old recipe during an upgrade should provision the new recipe under a different physical name and switch their own mapping after success.
+Applications that must preserve the old recipe during an upgrade should provision the new recipe under a different managed environment name and switch their own mapping after success.
 
 ## Environment names
 

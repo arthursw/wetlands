@@ -1,214 +1,84 @@
-# Operations and execution tasks
+# Operations, tasks, and lifecycle states
 
-Wetlands uses observable asynchronous objects for both host-side lifecycle work and worker execution.
+Wetlands represents work that finishes later with two kinds of objects: **operations** and **execution tasks**.
 
-`PreparationOperation[T]` and `ProvisioningOperation[T]` represent host-side work.
-`ExecutionTask[T]` represents one worker call.
+An operation performs work on the host computer, such as preparing Pixi, provisioning an environment, or removing an environment.
+An execution task represents one function call handled by a worker.
 
-All three support callbacks, blocking waits, cancellation, awaiting, and async event streams.
-No running event loop is required for synchronous use.
+Both can be observed, canceled, waited for, or awaited with `asyncio`.
 
-## Preparation and provisioning operations
+## Lifecycle states
+
+Operations and tasks use the same five state names:
+
+| State | Meaning |
+| --- | --- |
+| `PENDING` | The work has been created but has not started. |
+| `RUNNING` | The work is active. |
+| `COMPLETED` | The work finished and produced its result. |
+| `FAILED` | The work stopped with an error. |
+| `CANCELED` | Cancellation and required cleanup finished. |
+
+The last three states are **terminal states**.
+A terminal object will not change state again.
+
+## Operations
+
+Preparing Pixi and provisioning or removing an environment can start subprocesses and change files below the manager root.
+Wetlands publishes events while this work runs.
 
 ```python
 operation = manager.provision("analysis", spec)
-
 operation.listen(lambda event: print(event.message))
 environment = operation.wait_for(timeout=600)
 ```
 
-Operation states are:
-
-- `PENDING`;
-- `RUNNING`;
-- `COMPLETED`;
-- `FAILED`;
-- `CANCELED`.
-
-Events include a monotonically increasing sequence, timestamp, operation ID, kind, current state, human-readable message, and optional stage, step, stream, output line, or progress fields.
-
-```python
-from wetlands import OperationEventKind
-
-
-def on_event(event) -> None:
-    if event.kind is OperationEventKind.OUTPUT:
-        print(f"[{event.stage}:{event.stream}] {event.line}")
-
-
-operation.listen(on_event)
-```
-
-Listeners may run on Wetlands background threads.
-GUI applications must marshal UI mutations onto their own UI thread.
-Do not call `EnvironmentManager.close()` directly from an operation listener; schedule shutdown on another thread so the operation can finish.
-
-## Structured failure
-
-Failed operations raise a specialized `OperationError`.
-Its `failure` value identifies the operation, stage, safe command display, return code, bounded output tails, environment name, and any cleanup failure.
-
-```python
-from wetlands import ProvisioningError
-
-try:
-    environment = operation.wait_for()
-except ProvisioningError as error:
-    print(error.failure.stage)
-    print(error.failure.command)
-    print(error.failure.stderr_tail)
-```
-
-Wetlands sanitizes command displays and captured output before publishing them.
-
-## Provisioning cancellation
-
-```python
-operation = manager.provision("analysis", spec)
-operation.cancel()
-
-try:
-    operation.wait_for()
-except OperationCanceled:
-    pass
-```
-
-`cancel()` requests cancellation and returns immediately.
-It is idempotent and returns `False` after a terminal state.
-
-The operation reaches `CANCELED` only after the active subprocess tree has terminated and cleanup has completed.
-Wetlands first requests graceful termination, waits for the configured grace period, then forcibly terminates surviving processes.
+`wait_for()` blocks the current thread until the operation finishes.
+It returns the result for a completed operation and raises a public exception for failure, cancellation, or a waiting timeout.
 
 ## Execution tasks
 
-```python
-task = pool.submit_import(
-    "analysis_package.pipeline:run",
-    kwargs={"input_data": data},
-)
+Submitting a call returns immediately with an `ExecutionTask`:
 
-task.listen(
-    lambda event: print(
-        event.sequence,
-        event.kind.value,
-        event.state.value,
-        event.message,
-        event.progress,
-    )
+```python
+task = workers.submit_import(
+    "analysis_package.pipeline:run",
+    args=(data,),
 )
 result = task.wait_for()
 ```
 
-Execution task states are `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, and `CANCELED`.
+The task moves from the worker-pool queue to a worker and then to a terminal state.
+Listeners receive immutable event snapshots with an increasing sequence number.
 
-Execution events are immutable snapshots containing a monotonically increasing sequence, timestamp, task ID, kind, state, message, and progress fields.
-Listeners replay the bounded event history by default; pass `replay=False` to observe only future events.
+## Timeout is not cancellation
 
-`wait_for(timeout)` does not cancel the task when its timeout expires.
-Call `cancel()` explicitly when the work should stop.
+`wait_for(timeout=5)` limits how long the caller waits.
+It does not tell the worker to stop.
 
-Remote failures retain the remote exception identity, traceback, task ID, call target, and worker diagnostics.
+Call `task.cancel()` explicitly if the remote work should end.
+Read [Handle timeouts](how-to/timeouts.md) for a runnable example.
 
-## Progress and cooperative cancellation
+## Cancellation and cleanup
 
-A worker callable may optionally accept a runtime-context keyword chosen by the submitter.
-Wetlands never infers injection from a callable signature.
+Cancellation is a request, not an immediate state change.
+A task becomes `CANCELED` only after the worker has cooperated or Wetlands has stopped and replaced an unresponsive worker.
 
-```python
-def process(items, task=None):
-    results = []
+An operation becomes `CANCELED` only after active subprocesses stop and incomplete state is cleaned up.
+This rule prevents callers from seeing a terminal state while required cleanup is still running.
 
-    for index, item in enumerate(items):
-        if task is not None and task.cancel_requested:
-            task.cancel()
-            return None
+Read [Cancel a task](how-to/cancel_tasks.md) for cooperative and forced cancellation examples.
 
-        results.append(process_one(item))
+## Worker replacement
 
-        if task is not None:
-            task.update(
-                f"Processed {index + 1} items",
-                current=index + 1,
-                maximum=len(items),
-            )
+The pool replaces a worker after a crash, a broken connection, or forced cancellation.
+Queued tasks can then continue on the healthy pool.
 
-    return results
-```
+`worker_timeout` detects a worker that has stopped sending messages.
+It is an inactivity timeout, not a maximum duration for a task.
 
-Request the injection explicitly when submitting:
+## Related reference
 
-```python
-task = pool.submit_import(
-    "analysis_package.pipeline:process",
-    args=(items,),
-    context_keyword="task",
-)
-```
-
-Progress messages and intermediate outputs are initially limited to simple supported values.
-NumPy arrays should be returned as the terminal result rather than published as intermediate output.
-
-Cancellation starts cooperatively for running Python code.
-The worker observes `task.cancel_requested` and may acknowledge it with `task.cancel()`.
-If it does not finish during the manager's configured termination grace period, Wetlands terminates that worker's process tree and starts a replacement.
-The task reaches `CANCELED` only after this cleanup has completed.
-If a worker becomes unhealthy or disconnects, Wetlands fails its assigned task and replaces the worker.
-
-## Async use
-
-Operations and tasks can be awaited directly:
-
-```python
-import asyncio
-
-
-environment = await manager.provision("analysis", spec)
-
-pool = await asyncio.to_thread(environment.start)
-try:
-    result = await pool.submit_import(
-        "analysis_package.pipeline:run",
-        kwargs={"input_data": data},
-    )
-finally:
-    await asyncio.to_thread(pool.close)
-```
-
-Starting, attaching, detaching, and closing pools are blocking lifecycle operations.
-Async applications should move them to a thread as shown above.
-
-Events are available through an async iterator:
-
-```python
-operation = manager.provision("analysis", spec)
-
-async for event in operation.events():
-    render_activity(event)
-
-environment = await operation
-```
-
-The terminal event closes the stream.
-The event adapter safely moves notifications from Wetlands threads to the caller's event loop.
-
-Canceling an awaiting coroutine requests cancellation of the underlying operation or task and waits for mandatory cleanup before propagating `asyncio.CancelledError`.
-
-## Worker pools
-
-```python
-with environment.start(workers=4, worker_timeout=300) as pool:
-    tasks = [pool.submit_import("analysis_package.pipeline:run", args=(item,)) for item in items]
-    results = [task.wait_for() for task in tasks]
-```
-
-Workers are warm and process tasks from the pool queue.
-Health monitoring detects disconnects and inactivity.
-A replacement worker is started when a pool worker fails.
-`worker_timeout` is an inactivity timeout that resets whenever the worker sends an IPC message.
-It detects an unresponsive worker; it is not a wall-clock limit on task execution.
-
-`persistent=True` keeps trusted local workers alive when a controller detaches.
-Persistent pools use authenticated loopback connections and exclusive controller ownership.
-They do not change Wetlands' trusted-local execution model.
-
-See [Persistent workers and reconnection](persistent_workers.md) for complete controller lifecycle, attachment validation, crash behavior, and debugger reconnection.
+- [Events and logging](logging.md)
+- [Injected task context](reference/task_context.md)
+- [Errors and failure categories](reference/errors.md)

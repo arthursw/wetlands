@@ -1,4 +1,4 @@
-# Migrating to Wetlands 2
+# Migrate from Wetlands 1
 
 Wetlands 2 is a major release and intentionally does not preserve the Wetlands 1 public API.
 The migration separates construction, provisioning, and execution and removes application-facing transport management.
@@ -10,7 +10,7 @@ The migration separates construction, provisioning, and execution and removes ap
 | Constructor may prepare tooling | Constructor stores configuration only |
 | Manager chosen through constructor flags | Pixi is the sole environment manager |
 | Dependency dictionaries | Immutable `EnvironmentSpec` |
-| `create()` returns an environment synchronously | `provision()` returns an observable operation |
+| `create()` returns an environment synchronously | `provision()` returns an operation that can be observed, waited for, or awaited |
 | Environment launches itself and executes calls | `ManagedEnvironment.start()` returns a `WorkerPool` |
 | Filename-stem module imports | Qualified package targets or explicit path targets |
 | Manual `NDArray` transport | Automatic ordinary-value and NumPy transport |
@@ -150,7 +150,7 @@ Wetlands copies inputs, owns shared-memory leases, copies results into caller-ow
 
 Object-dtype arrays and unsupported Python objects now fail explicitly at submission.
 
-## Debugging running workers
+## Debug a running worker
 
 Do not pass a debug flag to `EnvironmentManager`, declare `debugpy` in the recipe, or call `debugpy.listen()` from worker code.
 Run the application normally and attach after a problem appears:
@@ -161,13 +161,13 @@ wetlands debug --root ./wetlands --environment cellpose-v1 --worker WORKER_ID --
 ```
 
 Wetlands owns the worker-compatible `debugpy` version and starts its adapter lazily through an authenticated management connection.
-See [Debugging running workers](debugging.md) for editor configuration and reconnection behavior.
+See [Debug a running worker](debugging.md) for editor configuration and reconnection behavior.
 
 ## Persistent worker reconnection
 
 Start a pool with `persistent=True`, call `pool.detach()` to leave its workers alive, and use `environment.attach_pool()` from a later controller.
 Only one process may own task dispatch at a time; debugger attachment is independent of that execution-controller claim.
-See [Persistent workers and reconnection](persistent_workers.md) for the complete lifecycle.
+See [Keep and reconnect to persistent workers](persistent_workers.md) for the complete lifecycle.
 
 ## Non-blocking and asyncio use
 
@@ -190,17 +190,24 @@ with environment.start() as pool:
 Async use:
 
 ```python
+import asyncio
+
+
 environment = await manager.provision("cellpose-v1", spec)
 
-with environment.start() as pool:
+pool = await asyncio.to_thread(environment.start)
+try:
     output = await pool.submit_import(
         "worker_package.segmentation:segment",
         args=(image,),
     )
+finally:
+    await asyncio.to_thread(pool.close)
 ```
 
 Use `operation.events()` or `task.events()` for async event consumption.
 The embedding application owns its event loop and UI-thread integration.
+Run blocking pool startup and shutdown, and manager shutdown, with `asyncio.to_thread()`.
 
 ## Replacement and upgrades
 
@@ -208,7 +215,7 @@ Wetlands 2 never reuses an incomplete environment.
 Failed, canceled, and crash-interrupted provisioning is removed and rebuilt.
 
 `replace_existing=True` can remove an old same-name environment before its replacement succeeds.
-Applications that require rollback should include a recipe or release identity in the physical environment name, provision the new name, then update their own logical mapping.
+Applications that require rollback should include a recipe or release identity in the managed environment name, provision the new name, then update their own logical mapping.
 
 ## Removed assumptions
 

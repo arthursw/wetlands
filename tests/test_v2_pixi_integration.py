@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import socket
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable, Protocol
 
 import numpy as np
@@ -31,6 +33,22 @@ pytestmark = [
 ]
 
 SAMPLEPROJECT_COMMIT = "621e4974ca25ce531773def586ba3ed8e736b3fc"
+
+
+def _load_example_module(name: str) -> ModuleType:
+    path = Path(__file__).parent.parent / "examples" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"wetlands_docs_{name}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load documentation example {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+task_cancellation = _load_example_module("task_cancellation")
+task_errors = _load_example_module("task_errors")
+task_progress = _load_example_module("task_progress")
+task_timeout = _load_example_module("task_timeout")
 
 
 def _wait_until(predicate: Callable[[], bool], timeout: float, description: str) -> None:
@@ -452,3 +470,45 @@ def test_real_pixi_release_acceptance(tmp_path: Path) -> None:
             assert pool.execute_import("builtins:len", args=([20, 22],), timeout=60) == 2
     finally:
         manager.close()
+
+
+def test_documented_complex_task_examples(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    root = tmp_path / "documentation-examples"
+
+    with caplog.at_level("INFO", logger="wetlands"):
+        progress = task_progress.main(root)
+    assert progress == {
+        "progress": [(1, 4), (2, 4), (3, 4), (4, 4)],
+        "outputs": {"items_processed": 4},
+        "result": [2, 4, 6, 8],
+    }
+    assert "Worker finished processing items" in caplog.text
+
+    cancellation = task_cancellation.main(root)
+    assert cancellation == {
+        "cooperative_state": "canceled",
+        "forced_state": "canceled",
+        "worker_replaced": True,
+        "follow_up": 42,
+    }
+
+    errors = task_errors.main(root)
+    assert errors["remote_category"] == "remote_exception"
+    assert errors["remote_target"] == "example_module:raise_example_error"
+    assert errors["remote_type"] == "ValueError"
+    assert errors["remote_message"] == "The worker could not process this input"
+    remote_traceback = errors["remote_traceback"]
+    assert isinstance(remote_traceback, str)
+    assert "ValueError: The worker could not process this input" in remote_traceback
+    assert errors["provisioning_stage"] == "post_install"
+    assert errors["provisioning_command"]
+    assert errors["provisioning_returncode"] == 7
+    provisioning_stderr = errors["provisioning_stderr"]
+    assert isinstance(provisioning_stderr, tuple)
+    assert any("deliberate setup failure" in line for line in provisioning_stderr)
+    assert errors["retry_result"] == 42
+
+    timeout = task_timeout.main(root)
+    assert timeout["state_after_timeout"] in {"pending", "running"}
+    assert timeout["running_after_timeout"] is True
+    assert timeout["final_state"] == "canceled"

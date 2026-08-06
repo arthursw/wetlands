@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import numpy as np
@@ -5,34 +7,26 @@ import numpy as np
 from wetlands import EnvironmentManager, EnvironmentSpec, LocalPackage
 
 
-def report(event) -> None:
-    print(f"{event.kind.value}: {event.message}")
-
-
-manager = EnvironmentManager(root="wetlands")
-
-preparation = manager.prepare()
-preparation.listen(report)
-preparation.wait_for()
-
-spec = EnvironmentSpec(
-    python="3.12.*",
-    conda=("numpy>=2", "pip"),
-    local=(LocalPackage(Path(__file__).parent),),
-)
-
-provisioning = manager.provision("numpy-example", spec)
-provisioning.listen(report)
-environment = provisioning.wait_for()
-
-image = np.arange(16, dtype=np.float32).reshape(4, 4)
-
-with environment.start(workers=1) as pool:
-    task = pool.submit_import(
-        "example_module:threshold",
-        kwargs={"image": image, "value": 7.5},
+def main(root: Path = Path("wetlands")) -> None:
+    example_directory = Path(__file__).parent
+    spec = EnvironmentSpec(
+        python="3.12.*",
+        conda=("numpy>=2", "pip"),
+        local=(LocalPackage(example_directory),),
     )
-    mask = task.wait_for()
 
-print(mask)
-manager.close()
+    with EnvironmentManager(root=root) as manager:
+        environment = manager.provision("numpy-example", spec).wait_for()
+        image = np.arange(16, dtype=np.float32).reshape(4, 4)
+
+        with environment.start() as workers:
+            mask = workers.execute_import(
+                "example_module:threshold",
+                kwargs={"image": image, "value": 7.5},
+            )
+
+    print(mask)
+
+
+if __name__ == "__main__":
+    main()

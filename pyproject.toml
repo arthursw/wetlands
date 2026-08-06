@@ -54,6 +54,7 @@ include = [
     "/CHANGELOG.md",
     "/LICENSE",
     "/README.md",
+    "/RELEASING.md",
     "/SECURITY.md",
     "/Wetland.png",
     "/mkdocs.yml",

@@ -9,7 +9,7 @@ It does not prepare Pixi or materialize runtime state.
 
 ## Pixi preparation
 
-`prepare()` returns an observable operation.
+`prepare()` returns an operation that callers can observe, wait for, or await.
 The operation serializes preparation under a root-local lock, discovers or installs the registered Pixi release, verifies its version and artifact digest, and returns `PixiInfo`.
 
 Concurrent managers targeting the same root coordinate through the same lock.
@@ -72,7 +72,7 @@ The resulting Debug Adapter Protocol endpoint is not authenticated by Wetlands a
 
 `submit_import()` creates a versioned execution envelope containing a task ID, qualified module target, encoded positional arguments, encoded keyword arguments, and codec requirements.
 
-The worker imports the requested module in its own environment, resolves the qualified callable, decodes ordinary values, invokes the function, and encodes its result.
+The worker imports the requested module in its own environment, finds the requested function or other callable attribute, decodes ordinary values, invokes it, and encodes its result.
 
 `submit_path()` carries a canonical path and qualified attribute instead.
 Path modules are cached by canonical path and content identity, preventing collisions between equal filename stems.

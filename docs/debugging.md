@@ -1,4 +1,4 @@
-# Debugging running workers
+# Debug a running worker
 
 You do not need to enable a special debug mode before starting your application.
 Wetlands workers include the debug adapter as part of their managed runtime, but they do not start a debug listener until you request one.
@@ -140,16 +140,21 @@ operation.listen(lambda event: print(event.stage, event.message))
 Execution failures retain the remote traceback and task context:
 
 ```python
+from wetlands import ExecutionError
+
+
 try:
     result = task.wait_for()
-except Exception:
-    print(task.error)
-    print(task.traceback)
-    raise
+except ExecutionError as error:
+    print(error.failure.category.value)
+    print(error.failure.call_target)
+    print(error.failure.traceback)
 ```
 
 A worker crash or protocol mismatch is reported separately from an exception raised by the target callable.
 Unhealthy workers are removed and replaced by the pool.
+
+See [Handle execution and provisioning errors](how-to/errors.md) for a complete runnable example and recovery guidance.
 
 ## Trust model
 
