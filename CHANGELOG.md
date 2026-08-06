@@ -2,6 +2,12 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.3.3
+
+- Added content identities and immutable environment-local staging for local packages so managed environments install and validate stable source snapshots instead of depending on a live source tree.
+- Kept default manager shutdown bounded during background physical reclamation while preserving one shared deadline for explicit finite close timeouts.
+- Made first-time managed Pixi setup observable through `on_mutation_started` before its install-root mutation and download, without notifying when valid Pixi and environment state is reused.
+
 ## 2.3.2
 
 - Fixed process-exit races at POSIX group enumeration and Windows wait timeout boundaries so completed shutdown is not reported as unverified.
