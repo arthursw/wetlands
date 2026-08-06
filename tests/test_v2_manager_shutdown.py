@@ -47,7 +47,7 @@ def test_close_cancels_and_joins_active_preparation(monkeypatch, tmp_path: Path)
     started = threading.Event()
     cleaned = threading.Event()
 
-    def prepare(manager: EnvironmentManager, operation) -> Any:
+    def prepare(manager: EnvironmentManager, operation, on_mutation_started=None) -> Any:
         started.set()
         while not operation.cancellation_requested:
             time.sleep(0.01)
@@ -80,7 +80,7 @@ def test_close_rejects_operation_runner_listener_without_closing_manager(
     close_errors: list[BaseException] = []
     expected = object()
 
-    def prepare(manager: EnvironmentManager, operation) -> Any:
+    def prepare(manager: EnvironmentManager, operation, on_mutation_started=None) -> Any:
         listener_ready.set()
         assert emit_event.wait(2)
         operation._emit(OperationEventKind.STEP, "preparing")
@@ -233,7 +233,7 @@ def test_close_timeout_is_one_deadline_for_active_operations(monkeypatch, tmp_pa
     started = threading.Event()
     release = threading.Event()
 
-    def prepare(manager: EnvironmentManager, operation) -> Any:
+    def prepare(manager: EnvironmentManager, operation, on_mutation_started=None) -> Any:
         started.set()
         assert release.wait(2)
         raise OperationCanceled(operation.id)
@@ -347,6 +347,22 @@ def test_close_passes_only_remaining_deadline_to_reclaimer(monkeypatch, tmp_path
 
     monkeypatch.setattr(manager._environment_reclaimer, "close", lambda timeout=0.25: True)
     manager.close(timeout=1)
+
+
+def test_close_without_timeout_keeps_bounded_reclaimer_default(monkeypatch, tmp_path: Path) -> None:
+    manager = EnvironmentManager(tmp_path)
+    received: list[float | None] = []
+
+    def incomplete_close(timeout: float | None = 0.25) -> bool:
+        received.append(timeout)
+        return False
+
+    monkeypatch.setattr(manager._environment_reclaimer, "close", incomplete_close)
+
+    manager.close()
+    manager.close()
+
+    assert received == [0.25]
 
 
 def test_close_waits_for_worker_start_registration_and_rejects_new_work(

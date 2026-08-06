@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import sys
+import tarfile
 import threading
 import time
 from pathlib import Path
@@ -27,6 +29,7 @@ from wetlands import (
     OperationState,
     PostInstallCommand,
     PreparationError,
+    PreparationOperation,
     ProvisioningError,
     ProvisioningOperation,
     UnmanagedTargetError,
@@ -240,6 +243,82 @@ def test_prepare_and_provision_with_external_pixi(tmp_path: Path) -> None:
     assert manager.environment("example").generation_id == environment.generation_id
     assert events[-1].state is OperationState.COMPLETED
     assert all(event.environment == "example" for event in events)
+
+
+def test_first_managed_pixi_mutation_is_announced_before_download(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_version = provisioning_module.PIXI_VERSION.removeprefix("v")
+    executable_name = "pixi.exe" if os.name == "nt" else "pixi"
+    archive_buffer = io.BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w:gz") as archive:
+        payload = b"managed pixi"
+        member = tarfile.TarInfo(executable_name)
+        member.size = len(payload)
+        member.mtime = 0
+        archive.addfile(member, io.BytesIO(payload))
+    archive_bytes = archive_buffer.getvalue()
+    artifact = "pixi-test.tar.gz"
+    timeline: list[str] = []
+
+    class Opener:
+        def open(self, url: str, timeout: int):
+            timeline.append("download-open")
+            response = io.BytesIO(archive_bytes)
+            response.headers = {"Content-Length": str(len(archive_bytes))}
+            return response
+
+    monkeypatch.setattr(provisioning_module, "_pixi_target", lambda: artifact)
+    monkeypatch.setitem(provisioning_module.PIXI_SHA256, artifact, hashlib.sha256(archive_bytes).hexdigest())
+    monkeypatch.setattr(provisioning_module.urllib.request, "build_opener", lambda *handlers: Opener())
+    monkeypatch.setattr(provisioning_module, "_detect_pixi_version", lambda executable, runner: expected_version)
+
+    manager = EnvironmentManager(tmp_path / "state")
+    operation: PreparationOperation[object] = PreparationOperation()
+    operation.listen(
+        lambda event: timeline.append(f"event:{event.stage}"),
+        replay=False,
+    )
+
+    def announce_mutation() -> None:
+        assert not (manager.root / "pixi").exists()
+        timeline.append("mutation")
+
+    pixi = provisioning_module.prepare_pixi(
+        manager,
+        operation,
+        on_mutation_started=announce_mutation,
+    )
+
+    assert pixi.managed
+    assert pixi.executable.is_file()
+    assert timeline.count("mutation") == 1
+    assert timeline.index("mutation") < timeline.index(f"event:{ProvisioningStage.PIXI_DOWNLOAD.value}")
+    assert timeline.index("mutation") < timeline.index("download-open")
+
+
+def test_valid_managed_pixi_and_environment_reuse_is_silent(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    marker = executable.parent / ".wetlands-pixi-version"
+    marker.write_text(f"{provisioning_module.PIXI_VERSION}\n", encoding="utf-8")
+    manager = EnvironmentManager(tmp_path)
+    spec = EnvironmentSpec(python="3.11")
+    mutations: list[str] = []
+
+    first = manager.provision(
+        "example",
+        spec,
+        on_mutation_started=lambda: mutations.append("first"),
+    ).wait_for()
+    second = manager.provision(
+        "example",
+        spec,
+        on_mutation_started=lambda: mutations.append("reuse"),
+    ).wait_for()
+
+    assert second is first
+    assert mutations == ["first"]
 
 
 def test_matching_environment_is_reused(tmp_path: Path) -> None:

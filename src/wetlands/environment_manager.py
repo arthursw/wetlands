@@ -124,7 +124,11 @@ class EnvironmentManager:
         self._environment_reclaimer.wake()
         return operation
 
-    def _prepare_sync(self, operation: Operation[Any]) -> PixiInfo:
+    def _prepare_sync(
+        self,
+        operation: Operation[Any],
+        on_mutation_started: Callable[[], None] | None = None,
+    ) -> PixiInfo:
         reconcile_shared_memory_leases(self.root)
         with self._prepare_condition:
             while self._preparing:
@@ -135,7 +139,11 @@ class EnvironmentManager:
                 return self._prepared
             self._preparing = True
         try:
-            pixi = prepare_pixi(self, operation)
+            pixi = prepare_pixi(
+                self,
+                operation,
+                on_mutation_started=on_mutation_started,
+            )
         except BaseException:
             with self._prepare_condition:
                 self._preparing = False
@@ -158,8 +166,9 @@ class EnvironmentManager:
         """Provision or reuse one environment asynchronously.
 
         ``on_mutation_started`` runs at most once on the operation thread,
-        immediately before Wetlands first mutates the managed target. It is not
-        called when an existing generation is reused without changes.
+        immediately before Wetlands first mutates its managed Pixi installation
+        or the environment target. It is not called when both are reused without
+        changes.
         """
 
         normalized_name = validate_environment_name(name)
@@ -432,11 +441,18 @@ class EnvironmentManager:
 
             with self._lifecycle_condition:
                 remaining_pool = any(environment._has_open_pools() for environment in environments)
-            reclaimer_timeout = None if deadline is None else max(0.0, deadline - time.monotonic())
-            reclaimer_closed = self._environment_reclaimer.close(timeout=reclaimer_timeout)
-            if not reclaimer_closed:
-                assert normalized_timeout is not None
-                errors.append(ManagerCloseTimeoutError("environment reclaimer", normalized_timeout))
+            if deadline is None:
+                # Background physical reclamation was always a bounded,
+                # best-effort part of close(). Keep the reclaimer's default wait
+                # instead of turning timeout=None into an indefinite join.
+                self._environment_reclaimer.close()
+                reclaimer_closed = True
+            else:
+                reclaimer_timeout = max(0.0, deadline - time.monotonic())
+                reclaimer_closed = self._environment_reclaimer.close(timeout=reclaimer_timeout)
+                if not reclaimer_closed:
+                    assert normalized_timeout is not None
+                    errors.append(ManagerCloseTimeoutError("environment reclaimer", normalized_timeout))
             with self._lifecycle_condition:
                 self._close_complete = lifecycle_ready and not remaining_pool and reclaimer_closed
             if errors:

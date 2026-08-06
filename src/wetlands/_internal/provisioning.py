@@ -740,7 +740,11 @@ def _detect_pixi_version(executable: Path, runner: ProcessTreeRunner) -> str:
     return match.group(1)
 
 
-def _prepare_pixi_impl(manager: EnvironmentManager, operation: Operation[Any]) -> PixiInfo:
+def _prepare_pixi_impl(
+    manager: EnvironmentManager,
+    operation: Operation[Any],
+    on_mutation_started: Callable[[], None] | None = None,
+) -> PixiInfo:
     runner = ProcessTreeRunner(
         operation,
         grace=manager.termination_grace,
@@ -786,6 +790,8 @@ def _prepare_pixi_impl(manager: EnvironmentManager, operation: Operation[Any]) -
                 )
             )
         url = f"https://github.com/prefix-dev/pixi/releases/download/{PIXI_VERSION}/{artifact}"
+        if on_mutation_started is not None:
+            on_mutation_started()
         install_root.mkdir(parents=True, exist_ok=True)
         bin_root = install_root / "bin"
         bin_root.mkdir(parents=True, exist_ok=True)
@@ -909,9 +915,17 @@ def _prepare_pixi_impl(manager: EnvironmentManager, operation: Operation[Any]) -
         return PixiInfo(executable, expected_version, True)
 
 
-def prepare_pixi(manager: EnvironmentManager, operation: Operation[Any]) -> PixiInfo:
+def prepare_pixi(
+    manager: EnvironmentManager,
+    operation: Operation[Any],
+    on_mutation_started: Callable[[], None] | None = None,
+) -> PixiInfo:
     try:
-        return _prepare_pixi_impl(manager, operation)
+        return _prepare_pixi_impl(
+            manager,
+            operation,
+            on_mutation_started=on_mutation_started,
+        )
     except (OperationCanceled, PreparationError):
         raise
     except BaseException as error:
@@ -2233,8 +2247,22 @@ def provision_environment(
 ) -> ManagedEnvironment:
     from wetlands.managed_environment import ManagedEnvironment
 
+    mutation_started = False
+
+    def announce_mutation() -> None:
+        nonlocal mutation_started
+        if mutation_started:
+            return
+        if on_mutation_started is not None:
+            on_mutation_started()
+        _raise_if_canceled(operation)
+        mutation_started = True
+
     try:
-        pixi = manager._prepare_sync(operation)
+        pixi = manager._prepare_sync(
+            operation,
+            on_mutation_started=announce_mutation,
+        )
     except PreparationError as error:
         raise ProvisioningError(error.failure) from error
     if operation.cancellation_requested:
@@ -2250,17 +2278,7 @@ def provision_environment(
     temporary_staging: Path | None = None
     local_snapshots: dict[str, Path] = {}
     local_backups: dict[str, Path] = {}
-    mutation_started = False
     current_stage = ProvisioningStage.LOCK_WAIT
-
-    def announce_mutation() -> None:
-        nonlocal mutation_started
-        if mutation_started:
-            return
-        if on_mutation_started is not None:
-            on_mutation_started()
-        _raise_if_canceled(operation)
-        mutation_started = True
 
     with environment_lifecycle_gate(manager, name, operation=operation):
         try:
