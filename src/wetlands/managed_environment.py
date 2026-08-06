@@ -193,7 +193,7 @@ class ManagedEnvironment:
         with self._lock:
             attempts: list[tuple[WorkerPool, _PoolCloseAttempt]] = []
             for pool in self._pools:
-                if pool._closed:
+                if pool._closed is True:
                     continue
                 key = id(pool)
                 attempt = self._pool_close_attempts.get(key)
