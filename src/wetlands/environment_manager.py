@@ -152,17 +152,34 @@ class EnvironmentManager:
         spec: EnvironmentSpec,
         *,
         replace_existing: bool = False,
+        on_mutation_started: Callable[[], None] | None = None,
     ) -> ProvisioningOperation[ManagedEnvironment]:
+        """Provision or reuse one environment asynchronously.
+
+        ``on_mutation_started`` runs at most once on the operation thread,
+        immediately before Wetlands first mutates the managed target. It is not
+        called when an existing generation is reused without changes.
+        """
+
         normalized_name = validate_environment_name(name)
         if not isinstance(spec, EnvironmentSpec):
             raise TypeError("spec must be an EnvironmentSpec")
+        if on_mutation_started is not None and not callable(on_mutation_started):
+            raise TypeError("on_mutation_started must be callable or None")
         operation: ProvisioningOperation[ManagedEnvironment] = ProvisioningOperation(environment=normalized_name)
         key = environment_name_key(normalized_name)
         with self._environment_lock:
             initial_epoch = self._environment_epochs.get(key, 0)
 
         def run() -> ManagedEnvironment:
-            environment = provision_environment(self, operation, normalized_name, spec, replace_existing)
+            environment = provision_environment(
+                self,
+                operation,
+                normalized_name,
+                spec,
+                replace_existing,
+                on_mutation_started,
+            )
             with self._environment_lock:
                 if self._environment_epochs.get(key, 0) != initial_epoch:
                     return environment
@@ -342,6 +359,12 @@ class EnvironmentManager:
             return endpoint
 
     def close(self) -> None:
+        """Cancel active operations and close pools using bounded process cleanup.
+
+        Failed pool cleanup is reported with :class:`ManagerCloseError`; a later
+        call retries pools whose cleanup did not complete.
+        """
+
         with self._close_lock:
             with self._lifecycle_condition:
                 if self._close_complete:

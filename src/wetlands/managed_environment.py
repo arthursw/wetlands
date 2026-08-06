@@ -335,7 +335,10 @@ class WorkerPool:
         self._closed = True
 
     def close(self) -> None:
-        """Stop all workers in the pool and release their resources."""
+        """Stop all workers using the manager's bounded termination grace.
+
+        If cleanup raises, the pool remains open so the caller can retry.
+        """
         if self._closed:
             return
         self._runtime._exit()

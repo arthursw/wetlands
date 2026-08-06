@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -55,8 +56,10 @@ from wetlands.specs import (
     MANAGED_DEBUGPY_VERSION,
     MANAGED_RUNTIME_PYPI,
     EnvironmentSpec,
+    LocalPackageValidationError,
     PixiInfo,
     ProvisioningStage,
+    _copy_local_package_content,
     _parse_pinned_git_url,
     environment_name_key,
     validate_environment_name,
@@ -963,8 +966,8 @@ def _render_pypi_dependency(dependency: str) -> tuple[str, str]:
     return requirement.name, _toml_quote(version)
 
 
-def _render_local_dependency(package: LocalPackage) -> str:
-    fields = [f"path = {_toml_quote(str(package.source))}"]
+def _render_local_dependency(package: LocalPackage, *, source: Path | None = None) -> str:
+    fields = [f"path = {_toml_quote(str(source if source is not None else package.source))}"]
     if package.editable:
         fields.append("editable = true")
     if package.extras:
@@ -973,7 +976,12 @@ def _render_local_dependency(package: LocalPackage) -> str:
     return f"{{ {', '.join(fields)} }}"
 
 
-def render_pixi_manifest(name: str, spec: EnvironmentSpec) -> bytes:
+def render_pixi_manifest(
+    name: str,
+    spec: EnvironmentSpec,
+    *,
+    local_sources: Mapping[str, Path] | None = None,
+) -> bytes:
     channels = list(spec.channels)
     for dependency in spec.conda:
         if "::" in dependency:
@@ -1009,7 +1017,11 @@ def render_pixi_manifest(name: str, spec: EnvironmentSpec) -> bytes:
             spec.local,
             key=lambda item: item.distribution_name,
         ):
-            lines.append(f"{_toml_quote(local_package.distribution_name)} = {_render_local_dependency(local_package)}")
+            source = None if local_sources is None else local_sources.get(local_package.distribution_name)
+            lines.append(
+                f"{_toml_quote(local_package.distribution_name)} = "
+                f"{_render_local_dependency(local_package, source=source)}"
+            )
     lines.append("")
     return "\n".join(lines).encode()
 
@@ -1625,6 +1637,32 @@ def _valid_ready_payload(
     return value
 
 
+def _staged_local_package_path(target: Path, distribution_name: str) -> Path:
+    return target / f".wetlands-local-{distribution_name}"
+
+
+def _content_local_packages_are_valid(target: Path, value: Mapping[str, Any]) -> bool:
+    recipe = value.get("recipe")
+    local = recipe.get("local") if isinstance(recipe, dict) else None
+    if not isinstance(local, list):
+        return True
+    from wetlands.specs import local_package_content_identity
+
+    for entry in local:
+        if not isinstance(entry, dict) or "content_identity" not in entry:
+            continue
+        identity = entry.get("content_identity")
+        distribution_name = entry.get("distribution_name")
+        if not isinstance(identity, str) or not isinstance(distribution_name, str):
+            return False
+        try:
+            if local_package_content_identity(_staged_local_package_path(target, distribution_name)) != identity:
+                return False
+        except (OSError, LocalPackageValidationError, ValueError):
+            return False
+    return True
+
+
 def _read_ready(target: Path) -> dict[str, Any] | None:
     root = target.parent
     try:
@@ -1695,13 +1733,16 @@ def _read_ready(target: Path) -> dict[str, Any] | None:
         value = json.loads(ready_bytes.decode("utf-8"))
     except (OSError, RuntimeError, UnicodeDecodeError, ValueError):
         return None
-    return _valid_ready_payload(
+    payload = _valid_ready_payload(
         value,
         target=target,
         canonical_target=canonical_target,
         manifest=manifest,
         lock=lock,
     )
+    if payload is None or not _content_local_packages_are_valid(target, payload):
+        return None
+    return payload
 
 
 def _target_has_valid_owner_marker(root: Path, target: Path) -> bool:
@@ -2079,12 +2120,116 @@ def _raise_if_canceled(operation: Operation[Any]) -> None:
         raise OperationCanceled(operation.id)
 
 
+def _snapshot_content_local_packages(
+    manager: EnvironmentManager,
+    operation: Operation[Any],
+    spec: EnvironmentSpec,
+) -> tuple[Path | None, dict[str, Path]]:
+    packages = tuple(package for package in spec.local if package.content_identity is not None)
+    if not packages:
+        return None, {}
+    manager.state_root.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=f"local-packages-{operation.id}-", dir=manager.state_root))
+    snapshots: dict[str, Path] = {}
+    try:
+        for package in packages:
+            _raise_if_canceled(operation)
+            destination = staging_root / package.distribution_name
+            assert package.content_identity is not None
+            _copy_local_package_content(package.source, destination, package.content_identity)
+            snapshots[package.distribution_name] = destination
+        _raise_if_canceled(operation)
+        return staging_root, snapshots
+    except BaseException:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
+
+
+def _install_content_local_packages(
+    manager: EnvironmentManager,
+    target: Path,
+    target_identity: _FileIdentity,
+    spec: EnvironmentSpec,
+    snapshots: Mapping[str, Path],
+) -> dict[str, Path]:
+    backups: dict[str, Path] = {}
+    for package in spec.local:
+        if package.content_identity is None:
+            continue
+        snapshot = snapshots[package.distribution_name]
+        stage = _staged_local_package_path(target, package.distribution_name)
+        _assert_managed_target(
+            manager.environments_root,
+            target,
+            require_marker=True,
+            expected_identity=target_identity,
+        )
+        os.replace(snapshot, stage)
+        backup = snapshot.parent / f"{package.distribution_name}-pristine"
+        _copy_local_package_content(stage, backup, package.content_identity)
+        backups[package.distribution_name] = backup
+        _assert_managed_target(
+            manager.environments_root,
+            target,
+            require_marker=True,
+            expected_identity=target_identity,
+        )
+    return backups
+
+
+def _restore_and_verify_content_local_packages(
+    manager: EnvironmentManager,
+    target: Path,
+    target_identity: _FileIdentity,
+    spec: EnvironmentSpec,
+    backups: Mapping[str, Path],
+) -> None:
+    from wetlands.specs import local_package_content_identity
+
+    for package in spec.local:
+        if package.content_identity is None:
+            continue
+        stage = _staged_local_package_path(target, package.distribution_name)
+        try:
+            unchanged = local_package_content_identity(stage) == package.content_identity
+        except (OSError, LocalPackageValidationError, ValueError):
+            unchanged = False
+        if not unchanged:
+            discarded = target / f".wetlands-local-discard-{package.distribution_name}"
+            _assert_managed_target(
+                manager.environments_root,
+                target,
+                require_marker=True,
+                expected_identity=target_identity,
+            )
+            discard_exists = os.path.lexists(stage)
+            if discard_exists:
+                os.replace(stage, discarded)
+            os.replace(backups[package.distribution_name], stage)
+            if discard_exists:
+                if _is_link_or_reparse(discarded) or not discarded.is_dir():
+                    discarded.unlink()
+                else:
+                    shutil.rmtree(discarded)
+        if local_package_content_identity(stage) != package.content_identity:
+            raise LocalPackageValidationError(
+                f"Staged local package {package.distribution_name!r} does not match its content identity"
+            )
+        _assert_managed_target(
+            manager.environments_root,
+            target,
+            require_marker=True,
+            expected_identity=target_identity,
+        )
+
+
 def provision_environment(
     manager: EnvironmentManager,
     operation: Operation[Any],
     name: str,
     spec: EnvironmentSpec,
     replace_existing: bool,
+    on_mutation_started: Callable[[], None] | None = None,
 ) -> ManagedEnvironment:
     from wetlands.managed_environment import ManagedEnvironment
 
@@ -2102,7 +2247,21 @@ def provision_environment(
     created_target = False
     created_target_identity: _FileIdentity | None = None
     ownership_published = False
+    temporary_staging: Path | None = None
+    local_snapshots: dict[str, Path] = {}
+    local_backups: dict[str, Path] = {}
+    mutation_started = False
     current_stage = ProvisioningStage.LOCK_WAIT
+
+    def announce_mutation() -> None:
+        nonlocal mutation_started
+        if mutation_started:
+            return
+        if on_mutation_started is not None:
+            on_mutation_started()
+        _raise_if_canceled(operation)
+        mutation_started = True
+
     with environment_lifecycle_gate(manager, name, operation=operation):
         try:
             if operation.cancellation_requested:
@@ -2126,7 +2285,12 @@ def provision_environment(
                 )
             target_exists = os.path.lexists(target)
             ready = _read_ready(target) if target_exists else None
-            manifest = render_pixi_manifest(name, spec)
+            local_sources = {
+                package.distribution_name: _staged_local_package_path(target, package.distribution_name)
+                for package in spec.local
+                if package.content_identity is not None
+            }
+            manifest = render_pixi_manifest(name, spec, local_sources=local_sources)
             generated_manifest_hash = hashlib.sha256(manifest).hexdigest()
             supplied_lock_hash = hashlib.sha256(spec.lock_bytes).hexdigest() if spec.lock_bytes is not None else None
             if ready is not None:
@@ -2176,6 +2340,9 @@ def provision_environment(
                         name,
                         str(generation_id) if generation_id is not None else None,
                     )
+                current_stage = ProvisioningStage.LOCAL_INSTALL
+                temporary_staging, local_snapshots = _snapshot_content_local_packages(manager, operation, spec)
+                announce_mutation()
                 current_stage = ProvisioningStage.INCOMPLETE_REMOVAL
                 manager._quarantine_environment(
                     target,
@@ -2202,6 +2369,9 @@ def provision_environment(
                         name,
                         str(generation_id) if generation_id is not None else None,
                     )
+                current_stage = ProvisioningStage.LOCAL_INSTALL
+                temporary_staging, local_snapshots = _snapshot_content_local_packages(manager, operation, spec)
+                announce_mutation()
                 current_stage = ProvisioningStage.INCOMPLETE_REMOVAL
                 operation._emit(
                     OperationEventKind.CLEANUP,
@@ -2217,6 +2387,11 @@ def provision_environment(
                 )
             _discard_matching_journals(manager, target)
 
+            if temporary_staging is None:
+                current_stage = ProvisioningStage.LOCAL_INSTALL
+                temporary_staging, local_snapshots = _snapshot_content_local_packages(manager, operation, spec)
+            announce_mutation()
+
             created_target_identity = _create_managed_target(
                 manager.environments_root,
                 target,
@@ -2231,6 +2406,13 @@ def provision_environment(
                 require_marker=False,
             )
             ownership_published = True
+            local_backups = _install_content_local_packages(
+                manager,
+                target,
+                created_target_identity,
+                spec,
+                local_snapshots,
+            )
             journal_path = _journal(
                 manager,
                 operation,
@@ -2418,6 +2600,13 @@ def provision_environment(
                     environment=pixi_environment,
                 )
             )
+            _restore_and_verify_content_local_packages(
+                manager,
+                target,
+                created_target_identity,
+                spec,
+                local_backups,
+            )
             if operation.cancellation_requested:
                 raise OperationCanceled(operation.id)
             manifest_bytes = _read_target_file(
@@ -2521,3 +2710,6 @@ def provision_environment(
                 message=f"Provisioning environment {name!r} failed: {error}",
             )
             raise ProvisioningError(failure) from error
+        finally:
+            if temporary_staging is not None:
+                shutil.rmtree(temporary_staging, ignore_errors=True)

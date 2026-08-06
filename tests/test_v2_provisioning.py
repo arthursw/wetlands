@@ -22,6 +22,7 @@ from wetlands import (
     EnvironmentRecipeConflictError,
     EnvironmentSpec,
     LocalPackage,
+    LocalPackageValidationError,
     OperationCanceled,
     OperationState,
     PostInstallCommand,
@@ -29,6 +30,7 @@ from wetlands import (
     ProvisioningError,
     ProvisioningOperation,
     UnmanagedTargetError,
+    local_package_content_identity,
 )
 from wetlands._internal.provisioning import (
     OWNER_MARKER,
@@ -351,6 +353,158 @@ def test_local_package_is_materialized_before_install_and_reused(
         "extras": ["test"],
     }
     assert first.generation_id == second.generation_id
+
+
+def test_content_identified_local_package_is_staged_restored_and_reused(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    package = tmp_path / "worker-package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "worker-package"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+    (package / "worker.py").write_text("VALUE = 42\n", encoding="utf-8")
+    identity = local_package_content_identity(package)
+    spec = EnvironmentSpec(local=(LocalPackage(package, content_identity=identity),))
+    mutations: list[str] = []
+    original_run = provisioning_module.ProcessTreeRunner.run
+
+    def mutate_build_source(runner, step):
+        result = original_run(runner, step)
+        if step.id == "pixi-install":
+            stage = manager.environments_root / "example" / ".wetlands-local-worker-package"
+            (stage / "build").mkdir()
+            (stage / "build" / "generated.txt").write_text("generated", encoding="utf-8")
+        return result
+
+    with patch.object(provisioning_module.ProcessTreeRunner, "run", new=mutate_build_source):
+        first = manager.provision(
+            "example",
+            spec,
+            on_mutation_started=lambda: mutations.append("first"),
+        ).wait_for()
+
+    stage = first.path / ".wetlands-local-worker-package"
+    manifest = tomllib.loads(first.pixi_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["pypi-dependencies"]["worker-package"] == {"path": str(stage)}
+    assert str(package) not in first.pixi_manifest_path.read_text(encoding="utf-8")
+    assert local_package_content_identity(stage) == identity
+    assert not (stage / "build").exists()
+    assert mutations == ["first"]
+
+    for path in package.iterdir():
+        path.unlink()
+    package.rmdir()
+    second = manager.provision(
+        "example",
+        spec,
+        on_mutation_started=lambda: mutations.append("reuse"),
+    ).wait_for()
+
+    assert second.generation_id == first.generation_id
+    assert mutations == ["first"]
+
+
+def test_changed_content_stage_is_rebuilt_from_declared_source(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    package = tmp_path / "worker-package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "worker-package"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+    identity = local_package_content_identity(package)
+    spec = EnvironmentSpec(local=(LocalPackage(package, content_identity=identity),))
+    first = manager.provision("example", spec).wait_for()
+    stage = first.path / ".wetlands-local-worker-package"
+    (stage / "pyproject.toml").write_text("changed", encoding="utf-8")
+
+    second = manager.provision("example", spec).wait_for()
+
+    assert second.generation_id != first.generation_id
+    assert local_package_content_identity(second.path / ".wetlands-local-worker-package") == identity
+
+
+def test_content_identity_mismatch_fails_before_target_mutation(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    package = tmp_path / "worker-package"
+    package.mkdir()
+    pyproject = package / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "worker-package"\nversion = "1.0"\n', encoding="utf-8")
+    identity = local_package_content_identity(package)
+    spec = EnvironmentSpec(local=(LocalPackage(package, content_identity=identity),))
+    pyproject.write_text('[project]\nname = "worker-package"\nversion = "2.0"\n', encoding="utf-8")
+    mutations: list[str] = []
+
+    with pytest.raises(ProvisioningError) as caught:
+        manager.provision(
+            "example",
+            spec,
+            on_mutation_started=lambda: mutations.append("mutation"),
+        ).wait_for()
+
+    assert isinstance(caught.value.__cause__, LocalPackageValidationError)
+    assert mutations == []
+    assert not (manager.environments_root / "example").exists()
+    assert not tuple(manager.state_root.glob("local-packages-*"))
+
+
+def test_mutation_callback_runs_once_and_preserves_existing_target_if_it_fails(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    target = manager.environments_root / "example"
+    observations: list[bool] = []
+    first = manager.provision(
+        "example",
+        EnvironmentSpec(python="3.11"),
+        on_mutation_started=lambda: observations.append(target.exists()),
+    ).wait_for()
+    manager.provision(
+        "example",
+        EnvironmentSpec(python="3.11"),
+        on_mutation_started=lambda: observations.append(target.exists()),
+    ).wait_for()
+
+    def reject_mutation() -> None:
+        observations.append(target.exists())
+        raise RuntimeError("UI unavailable")
+
+    with pytest.raises(ProvisioningError, match="UI unavailable"):
+        manager.provision(
+            "example",
+            EnvironmentSpec(python="3.12"),
+            replace_existing=True,
+            on_mutation_started=reject_mutation,
+        ).wait_for()
+
+    assert observations == [False, True]
+    assert manager.environment("example").generation_id == first.generation_id
+
+
+def test_content_stage_is_verified_before_worker_pool_start(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    package = tmp_path / "worker-package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "worker-package"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+    identity = local_package_content_identity(package)
+    environment = manager.provision(
+        "example",
+        EnvironmentSpec(local=(LocalPackage(package, content_identity=identity),)),
+    ).wait_for()
+    (environment.path / ".wetlands-local-worker-package" / "pyproject.toml").write_text(
+        "changed",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(EnvironmentGenerationChangedError):
+        environment.start()
 
 
 def test_local_package_can_use_a_supplied_lock_without_modifying_it(tmp_path: Path) -> None:

@@ -354,6 +354,9 @@ def test_local_package_content_identity_rejects_links_and_special_files(tmp_path
     with pytest.raises(LocalPackageValidationError, match="links or reparse points"):
         local_package_content_identity(package)
 
+    with pytest.raises(LocalPackageValidationError, match="cannot be a link"):
+        LocalPackage(link, content_identity=f"sha256:{'0' * 64}")
+
     link.unlink()
     if hasattr(__import__("os"), "mkfifo"):
         import os

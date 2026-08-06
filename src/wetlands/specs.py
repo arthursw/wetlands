@@ -106,7 +106,9 @@ def _local_tree_entries(source: Path) -> tuple[tuple[int, int, int, int, int, in
         try:
             children = tuple(os.scandir(directory))
         except OSError as error:
-            raise LocalPackageValidationError(f"Could not inspect local package directory {directory}: {error}") from error
+            raise LocalPackageValidationError(
+                f"Could not inspect local package directory {directory}: {error}"
+            ) from error
         for child in sorted(children, key=lambda item: item.name):
             path = Path(child.path)
             try:
@@ -114,7 +116,9 @@ def _local_tree_entries(source: Path) -> tuple[tuple[int, int, int, int, int, in
                 relative = path.relative_to(source).as_posix()
                 relative.encode("utf-8")
             except (OSError, UnicodeError, ValueError) as error:
-                raise LocalPackageValidationError(f"Could not safely identify local package entry {path}: {error}") from error
+                raise LocalPackageValidationError(
+                    f"Could not safely identify local package entry {path}: {error}"
+                ) from error
             if relative in {"", ".", ".."} or relative.startswith("../"):
                 raise LocalPackageValidationError(f"Local package entry escapes its source directory: {path}")
             portable_key = unicodedata.normalize("NFC", relative).casefold()
@@ -152,7 +156,9 @@ def _read_local_file(source: Path, entry: _LocalTreeEntry, destination: BinaryIO
     try:
         descriptor = os.open(path, flags)
     except OSError as error:
-        raise LocalPackageValidationError(f"Could not safely open local package file {entry.relative!r}: {error}") from error
+        raise LocalPackageValidationError(
+            f"Could not safely open local package file {entry.relative!r}: {error}"
+        ) from error
     digest = hashlib.sha256()
     try:
         if _metadata_signature(os.fstat(descriptor)) != entry.signature:
@@ -171,7 +177,9 @@ def _read_local_file(source: Path, entry: _LocalTreeEntry, destination: BinaryIO
     try:
         after = path.lstat()
     except OSError as error:
-        raise LocalPackageValidationError(f"Local package file disappeared during inspection: {entry.relative}") from error
+        raise LocalPackageValidationError(
+            f"Local package file disappeared during inspection: {entry.relative}"
+        ) from error
     if _is_link_or_reparse(after) or _metadata_signature(after) != entry.signature:
         raise LocalPackageValidationError(f"Local package file changed while it was read: {entry.relative}")
     return digest.digest()
@@ -306,7 +314,19 @@ class LocalPackage:
     distribution_name: str = field(init=False)
 
     def __post_init__(self) -> None:
-        source = Path(self.source).resolve()
+        requested_source = Path(self.source).expanduser()
+        if self.content_identity is not None:
+            try:
+                requested_metadata = requested_source.lstat()
+            except OSError as error:
+                raise LocalPackageValidationError(
+                    f"Could not inspect local package source {requested_source}: {error}"
+                ) from error
+            if _is_link_or_reparse(requested_metadata):
+                raise LocalPackageValidationError(
+                    f"A content-identified local package source cannot be a link or reparse point: {requested_source}"
+                )
+        source = requested_source.resolve()
         pyproject = source / "pyproject.toml"
         if not source.is_dir():
             raise LocalPackageValidationError(f"Local package source must be an existing directory: {source}")
@@ -332,7 +352,10 @@ class LocalPackage:
         object.__setattr__(self, "distribution_name", distribution_name)
         content_identity = self.content_identity
         if content_identity is not None:
-            if not isinstance(content_identity, str) or _LOCAL_PACKAGE_IDENTITY_PATTERN.fullmatch(content_identity) is None:
+            if (
+                not isinstance(content_identity, str)
+                or _LOCAL_PACKAGE_IDENTITY_PATTERN.fullmatch(content_identity) is None
+            ):
                 raise ValueError("Local package content_identity must be 'sha256:' followed by 64 hexadecimal digits")
             if self.editable:
                 raise ValueError("A content-identified local package cannot be editable")

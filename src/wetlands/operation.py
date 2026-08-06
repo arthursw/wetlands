@@ -60,6 +60,22 @@ class OperationFailure:
     environment: str | None = None
     cleanup_error: str | None = None
 
+    def to_payload(self) -> dict[str, Any]:
+        """Return a stable JSON-compatible diagnostic representation."""
+
+        return {
+            "operation_id": self.operation_id,
+            "stage": self.stage,
+            "message": self.message,
+            "step_id": self.step_id,
+            "command": self.command,
+            "returncode": self.returncode,
+            "stdout_tail": list(self.stdout_tail),
+            "stderr_tail": list(self.stderr_tail),
+            "environment": self.environment,
+            "cleanup_error": self.cleanup_error,
+        }
+
 
 @dataclass(frozen=True)
 class OperationEvent:

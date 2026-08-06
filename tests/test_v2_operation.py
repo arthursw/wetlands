@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 
@@ -10,8 +11,38 @@ from wetlands.operation import (
     Operation,
     OperationCanceled,
     OperationEventKind,
+    OperationFailure,
     OperationState,
 )
+
+
+def test_operation_failure_payload_is_stable_and_json_compatible() -> None:
+    failure = OperationFailure(
+        operation_id="operation-1",
+        stage="install",
+        message="failed",
+        step_id="step-1",
+        command="tool install",
+        returncode=2,
+        stdout_tail=("output",),
+        stderr_tail=("error",),
+        environment="example",
+        cleanup_error="cleanup failed",
+    )
+
+    assert failure.to_payload() == {
+        "operation_id": "operation-1",
+        "stage": "install",
+        "message": "failed",
+        "step_id": "step-1",
+        "command": "tool install",
+        "returncode": 2,
+        "stdout_tail": ["output"],
+        "stderr_tail": ["error"],
+        "environment": "example",
+        "cleanup_error": "cleanup failed",
+    }
+    json.dumps(failure.to_payload())
 
 
 def test_operation_wait_and_await_return_the_value() -> None:

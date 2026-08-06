@@ -79,6 +79,12 @@ def test_manager_constructor_has_no_manager_selection_or_legacy_paths() -> None:
     assert not hasattr(wetlands.EnvironmentManager, "get_process_logger")
 
 
+def test_provision_exposes_a_pre_mutation_notification() -> None:
+    parameters = inspect.signature(wetlands.EnvironmentManager.provision).parameters
+
+    assert parameters["on_mutation_started"].default is None
+
+
 def test_worker_environment_is_a_public_start_option() -> None:
     parameters = inspect.signature(wetlands.ManagedEnvironment.start).parameters
 
