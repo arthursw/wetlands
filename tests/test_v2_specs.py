@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -396,9 +397,7 @@ def test_local_package_content_identity_rejects_links_and_special_files(tmp_path
         LocalPackage(link, content_identity=f"sha256:{'0' * 64}")
 
     link.unlink()
-    if hasattr(__import__("os"), "mkfifo"):
-        import os
-
+    if hasattr(os, "mkfifo"):
         fifo = package / "pipe"
         os.mkfifo(fifo)
         with pytest.raises(LocalPackageValidationError, match="special files"):
@@ -436,6 +435,34 @@ def test_local_package_content_identity_rejects_mutation_during_scan(tmp_path: P
         pytest.raises(LocalPackageValidationError, match="changed"),
     ):
         local_package_content_identity(package)
+
+
+def test_local_package_content_identity_allows_path_descriptor_timestamp_differences(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    source = package / "data.txt"
+    source.write_text("content", encoding="utf-8")
+    original_fstat = specs_module.os.fstat
+
+    class DescriptorMetadata:
+        def __init__(self, metadata: os.stat_result) -> None:
+            self._metadata = metadata
+            self.st_mtime_ns = metadata.st_mtime_ns + 1
+            self.st_ctime_ns = metadata.st_ctime_ns + 1
+
+        def __getattr__(self, name: str):
+            return getattr(self._metadata, name)
+
+    monkeypatch.setattr(
+        specs_module.os,
+        "fstat",
+        lambda descriptor: DescriptorMetadata(original_fstat(descriptor)),
+    )
+
+    assert local_package_content_identity(package).startswith("sha256:")
 
 
 @pytest.mark.parametrize(

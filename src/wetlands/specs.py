@@ -86,6 +86,26 @@ def _metadata_signature(metadata: os.stat_result) -> tuple[int, int, int, int, i
     )
 
 
+def _opened_file_matches_entry(
+    entry_signature: tuple[int, int, int, int, int, int],
+    descriptor_signature: tuple[int, int, int, int, int, int],
+) -> bool:
+    """Return whether path and descriptor metadata identify the same file.
+
+    Windows may report different timestamp precision for a path stat and an
+    open descriptor stat.  Compare their stable fields here, then compare each
+    source's complete signature with a second reading in ``_read_local_file``.
+    """
+
+    entry_device, entry_inode, entry_mode, entry_size, _, _ = entry_signature
+    descriptor_device, descriptor_inode, descriptor_mode, descriptor_size, _, _ = descriptor_signature
+    if entry_mode != descriptor_mode or entry_size != descriptor_size:
+        return False
+    if entry_device and descriptor_device and entry_device != descriptor_device:
+        return False
+    return not (entry_inode and descriptor_inode and entry_inode != descriptor_inode)
+
+
 def _is_link_or_reparse(metadata: os.stat_result) -> bool:
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
     return stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
@@ -161,7 +181,8 @@ def _read_local_file(source: Path, entry: _LocalTreeEntry, destination: BinaryIO
         ) from error
     digest = hashlib.sha256()
     try:
-        if _metadata_signature(os.fstat(descriptor)) != entry.signature:
+        descriptor_signature = _metadata_signature(os.fstat(descriptor))
+        if not _opened_file_matches_entry(entry.signature, descriptor_signature):
             raise LocalPackageValidationError(f"Local package file changed during inspection: {entry.relative}")
         while True:
             chunk = os.read(descriptor, 1024 * 1024)
@@ -170,7 +191,7 @@ def _read_local_file(source: Path, entry: _LocalTreeEntry, destination: BinaryIO
             digest.update(chunk)
             if destination is not None:
                 destination.write(chunk)
-        if _metadata_signature(os.fstat(descriptor)) != entry.signature:
+        if _metadata_signature(os.fstat(descriptor)) != descriptor_signature:
             raise LocalPackageValidationError(f"Local package file changed while it was read: {entry.relative}")
     finally:
         os.close(descriptor)

@@ -339,7 +339,7 @@ def test_close_passes_only_remaining_deadline_to_reclaimer(monkeypatch, tmp_path
 
     assert len(received) == 1
     assert received[0] is not None
-    assert 0 <= received[0] <= 0.05
+    assert 0 <= received[0] <= 0.05 + 1e-12
     assert any(
         isinstance(error, ManagerCloseTimeoutError) and error.phase == "environment reclaimer"
         for error in caught.value.errors

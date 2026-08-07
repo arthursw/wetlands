@@ -50,6 +50,7 @@ groups = {
         "InvalidStateError",
         "LocalPackageValidationError",
         "ManagerCloseError",
+        "ManagerCloseTimeoutError",
         "OperationCanceled",
         "OperationError",
         "OperationFailure",
