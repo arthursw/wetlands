@@ -465,6 +465,32 @@ def test_local_package_content_identity_allows_path_descriptor_timestamp_differe
     assert local_package_content_identity(package).startswith("sha256:")
 
 
+def test_local_package_content_identity_does_not_use_directory_entry_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "data.txt").write_text("content", encoding="utf-8")
+    original_scandir = specs_module.os.scandir
+
+    class DirectoryEntry:
+        def __init__(self, entry: os.DirEntry[str]) -> None:
+            self.name = entry.name
+            self.path = entry.path
+
+        def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+            raise AssertionError("directory-entry metadata is not stable across Windows stat APIs")
+
+    monkeypatch.setattr(
+        specs_module.os,
+        "scandir",
+        lambda path: iter(DirectoryEntry(entry) for entry in original_scandir(path)),
+    )
+
+    assert local_package_content_identity(package).startswith("sha256:")
+
+
 @pytest.mark.parametrize(
     "pyproject, message",
     [

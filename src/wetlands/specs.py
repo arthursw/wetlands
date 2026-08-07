@@ -132,7 +132,7 @@ def _local_tree_entries(source: Path) -> tuple[tuple[int, int, int, int, int, in
         for child in sorted(children, key=lambda item: item.name):
             path = Path(child.path)
             try:
-                metadata = child.stat(follow_symlinks=False)
+                metadata = path.lstat()
                 relative = path.relative_to(source).as_posix()
                 relative.encode("utf-8")
             except (OSError, UnicodeError, ValueError) as error:
