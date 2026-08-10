@@ -59,6 +59,7 @@ def environment(tmp_path: Path) -> _Environment:
     (project / "pixi.toml").write_text("", encoding="utf-8")
     fake_pixi = """#!/usr/bin/env python3
 import os
+import subprocess
 import sys
 if os.name == "nt":
     valid_prefix = os.path.basename(sys.argv[0]) == "run" and sys.argv[1:2] == ["--manifest-path"]
@@ -67,6 +68,8 @@ else:
 if not valid_prefix or "--locked" not in sys.argv or "--" not in sys.argv:
     raise SystemExit(91)
 split = sys.argv.index("--")
+if os.name == "nt":
+    raise SystemExit(subprocess.run(sys.argv[split + 1:], check=False, env=os.environ).returncode)
 os.execvpe(sys.argv[split + 1], sys.argv[split + 1:], os.environ)
 """
     if os.name == "nt":
@@ -520,8 +523,10 @@ def test_real_manager_close_terminates_a_registered_process(tmp_path: Path) -> N
     (project / "pixi.toml").write_text("", encoding="utf-8")
     fake_pixi = (
         "#!/usr/bin/env python3\n"
-        "import os, sys\n"
+        "import os, subprocess, sys\n"
         "split = sys.argv.index('--')\n"
+        "if os.name == 'nt':\n"
+        " raise SystemExit(subprocess.run(sys.argv[split + 1:], check=False, env=os.environ).returncode)\n"
         "os.execvpe(sys.argv[split + 1], sys.argv[split + 1:], os.environ)\n"
     )
     if os.name == "nt":
