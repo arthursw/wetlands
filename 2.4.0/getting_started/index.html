@@ -408,6 +408,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-values-can-cross-the-worker-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      What values can cross the worker boundary?
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-remains-on-disk" class="md-nav__link">
     <span class="md-ellipsis">
       What remains on disk?
@@ -858,7 +867,7 @@
   
   
   <span class="md-ellipsis">
-    Values and NumPy ownership
+    NumPy arrays and shared-memory transport
     
   </span>
   
@@ -1534,6 +1543,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-values-can-cross-the-worker-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      What values can cross the worker boundary?
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-remains-on-disk" class="md-nav__link">
     <span class="md-ellipsis">
       What remains on disk?
@@ -1614,13 +1632,21 @@ Provisioning means preparing an environment so it is ready to run code.</p>
 The context manager stops the worker when the block ends.</p>
 <p><code>execute_import()</code> imports <code>builtins:sum</code> inside the worker, calls it with <code>[20, 22]</code>, waits for completion, and returns the result to the application.</p>
 <p>The outer context manager closes the manager even when an error occurs.</p>
+<h2 id="what-values-can-cross-the-worker-boundary">What values can cross the worker boundary?</h2>
+<p>Arguments and results can contain ordinary values such as numbers, strings, bytes, lists, tuples, and dictionaries.</p>
+<p>Wetlands can also pass NumPy arrays automatically.
+Their data is copied between the application and worker through operating-system shared memory, while your code continues to use normal <code>numpy.ndarray</code> objects.
+You do not create or clean up shared memory yourself, and worker mutations cannot change the application's original array.</p>
+<p>NumPy transport requires <code>wetlands[shared-memory]</code> in the application environment and NumPy in the managed worker environment.
+The next tutorial demonstrates the complete setup.
+See <a href="../shared_memory/">NumPy arrays and shared-memory transport</a> for the transfer and ownership model.</p>
 <h2 id="what-remains-on-disk">What remains on disk?</h2>
 <p>Closing the manager and worker pool stops their processes, but it keeps the ready environment below the <code>wetlands</code> directory.
 The next run can reuse it instead of downloading and installing Python again.</p>
 <p>When you no longer need an environment, follow <a href="../how-to/environment_management/">Discover, replace, and remove environments</a> to remove it safely.</p>
 <h2 id="next-step">Next step</h2>
 <p>Continue with <a href="../tutorials/own_package/">Run code from your own package</a>.
-It replaces <code>builtins:sum</code> with a function that you provide and introduces NumPy arrays.</p>
+It replaces <code>builtins:sum</code> with a function that you provide and passes a NumPy array through shared memory.</p>
 <p>If something failed during setup, read <a href="../how-to/errors/">Handle execution and provisioning errors</a>.</p>
 
 

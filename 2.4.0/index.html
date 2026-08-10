@@ -836,7 +836,7 @@
   
   
   <span class="md-ellipsis">
-    Values and NumPy ownership
+    NumPy arrays and shared-memory transport
     
   </span>
   
@@ -1534,7 +1534,8 @@
 <p><img alt="Wetland" src="Wetland.svg" /></p>
 <p>Wetlands lets a Python application run functions and external commands in separate environments without mixing their dependencies into the main application.</p>
 <p>For example, an application can use Cellpose and StarDist even when those libraries require incompatible versions of another package.
-Each library runs in its own environment while Wetlands moves ordinary Python values and NumPy arrays between the application and worker processes.</p>
+Each library runs in its own environment while Wetlands moves ordinary Python values between the application and worker processes.
+NumPy array data is transferred automatically through operating-system shared memory, but application and worker code still receive independent, ordinary arrays.</p>
 <blockquote>
 <p>Wetlands runs worker functions, managed commands, and installers with your user account's permissions.
 Use it only with code and dependencies you trust.</p>
@@ -1542,7 +1543,8 @@ Use it only with code and dependencies you trust.</p>
 <h2 id="new-to-wetlands">New to Wetlands?</h2>
 <p>Follow <a href="getting_started/">Run your first task</a> to install Wetlands, create one environment, and get a result.
 The tutorial assumes that you know basic Python but does not assume knowledge of Pixi, worker processes, or asynchronous APIs.</p>
-<p>Then follow <a href="tutorials/own_package/">Run code from your own package</a> to understand how application code and worker code fit together.</p>
+<p>Then follow <a href="tutorials/own_package/">Run code from your own package</a> to understand how application code and worker code fit together.
+That tutorial also shows how Wetlands passes NumPy arrays through shared memory without exposing shared-memory APIs to your code.</p>
 <h2 id="solving-a-specific-problem">Solving a specific problem?</h2>
 <ul>
 <li><a href="how-to/progress/">Report progress, intermediate output, and worker logs</a></li>
@@ -1550,6 +1552,7 @@ The tutorial assumes that you know basic Python but does not assume knowledge of
 <li><a href="how-to/errors/">Handle execution and provisioning errors</a></li>
 <li><a href="how-to/timeouts/">Handle timeouts</a></li>
 <li><a href="how-to/asyncio/">Use Wetlands with asyncio</a></li>
+<li><a href="shared_memory/">Pass NumPy arrays through shared memory</a></li>
 <li><a href="how-to/managed_processes/">Run commands and services</a></li>
 <li><a href="debugging/">Debug a running worker</a></li>
 <li><a href="dependencies/">Define environment dependencies</a></li>

@@ -858,7 +858,7 @@
   
   
   <span class="md-ellipsis">
-    Values and NumPy ownership
+    NumPy arrays and shared-memory transport
     
   </span>
   
@@ -1605,7 +1605,9 @@ The module is imported in the worker environment, not in the host application.</
 </span></code></pre></div>
 <h2 id="values-crossing-the-boundary">Values crossing the boundary</h2>
 <p>Simple Python values are encoded into protocol messages.
-NumPy array data uses shared memory internally, but application and worker code still receive ordinary arrays.</p>
+NumPy array data is copied through operating-system shared memory instead of being embedded in those messages.
+Shared memory is an automatic transport detail: application and worker code receive independent, ordinary arrays rather than a shared mutable or zero-copy view.
+See <a href="../../shared_memory/">NumPy arrays and shared-memory transport</a> for the complete flow.</p>
 <p>The boundary isolates dependencies, not permissions.
 Read <a href="../security/">Trusted-code security model</a> before running third-party code.</p>
 

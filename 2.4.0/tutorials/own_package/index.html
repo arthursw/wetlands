@@ -858,7 +858,7 @@
   
   
   <span class="md-ellipsis">
-    Values and NumPy ownership
+    NumPy arrays and shared-memory transport
     
   </span>
   
@@ -1659,9 +1659,15 @@ It does not import <code>example_module</code>.</p>
 <p><code>LocalPackage(example_directory)</code> tells Wetlands to install the example package inside the managed environment.
 The environment also has its own NumPy installation because the specification includes <code>numpy&gt;=2</code>.</p>
 <p><code>example_module:threshold</code> means “import <code>example_module</code> inside the worker, then call its <code>threshold</code> attribute.”</p>
-<p>Wetlands copies the input array into worker-owned memory.
-Changes made by the worker cannot modify the application's original array.
-The returned mask is a normal array owned by the application.</p>
+<p>When the application calls <code>threshold</code>, Wetlands transfers the NumPy data through operating-system shared memory automatically:</p>
+<ol>
+<li>the application copies <code>image</code> into a temporary host-owned shared-memory segment;</li>
+<li>the worker copies that data into a private, writable array;</li>
+<li>the worker places the returned mask in a temporary worker-owned shared-memory segment;</li>
+<li>the application copies the result into a normal array that it owns.</li>
+</ol>
+<p>Wetlands cleans up both temporary segments.
+This is shared-memory transport, not a shared mutable array or zero-copy API, so changes made by the worker cannot modify the application's original array.</p>
 <p>The worker and manager stop when their context managers exit.
 The ready <code>numpy-example</code> environment remains below the Wetlands root so a later run can reuse it.</p>
 <h2 id="use-a-published-package">Use a published package</h2>
@@ -1677,7 +1683,7 @@ The ready <code>numpy-example</code> environment remains below the Wetlands root
 <ul>
 <li><a href="../../dependencies/">Define environment dependencies</a></li>
 <li><a href="../../how-to/progress/">Report task progress</a></li>
-<li><a href="../../shared_memory/">Understand values and NumPy ownership</a></li>
+<li><a href="../../shared_memory/">Understand NumPy shared-memory transport</a></li>
 </ul>
 
 

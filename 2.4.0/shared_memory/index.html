@@ -22,7 +22,7 @@
     
     
       
-        <title>Values and NumPy ownership - Wetlands</title>
+        <title>NumPy arrays and shared-memory transport - Wetlands</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#values-and-numpy-ownership" class="md-skip">
+        <a href="#numpy-arrays-and-shared-memory-transport" class="md-skip">
           Skip to content
         </a>
       
@@ -115,7 +115,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Values and NumPy ownership
+              NumPy arrays and shared-memory transport
             
           </span>
         </div>
@@ -771,7 +771,7 @@
   
   
   <span class="md-ellipsis">
-    Values and NumPy ownership
+    NumPy arrays and shared-memory transport
     
   </span>
   
@@ -784,7 +784,7 @@
   
   
   <span class="md-ellipsis">
-    Values and NumPy ownership
+    NumPy arrays and shared-memory transport
     
   </span>
   
@@ -807,9 +807,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#example" class="md-nav__link">
+  <a href="#set-up-both-environments" class="md-nav__link">
     <span class="md-ellipsis">
-      Example
+      Set up both environments
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pass-an-array-like-any-other-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pass an array like any other value
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-happens-during-a-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      What happens during a call
     </span>
   </a>
   
@@ -825,18 +843,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#numpy-rules" class="md-nav__link">
+  <a href="#array-behavior-and-limitations" class="md-nav__link">
     <span class="md-ellipsis">
-      NumPy rules
+      Array behavior and limitations
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#ownership" class="md-nav__link">
+  <a href="#shared-memory-lifetime-and-cleanup" class="md-nav__link">
     <span class="md-ellipsis">
-      Ownership
+      Shared-memory lifetime and cleanup
     </span>
   </a>
   
@@ -1498,9 +1516,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#example" class="md-nav__link">
+  <a href="#set-up-both-environments" class="md-nav__link">
     <span class="md-ellipsis">
-      Example
+      Set up both environments
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pass-an-array-like-any-other-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pass an array like any other value
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-happens-during-a-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      What happens during a call
     </span>
   </a>
   
@@ -1516,18 +1552,18 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#numpy-rules" class="md-nav__link">
+  <a href="#array-behavior-and-limitations" class="md-nav__link">
     <span class="md-ellipsis">
-      NumPy rules
+      Array behavior and limitations
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#ownership" class="md-nav__link">
+  <a href="#shared-memory-lifetime-and-cleanup" class="md-nav__link">
     <span class="md-ellipsis">
-      Ownership
+      Shared-memory lifetime and cleanup
     </span>
   </a>
   
@@ -1570,44 +1606,80 @@
   
 
 
-<h1 id="values-and-numpy-ownership">Values and NumPy ownership</h1>
-<p>Wetlands transports NumPy arrays automatically through its value codec protocol.
-Application and worker code exchange normal <code>numpy.ndarray</code> objects and never manage shared-memory handles.</p>
-<h2 id="example">Example</h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">image</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">with</span> <span class="n">environment</span><span class="o">.</span><span class="n">start</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">masks</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">execute_import</span><span class="p">(</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="s2">&quot;worker_package.segmentation:segment&quot;</span><span class="p">,</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="n">kwargs</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;image&quot;</span><span class="p">:</span> <span class="n">image</span><span class="p">,</span> <span class="s2">&quot;threshold&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">},</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="p">)</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
+<h1 id="numpy-arrays-and-shared-memory-transport">NumPy arrays and shared-memory transport</h1>
+<p>Wetlands passes ordinary <code>numpy.ndarray</code> objects between your application and worker processes.
+The array data travels automatically through operating-system shared memory instead of being placed in the worker's ordinary control messages.
+Only a small descriptor containing information such as the array's shape and dtype travels through the control connection.</p>
+<p>You do not create, attach, close, or unlink shared-memory segments yourself.
+Application and worker code only handle normal NumPy arrays.</p>
+<blockquote>
+<p>Shared memory is the transport mechanism, not the ownership model.
+Wetlands copies data between your arrays and temporary shared-memory segments, so this is not a shared mutable array and is not a zero-copy API.</p>
+</blockquote>
+<h2 id="set-up-both-environments">Set up both environments</h2>
+<p>Install Wetlands with NumPy transport support in the application environment:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;wetlands[shared-memory]&quot;</span>
+</span></code></pre></div>
+<p>Also include NumPy in every managed environment whose worker functions receive or return arrays:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">wetlands</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnvironmentSpec</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">spec</span> <span class="o">=</span> <span class="n">EnvironmentSpec</span><span class="p">(</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">python</span><span class="o">=</span><span class="s2">&quot;3.12.*&quot;</span><span class="p">,</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">conda</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;numpy&gt;=2&quot;</span><span class="p">,),</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>The extra installs NumPy in the application environment so Wetlands can encode and decode arrays.
+The dependency in <code>EnvironmentSpec</code> installs NumPy independently inside the worker environment.</p>
+<h2 id="pass-an-array-like-any-other-value">Pass an array like any other value</h2>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">image</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">with</span> <span class="n">environment</span><span class="o">.</span><span class="n">start</span><span class="p">()</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">masks</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">execute_import</span><span class="p">(</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="s2">&quot;worker_package.segmentation:segment&quot;</span><span class="p">,</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="n">kwargs</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;image&quot;</span><span class="p">:</span> <span class="n">image</span><span class="p">,</span> <span class="s2">&quot;threshold&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">},</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="p">)</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span>
 </span></code></pre></div>
 <p>Worker code is ordinary Python:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">segment</span><span class="p">(</span><span class="n">image</span><span class="p">:</span> <span class="s2">&quot;numpy.ndarray&quot;</span><span class="p">,</span> <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;numpy.ndarray&quot;</span><span class="p">:</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">image</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="n">image</span> <span class="o">/</span> <span class="n">image</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">return</span> <span class="n">image</span> <span class="o">&gt;</span> <span class="n">threshold</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">segment</span><span class="p">(</span><span class="n">image</span><span class="p">:</span> <span class="s2">&quot;numpy.ndarray&quot;</span><span class="p">,</span> <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;numpy.ndarray&quot;</span><span class="p">:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">image</span><span class="p">[</span><span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="n">image</span> <span class="o">/</span> <span class="n">image</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="k">return</span> <span class="n">image</span> <span class="o">&gt;</span> <span class="n">threshold</span>
 </span></code></pre></div>
 <p>Worker mutation does not modify the caller's original array.
 The result returned to the host is independently owned and remains valid after task and pool cleanup.</p>
+<h2 id="what-happens-during-a-call">What happens during a call</h2>
+<p>For an input array, Wetlands performs this flow:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>application array
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    -&gt; copy into host-owned shared memory
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    -&gt; worker reads the shared-memory segment
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    -&gt; copy into a private, writable worker array
+</span></code></pre></div>
+<p>For a result array, the flow runs in the other direction:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>worker result array
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    -&gt; copy into worker-owned shared memory
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    -&gt; application reads the shared-memory segment
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    -&gt; copy into an independently owned application array
+</span></code></pre></div>
+<p>Wetlands removes the temporary shared-memory segments after transfer.
+This design keeps large array bytes out of the control-message stream while giving each process a normal array with an unambiguous lifetime.</p>
 <h2 id="supported-values">Supported values</h2>
 <p>Wetlands accepts simple Python values, nested containers, and NumPy arrays at the task boundary.
 See <a href="../reference/supported/">Supported platforms and values</a> for the exact list and validation rules.</p>
 <p>Unsupported objects raise <code>ValueEncodingError</code> and identify where the unsupported value appeared in the submitted arguments.</p>
-<h2 id="numpy-rules">NumPy rules</h2>
+<h2 id="array-behavior-and-limitations">Array behavior and limitations</h2>
 <ul>
 <li>Object-dtype arrays are rejected.</li>
 <li>Non-contiguous arrays are converted to C-contiguous transport storage.</li>
 <li>Structured dtypes are preserved.</li>
 <li>Empty arrays do not allocate shared memory.</li>
-<li>Workers receive writable, private C-contiguous copies detached from input transport storage.</li>
-<li>Host results are copied before the output transport resource is released.</li>
+<li>Workers receive writable, private C-contiguous arrays detached from the input transport storage.</li>
+<li>Results returned to the application are independent arrays, copied before the output transport storage is released.</li>
 </ul>
-<p>Install NumPy in both the host environment and any worker environment that exchanges arrays.</p>
-<h2 id="ownership">Ownership</h2>
+<h2 id="shared-memory-lifetime-and-cleanup">Shared-memory lifetime and cleanup</h2>
 <p>For an input array:</p>
 <ol>
 <li>the host allocates and owns shared memory;</li>
@@ -1631,6 +1703,7 @@ Worker startup reports its supported codec capabilities and execution-protocol v
 The host fails before dispatch when required capabilities are unavailable.</p>
 <p>The initial codec boundary is intentionally small.
 Additional array or storage technologies can be introduced later without changing task semantics.</p>
+<p>For the lower-level protocol design, see <a href="../developer/codecs/">Transport codecs</a>.</p>
 
 
 
