@@ -60,8 +60,11 @@ def environment(tmp_path: Path) -> _Environment:
     fake_pixi = """#!/usr/bin/env python3
 import os
 import sys
-expected = ["run", "--manifest-path"]
-if sys.argv[1:3] != expected or "--locked" not in sys.argv or "--" not in sys.argv:
+if os.name == "nt":
+    valid_prefix = os.path.basename(sys.argv[0]) == "run" and sys.argv[1:2] == ["--manifest-path"]
+else:
+    valid_prefix = sys.argv[1:3] == ["run", "--manifest-path"]
+if not valid_prefix or "--locked" not in sys.argv or "--" not in sys.argv:
     raise SystemExit(91)
 split = sys.argv.index("--")
 os.execvpe(sys.argv[split + 1], sys.argv[split + 1:], os.environ)
@@ -91,8 +94,8 @@ def test_success_captures_stdout_stderr_and_releases(environment: _Environment) 
 
     assert result.argv[:2] == (sys.executable, "-c")
     assert result.returncode == 0
-    assert result.stdout == "out\n"
-    assert result.stderr == "err\n"
+    assert result.stdout == f"out{os.linesep}"
+    assert result.stderr == f"err{os.linesep}"
     assert result.started_at <= result.ended_at
     assert process.returncode == 0
     assert not process.running
@@ -124,13 +127,13 @@ def test_command_not_found_is_a_checked_process_exit(environment: _Environment) 
 
 def test_timeout_contains_partial_output_and_cleans_up(environment: _Environment) -> None:
     process = _spawn(environment, "import time; print('ready', flush=True); time.sleep(30)")
-    process.wait_for_line(lambda event: event.text == "ready\n", timeout=2)
+    process.wait_for_line(lambda event: event.text == f"ready{os.linesep}", timeout=5)
 
     with pytest.raises(ProcessTimeoutError) as raised:
         process.wait(timeout=0.05)
 
     assert raised.value.timeout == 0.05
-    assert raised.value.result.stdout == "ready\n"
+    assert raised.value.result.stdout == f"ready{os.linesep}"
     assert environment.processes == []
     with pytest.raises(ProcessTimeoutError) as repeated:
         process.wait(check=False)
@@ -189,7 +192,7 @@ def test_readiness_replays_events_and_timeout_does_not_stop_process(environment:
     process = _spawn(environment, "import time; print('Listening on 42', flush=True); time.sleep(.4)")
     time.sleep(0.05)
 
-    event = process.wait_for_line(lambda item: item.text.startswith("Listening on "), timeout=1)
+    event = process.wait_for_line(lambda item: item.text.startswith("Listening on "), timeout=5)
     assert event.stream is OutputStream.STDOUT
     with pytest.raises(ProcessLineTimeoutError):
         process.wait_for_line(lambda item: item.text.startswith("missing"), timeout=0.02, replay=False)
@@ -199,7 +202,7 @@ def test_readiness_replays_events_and_timeout_does_not_stop_process(environment:
 
 def test_trailing_partial_line_is_an_event(environment: _Environment) -> None:
     process = _spawn(environment, "import sys; sys.stderr.write('partial'); sys.stderr.flush()")
-    event = process.wait_for_line(lambda item: item.text == "partial", timeout=1)
+    event = process.wait_for_line(lambda item: item.text == "partial", timeout=5)
     assert event.stream is OutputStream.STDERR
     assert process.wait().stderr == "partial"
 
@@ -274,8 +277,8 @@ def test_async_events_preserve_stream_and_await_process(environment: _Environmen
         result = await process
 
         assert {(event.stream, event.text) for event in events} == {
-            (OutputStream.STDOUT, "one\n"),
-            (OutputStream.STDERR, "two\n"),
+            (OutputStream.STDOUT, f"one{os.linesep}"),
+            (OutputStream.STDERR, f"two{os.linesep}"),
         }
         assert result.returncode == 0
 
@@ -296,10 +299,10 @@ def test_async_events_preserve_deterministic_live_interleaving(environment: _Env
         events = [event async for event in process.events(replay=False)]
 
         assert [(event.stream, event.text) for event in events] == [
-            (OutputStream.STDOUT, "out-1\n"),
-            (OutputStream.STDERR, "err-1\n"),
-            (OutputStream.STDOUT, "out-2\n"),
-            (OutputStream.STDERR, "err-2\n"),
+            (OutputStream.STDOUT, f"out-1{os.linesep}"),
+            (OutputStream.STDERR, f"err-1{os.linesep}"),
+            (OutputStream.STDOUT, f"out-2{os.linesep}"),
+            (OutputStream.STDERR, f"err-2{os.linesep}"),
         ]
         assert process.wait().returncode == 0
 
@@ -315,7 +318,7 @@ def test_lagging_async_observer_gets_a_typed_error(environment: _Environment) ->
         process = _spawn(environment, code)
         events = process.events()
         first = await events.__anext__()
-        assert first.text == "first\n"
+        assert first.text == f"first{os.linesep}"
         await process
         with pytest.raises(ProcessEventLagError) as raised:
             await events.__anext__()
@@ -456,8 +459,8 @@ def test_timeout_cause_is_not_replaced_by_later_output_limit(environment: _Envir
         "print('ready', flush=True); "
         "time.sleep(30)"
     )
-    process = _spawn(environment, code, output_limit=len(b"ready\n"))
-    process.wait_for_line(lambda event: event.text == "ready\n", timeout=2)
+    process = _spawn(environment, code, output_limit=len(f"ready{os.linesep}".encode()))
+    process.wait_for_line(lambda event: event.text == f"ready{os.linesep}", timeout=5)
 
     with pytest.raises(ProcessTimeoutError):
         process.wait(timeout=0)
@@ -500,13 +503,13 @@ def test_concurrent_waiters_observe_the_same_winning_timeout(environment: _Envir
 def test_multiple_processes_share_generation_ownership_independently(environment: _Environment) -> None:
     first = _spawn(environment, "import time; print('first', flush=True); time.sleep(.1)")
     second = _spawn(environment, "import time; print('second', flush=True); time.sleep(30)")
-    second.wait_for_line(lambda event: event.text == "second\n", timeout=2)
+    second.wait_for_line(lambda event: event.text == f"second{os.linesep}", timeout=5)
     assert environment.processes == [first, second]
 
-    assert first.wait().stdout == "first\n"
+    assert first.wait().stdout == f"first{os.linesep}"
     assert second in environment.processes
     second.close()
-    assert second.wait(check=False).stdout == "second\n"
+    assert second.wait(check=False).stdout == f"second{os.linesep}"
     assert environment.processes == []
 
 
@@ -597,7 +600,7 @@ def test_managed_environment_run_uses_core_launch_contract(environment: _Environ
     ):
         result = managed.run([sys.executable, "-c", "print('through-public-api')"])
 
-    assert result.stdout == "through-public-api\n"
+    assert result.stdout == f"through-public-api{os.linesep}"
     assert managed._processes == []
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import json
+import os
 import socket
 import sys
 import time
@@ -324,13 +325,13 @@ def test_real_pixi_managed_commands_run_and_spawn(tmp_path: Path) -> None:
             timeout=60,
         )
         assert result.returncode == 0
-        assert result.stdout == "configured\n"
-        assert result.stderr == "err\n"
+        assert result.stdout == f"configured{os.linesep}"
+        assert result.stderr == f"err{os.linesep}"
 
         process = environment.spawn(
             ["python", "-u", "-c", "import time; print('ready', flush=True); time.sleep(300)"],
         )
-        ready = process.wait_for_line(lambda event: event.text == "ready\n", timeout=60)
+        ready = process.wait_for_line(lambda event: event.text == f"ready{os.linesep}", timeout=60)
         assert ready.stream is OutputStream.STDOUT
         process.terminate(timeout=0.5)
         assert process.wait(check=False).returncode != 0
