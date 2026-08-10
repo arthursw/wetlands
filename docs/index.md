@@ -5,7 +5,8 @@
 Wetlands lets a Python application run functions and external commands in separate environments without mixing their dependencies into the main application.
 
 For example, an application can use Cellpose and StarDist even when those libraries require incompatible versions of another package.
-Each library runs in its own environment while Wetlands moves ordinary Python values and NumPy arrays between the application and worker processes.
+Each library runs in its own environment while Wetlands moves ordinary Python values between the application and worker processes.
+NumPy array data is transferred automatically through operating-system shared memory, but application and worker code still receive independent, ordinary arrays.
 
 > Wetlands runs worker functions, managed commands, and installers with your user account's permissions.
 > Use it only with code and dependencies you trust.
@@ -16,6 +17,7 @@ Follow [Run your first task](getting_started.md) to install Wetlands, create one
 The tutorial assumes that you know basic Python but does not assume knowledge of Pixi, worker processes, or asynchronous APIs.
 
 Then follow [Run code from your own package](tutorials/own_package.md) to understand how application code and worker code fit together.
+That tutorial also shows how Wetlands passes NumPy arrays through shared memory without exposing shared-memory APIs to your code.
 
 ## Solving a specific problem?
 
@@ -24,6 +26,7 @@ Then follow [Run code from your own package](tutorials/own_package.md) to unders
 - [Handle execution and provisioning errors](how-to/errors.md)
 - [Handle timeouts](how-to/timeouts.md)
 - [Use Wetlands with asyncio](how-to/asyncio.md)
+- [Pass NumPy arrays through shared memory](shared_memory.md)
 - [Run commands and services](how-to/managed_processes.md)
 - [Debug a running worker](debugging.md)
 - [Define environment dependencies](dependencies.md)

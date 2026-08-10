@@ -87,9 +87,15 @@ The environment also has its own NumPy installation because the specification in
 
 `example_module:threshold` means “import `example_module` inside the worker, then call its `threshold` attribute.”
 
-Wetlands copies the input array into worker-owned memory.
-Changes made by the worker cannot modify the application's original array.
-The returned mask is a normal array owned by the application.
+When the application calls `threshold`, Wetlands transfers the NumPy data through operating-system shared memory automatically:
+
+1. the application copies `image` into a temporary host-owned shared-memory segment;
+2. the worker copies that data into a private, writable array;
+3. the worker places the returned mask in a temporary worker-owned shared-memory segment;
+4. the application copies the result into a normal array that it owns.
+
+Wetlands cleans up both temporary segments.
+This is shared-memory transport, not a shared mutable array or zero-copy API, so changes made by the worker cannot modify the application's original array.
 
 The worker and manager stop when their context managers exit.
 The ready `numpy-example` environment remains below the Wetlands root so a later run can reuse it.
@@ -112,4 +118,4 @@ Call it with the same `package.module:function` syntax.
 
 - [Define environment dependencies](../dependencies.md)
 - [Report task progress](../how-to/progress.md)
-- [Understand values and NumPy ownership](../shared_memory.md)
+- [Understand NumPy shared-memory transport](../shared_memory.md)

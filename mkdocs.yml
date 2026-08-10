@@ -49,7 +49,7 @@ nav:
       - The Wetlands mental model: concepts/mental_model.md
       - Operations, tasks, and lifecycle states: tasks.md
       - Environment identity, reuse, and rebuilding: concepts/environment_identity.md
-      - Values and NumPy ownership: shared_memory.md
+      - NumPy arrays and shared-memory transport: shared_memory.md
       - Trusted-code security model: concepts/security.md
       - Choosing Wetlands or Appose: appose.md
   - Reference:

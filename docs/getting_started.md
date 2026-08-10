@@ -65,6 +65,18 @@ The context manager stops the worker when the block ends.
 
 The outer context manager closes the manager even when an error occurs.
 
+## What values can cross the worker boundary?
+
+Arguments and results can contain ordinary values such as numbers, strings, bytes, lists, tuples, and dictionaries.
+
+Wetlands can also pass NumPy arrays automatically.
+Their data is copied between the application and worker through operating-system shared memory, while your code continues to use normal `numpy.ndarray` objects.
+You do not create or clean up shared memory yourself, and worker mutations cannot change the application's original array.
+
+NumPy transport requires `wetlands[shared-memory]` in the application environment and NumPy in the managed worker environment.
+The next tutorial demonstrates the complete setup.
+See [NumPy arrays and shared-memory transport](shared_memory.md) for the transfer and ownership model.
+
 ## What remains on disk?
 
 Closing the manager and worker pool stops their processes, but it keeps the ready environment below the `wetlands` directory.
@@ -75,6 +87,6 @@ When you no longer need an environment, follow [Discover, replace, and remove en
 ## Next step
 
 Continue with [Run code from your own package](tutorials/own_package.md).
-It replaces `builtins:sum` with a function that you provide and introduces NumPy arrays.
+It replaces `builtins:sum` with a function that you provide and passes a NumPy array through shared memory.
 
 If something failed during setup, read [Handle execution and provisioning errors](how-to/errors.md).

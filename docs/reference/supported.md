@@ -29,4 +29,4 @@ NumPy arrays may have at most 64 dimensions, and one transported array must fit 
 
 Intermediate outputs support the simple Python values above but not NumPy arrays.
 
-See [Values and NumPy ownership](../shared_memory.md) for mutation and ownership rules.
+See [NumPy arrays and shared-memory transport](../shared_memory.md) for setup, copy behavior, and ownership rules.

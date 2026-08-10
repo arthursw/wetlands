@@ -52,7 +52,9 @@ EnvironmentManager
 ## Values crossing the boundary
 
 Simple Python values are encoded into protocol messages.
-NumPy array data uses shared memory internally, but application and worker code still receive ordinary arrays.
+NumPy array data is copied through operating-system shared memory instead of being embedded in those messages.
+Shared memory is an automatic transport detail: application and worker code receive independent, ordinary arrays rather than a shared mutable or zero-copy view.
+See [NumPy arrays and shared-memory transport](../shared_memory.md) for the complete flow.
 
 The boundary isolates dependencies, not permissions.
 Read [Trusted-code security model](security.md) before running third-party code.

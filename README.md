@@ -20,11 +20,16 @@ Wetlands creates the environments, keeps worker processes ready for repeated cal
 pip install wetlands
 ```
 
-Install the optional NumPy support when arrays cross the worker boundary:
+Wetlands transfers NumPy array data between the application and workers through operating-system shared memory automatically.
+Install the optional host-side NumPy support when arrays cross the worker boundary:
 
 ```sh
 pip install "wetlands[shared-memory]"
 ```
+
+Also include NumPy in each managed worker environment that receives or returns arrays.
+Your code uses ordinary, independently owned arrays; it never manages shared-memory handles directly.
+See [NumPy arrays and shared-memory transport](https://arthursw.github.io/wetlands/latest/shared_memory/) for the complete transfer model.
 
 ## Run a task
 
