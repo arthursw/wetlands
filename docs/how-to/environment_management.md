@@ -32,7 +32,7 @@ For rollback-safe upgrades, provision under a new managed environment name and s
 
 ## Remove an environment
 
-Close its worker pools, then wait for the removal operation:
+Close its worker pools and managed processes, then wait for the removal operation:
 
 ```python
 removal = manager.remove("analysis")
@@ -41,7 +41,7 @@ removed = removal.wait_for()
 print(removed.name)
 ```
 
-Wetlands refuses to remove unmanaged targets or environments with live workers.
+Wetlands refuses to remove unmanaged targets or environments with live worker pools or managed processes.
 It raises `EnvironmentNotFoundError` when the name does not exist.
 
 Completion means the original path is gone and the name can be reused.

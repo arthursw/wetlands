@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -19,10 +19,17 @@ from wetlands.task import ExecutionTask
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
+    from wetlands.managed_process import ManagedProcess, ManagedProcessResult
 
 
 @dataclass
 class _PoolCloseAttempt:
+    done: threading.Event = field(default_factory=threading.Event)
+    error: BaseException | None = None
+
+
+@dataclass
+class _ProcessCloseAttempt:
     done: threading.Event = field(default_factory=threading.Event)
     error: BaseException | None = None
 
@@ -47,6 +54,8 @@ class ManagedEnvironment:
         self._metadata = dict(metadata)
         self._pools: list[WorkerPool] = []
         self._pool_close_attempts: dict[int, _PoolCloseAttempt] = {}
+        self._processes: list[ManagedProcess] = []
+        self._process_close_attempts: dict[int, _ProcessCloseAttempt] = {}
         self._lock = threading.RLock()
 
     @classmethod
@@ -103,6 +112,58 @@ class ManagedEnvironment:
     def lockfile_hash(self) -> str:
         """Return the SHA-256 hash of this generation's lockfile."""
         return str(self._metadata["lock_sha256"])
+
+    def spawn(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: str | Path | None = None,
+        env: Mapping[str, str | None] | None = None,
+        output_limit: int = 1_048_576,
+    ) -> ManagedProcess:
+        """Launch an independently supervised command in this generation."""
+        from wetlands.managed_process import ManagedProcess, _validate_launch_options
+
+        options = _validate_launch_options(
+            argv=argv,
+            cwd=cwd,
+            env=env,
+            output_limit=output_limit,
+            default_cwd=self.path,
+        )
+        with self._manager._manager_work():
+            with environment_lifecycle_gate(self._manager, self.name):
+                self._require_current_generation()
+                runtime_state.reconcile_persistent_pool(
+                    self._manager.root,
+                    self.name,
+                    grace=self._manager.termination_grace,
+                )
+                return ManagedProcess._launch_validated(
+                    environment=self,
+                    options=options,
+                )
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: str | Path | None = None,
+        env: Mapping[str, str | None] | None = None,
+        timeout: float | None = None,
+        output_limit: int = 1_048_576,
+        check: bool = True,
+    ) -> ManagedProcessResult:
+        """Run a command to completion and return its Wetlands-owned result."""
+        from wetlands.managed_process import _validate_check, _validate_timeout
+
+        normalized_timeout = _validate_timeout(timeout)
+        normalized_check = _validate_check(check)
+        process = self.spawn(argv, cwd=cwd, env=env, output_limit=output_limit)
+        try:
+            return process.wait(timeout=normalized_timeout, check=normalized_check)
+        finally:
+            process.close()
 
     def start(
         self,
@@ -176,6 +237,18 @@ class ManagedEnvironment:
         if errors:
             raise ManagerCloseError(errors)
 
+    def _register_process(self, process: ManagedProcess) -> None:
+        """Retain generation ownership until process cleanup is proven."""
+        with self._lock:
+            if not any(existing is process for existing in self._processes):
+                self._processes.append(process)
+
+    def _release_process(self, process: ManagedProcess) -> None:
+        """Release a process after its supervisor proves the owned tree clean."""
+        with self._lock:
+            self._processes[:] = [existing for existing in self._processes if existing is not process]
+            self._process_close_attempts.pop(id(process), None)
+
     def _close_pool(self, pool: WorkerPool, attempt: _PoolCloseAttempt) -> None:
         try:
             pool.close()
@@ -190,6 +263,10 @@ class ManagedEnvironment:
         deadline: float | None = None,
         timeout: float | None = None,
     ) -> tuple[BaseException, ...]:
+        attempts = self._start_pool_close_attempts()
+        return self._collect_pool_close_attempts(attempts, deadline=deadline, timeout=timeout)
+
+    def _start_pool_close_attempts(self) -> tuple[tuple[WorkerPool, _PoolCloseAttempt], ...]:
         with self._lock:
             attempts: list[tuple[WorkerPool, _PoolCloseAttempt]] = []
             for pool in self._pools:
@@ -207,6 +284,15 @@ class ManagedEnvironment:
                         daemon=True,
                     ).start()
                 attempts.append((pool, attempt))
+        return tuple(attempts)
+
+    def _collect_pool_close_attempts(
+        self,
+        attempts: tuple[tuple[WorkerPool, _PoolCloseAttempt], ...],
+        *,
+        deadline: float | None,
+        timeout: float | None,
+    ) -> tuple[BaseException, ...]:
         errors: list[BaseException] = []
         for pool, attempt in attempts:
             remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
@@ -221,9 +307,60 @@ class ManagedEnvironment:
                 errors.append(attempt.error)
         return tuple(errors)
 
+    def _close_process(self, process: ManagedProcess, attempt: _ProcessCloseAttempt) -> None:
+        try:
+            process.close()
+        except BaseException as error:
+            attempt.error = error
+        finally:
+            attempt.done.set()
+
+    def _start_process_close_attempts(self) -> tuple[tuple[ManagedProcess, _ProcessCloseAttempt], ...]:
+        with self._lock:
+            attempts: list[tuple[ManagedProcess, _ProcessCloseAttempt]] = []
+            for process in self._processes:
+                key = id(process)
+                attempt = self._process_close_attempts.get(key)
+                if attempt is None:
+                    attempt = _ProcessCloseAttempt()
+                    self._process_close_attempts[key] = attempt
+                    threading.Thread(
+                        target=self._close_process,
+                        args=(process, attempt),
+                        name=f"wetlands-process-close-{self.name}",
+                        daemon=True,
+                    ).start()
+                attempts.append((process, attempt))
+        return tuple(attempts)
+
+    def _collect_process_close_attempts(
+        self,
+        attempts: tuple[tuple[ManagedProcess, _ProcessCloseAttempt], ...],
+        *,
+        deadline: float | None,
+        timeout: float | None,
+    ) -> tuple[BaseException, ...]:
+        errors: list[BaseException] = []
+        for process, attempt in attempts:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            if not attempt.done.wait(remaining):
+                assert timeout is not None
+                errors.append(ManagerCloseTimeoutError(f"managed processes for {self.name}", timeout))
+                continue
+            with self._lock:
+                if self._process_close_attempts.get(id(process)) is attempt:
+                    self._process_close_attempts.pop(id(process), None)
+            if attempt.error is not None:
+                errors.append(attempt.error)
+        return tuple(errors)
+
     def _has_open_pools(self) -> bool:
         with self._lock:
             return any(not pool._closed for pool in self._pools)
+
+    def _has_live_resources(self) -> bool:
+        with self._lock:
+            return bool(self._processes) or any(not pool._closed for pool in self._pools)
 
     def attach_pool(self, *, timeout: float = 5.0) -> WorkerPool:
         """Exclusively attach to this generation's detached persistent pool."""

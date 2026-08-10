@@ -2,6 +2,12 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.4.0
+
+- Added generation-owned managed processes for running trusted external commands and services inside an exact provisioned Pixi environment.
+- Added bounded stdout and stderr capture, asynchronous output events, readiness-line waiting, typed command failures, and synchronous command results.
+- Added manager-owned cross-platform process-tree cleanup and environment mutation protection while managed processes are active.
+
 ## 2.3.3
 
 - Added content identities and immutable environment-local staging for local packages so managed environments install and validate stable source snapshots instead of depending on a live source tree.

@@ -26,13 +26,13 @@ class ManagerCloseTimeoutError(TimeoutError):
 
 
 class EnvironmentInUseError(RuntimeError):
-    """A managed environment cannot be replaced while its workers are alive."""
+    """A managed environment cannot be changed while managed resources are alive."""
 
     def __init__(self, environment: str, generation_id: str | None = None) -> None:
         self.environment = environment
         self.generation_id = generation_id
         generation = f" generation {generation_id!r}" if generation_id is not None else ""
-        super().__init__(f"Environment {environment!r}{generation} is in use by a live worker pool")
+        super().__init__(f"Environment {environment!r}{generation} is in use by a live managed resource")
 
 
 class EnvironmentNotFoundError(LookupError):

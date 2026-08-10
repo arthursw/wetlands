@@ -1152,6 +1152,31 @@ def test_replacement_is_rejected_while_nonpersistent_pool_is_live(
         pool.close()
 
 
+def test_replacement_is_rejected_while_managed_process_is_registered(
+    tmp_path: Path,
+) -> None:
+    executable = _fake_pixi(tmp_path)
+    manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+    environment = manager.provision(
+        "example",
+        EnvironmentSpec(python="3.11"),
+    ).wait_for()
+    process = object()
+    environment._register_process(process)
+    try:
+        with pytest.raises(EnvironmentInUseError) as caught:
+            manager.provision(
+                "example",
+                EnvironmentSpec(python="3.12"),
+                replace_existing=True,
+            ).wait_for()
+
+        assert caught.value.environment == "example"
+        assert caught.value.generation_id == environment.generation_id
+    finally:
+        environment._release_process(process)
+
+
 def test_stale_environment_handle_rejects_start_and_attach(tmp_path: Path) -> None:
     executable = _fake_pixi(tmp_path)
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)

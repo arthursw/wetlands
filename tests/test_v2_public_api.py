@@ -32,6 +32,8 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "ManagedEnvironment",
         "ManagedEnvironmentInfo",
         "ManagedEnvironmentState",
+        "ManagedProcess",
+        "ManagedProcessResult",
         "ManagerCloseError",
         "ManagerCloseTimeoutError",
         "Operation",
@@ -41,6 +43,8 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "OperationEventKind",
         "OperationFailure",
         "OperationState",
+        "OutputEvent",
+        "OutputStream",
         "PixiInfo",
         "PostInstallCommand",
         "PreparationError",
@@ -48,6 +52,13 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "ProvisioningError",
         "ProvisioningOperation",
         "ProvisioningStage",
+        "ProcessCleanupError",
+        "ProcessError",
+        "ProcessEventLagError",
+        "ProcessExitError",
+        "ProcessLineTimeoutError",
+        "ProcessOutputLimitError",
+        "ProcessTimeoutError",
         "RemoteExceptionInfo",
         "RemovalError",
         "RemovalOperation",
@@ -99,6 +110,69 @@ def test_worker_environment_is_a_public_start_option() -> None:
 
     assert "worker_environment" in parameters
     assert parameters["worker_environment"].default is None
+
+
+def test_managed_environment_exposes_only_argv_based_command_execution() -> None:
+    spawn = inspect.signature(wetlands.ManagedEnvironment.spawn).parameters
+    assert tuple(spawn) == ("self", "argv", "cwd", "env", "output_limit")
+    assert spawn["cwd"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert spawn["cwd"].default is None
+    assert spawn["env"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert spawn["env"].default is None
+    assert spawn["output_limit"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert spawn["output_limit"].default == 1_048_576
+
+    run = inspect.signature(wetlands.ManagedEnvironment.run).parameters
+    assert tuple(run) == ("self", "argv", "cwd", "env", "timeout", "output_limit", "check")
+    assert run["cwd"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert run["cwd"].default is None
+    assert run["env"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert run["env"].default is None
+    assert run["timeout"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert run["timeout"].default is None
+    assert run["output_limit"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert run["output_limit"].default == 1_048_576
+    assert run["check"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert run["check"].default is True
+
+    assert not hasattr(wetlands.ManagedEnvironment, "execute_commands")
+
+
+def test_managed_process_exposes_a_bounded_supervision_surface() -> None:
+    for name in ("argv", "environment", "generation_id", "pid", "returncode", "running"):
+        assert isinstance(inspect.getattr_static(wetlands.ManagedProcess, name), property)
+
+    wait = inspect.signature(wetlands.ManagedProcess.wait).parameters
+    assert tuple(wait) == ("self", "timeout", "check")
+    assert wait["timeout"].default is None
+    assert wait["check"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert wait["check"].default is True
+
+    wait_async = inspect.signature(wetlands.ManagedProcess.wait_async).parameters
+    assert tuple(wait_async) == ("self", "timeout", "check")
+    assert wait_async["timeout"].default is None
+    assert wait_async["check"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert wait_async["check"].default is True
+
+    events = inspect.signature(wetlands.ManagedProcess.events).parameters
+    assert tuple(events) == ("self", "replay")
+    assert events["replay"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert events["replay"].default is True
+
+    wait_for_line = inspect.signature(wetlands.ManagedProcess.wait_for_line).parameters
+    assert tuple(wait_for_line) == ("self", "predicate", "timeout", "replay")
+    assert wait_for_line["timeout"].default is None
+    assert wait_for_line["replay"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert wait_for_line["replay"].default is True
+
+    terminate = inspect.signature(wetlands.ManagedProcess.terminate).parameters
+    assert tuple(terminate) == ("self", "timeout")
+    assert terminate["timeout"].default is None
+    assert tuple(inspect.signature(wetlands.ManagedProcess.kill).parameters) == ("self",)
+    assert tuple(inspect.signature(wetlands.ManagedProcess.close).parameters) == ("self",)
+
+    assert not hasattr(wetlands.ManagedProcess, "popen")
+    assert not hasattr(wetlands.ManagedProcess, "process")
 
 
 def test_public_worker_environment_validation_precedes_runtime_reconciliation(tmp_path) -> None:

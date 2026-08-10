@@ -94,12 +94,7 @@ def discover_managed_environments(manager: EnvironmentManager) -> tuple[ManagedE
 
 
 def _cached_environment_in_use(manager: EnvironmentManager, name: str) -> str | None:
-    key = environment_name_key(name)
-    with manager._environment_lock:
-        environment = manager._environments.get(key)
-    if environment is None or environment.name != name or not environment._has_open_pools():
-        return None
-    return environment.generation_id
+    return manager._cached_environment_generation_in_use(name)
 
 
 def remove_managed_environment(

@@ -42,6 +42,7 @@ nav:
       - Use Wetlands with asyncio: how-to/asyncio.md
       - Configure workers and GPUs: how-to/worker_configuration.md
       - Keep and reconnect to persistent workers: persistent_workers.md
+      - Run commands and services: how-to/managed_processes.md
       - Debug a running worker: debugging.md
       - Discover, replace, and remove environments: how-to/environment_management.md
   - Concepts:

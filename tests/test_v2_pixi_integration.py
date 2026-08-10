@@ -23,6 +23,7 @@ from wetlands import (
     LocalPackage,
     OperationCanceled,
     OperationState,
+    OutputStream,
     PostInstallCommand,
 )
 
@@ -299,6 +300,42 @@ def test_real_pixi_debugger_can_reconnect_after_normal_startup(tmp_path: Path) -
         )
     finally:
         manager.close()
+
+
+def test_real_pixi_managed_commands_run_and_spawn(tmp_path: Path) -> None:
+    manager = EnvironmentManager(tmp_path / "manager", termination_grace=0.5)
+    python_requirement = f"{sys.version_info.major}.{sys.version_info.minor}.*"
+
+    try:
+        environment = _observe(
+            manager.provision(
+                "commands",
+                EnvironmentSpec(python=python_requirement),
+            )
+        ).wait_for(600)
+
+        result = environment.run(
+            [
+                "python",
+                "-c",
+                "import os, sys; print(os.environ['WETLANDS_COMMAND_TEST']); print('err', file=sys.stderr)",
+            ],
+            env={"WETLANDS_COMMAND_TEST": "configured"},
+            timeout=60,
+        )
+        assert result.returncode == 0
+        assert result.stdout == "configured\n"
+        assert result.stderr == "err\n"
+
+        process = environment.spawn(
+            ["python", "-u", "-c", "import time; print('ready', flush=True); time.sleep(300)"],
+        )
+        ready = process.wait_for_line(lambda event: event.text == "ready\n", timeout=60)
+        assert ready.stream is OutputStream.STDOUT
+        process.terminate(timeout=0.5)
+        assert process.wait(check=False).returncode != 0
+    finally:
+        manager.close(timeout=30)
 
 
 def test_real_pixi_release_acceptance(tmp_path: Path) -> None:

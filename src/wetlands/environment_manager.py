@@ -244,7 +244,7 @@ class EnvironmentManager:
             return discover_managed_environments(self)
 
     def remove(self, name: str) -> RemovalOperation[ManagedEnvironmentInfo]:
-        """Remove a managed environment after proving it has no live workers."""
+        """Remove a managed environment after proving it has no live resources."""
 
         normalized_name = validate_environment_name(name)
         operation: RemovalOperation[ManagedEnvironmentInfo] = RemovalOperation(environment=normalized_name)
@@ -290,6 +290,15 @@ class EnvironmentManager:
             },
             include_nonpersistent=True,
         )
+
+    def _cached_environment_generation_in_use(self, name: str) -> str | None:
+        """Return the cached generation when controller-owned resources are live."""
+        key = environment_name_key(name)
+        with self._environment_lock:
+            environment = self._environments.get(key)
+        if environment is None or environment.name != name or not environment._has_live_resources():
+            return None
+        return environment.generation_id
 
     @staticmethod
     def _public_worker(entry: dict[str, Any]) -> RunningWorker:
@@ -369,10 +378,10 @@ class EnvironmentManager:
             return endpoint
 
     def close(self, *, timeout: float | None = None) -> None:
-        """Cancel active operations and close pools using bounded process cleanup.
+        """Cancel operations and close pools and processes with bounded cleanup.
 
-        Failed pool cleanup is reported with :class:`ManagerCloseError`; a later
-        call retries pools whose cleanup did not complete.
+        Failed resource cleanup is reported with :class:`ManagerCloseError`; a
+        later call retries resources whose cleanup did not complete.
         """
         if timeout is not None and (type(timeout) not in {int, float} or not math.isfinite(timeout) or timeout < 0):
             raise ValueError("timeout must be a finite non-negative number or None")
@@ -431,16 +440,31 @@ class EnvironmentManager:
             if lifecycle_ready:
                 with self._environment_lock:
                     environments = tuple(self._environments.values())
-                for environment in environments:
+                pool_attempts = tuple(
+                    (environment, environment._start_pool_close_attempts()) for environment in environments
+                )
+                process_attempts = tuple(
+                    (environment, environment._start_process_close_attempts()) for environment in environments
+                )
+                for environment, pool_environment_attempts in pool_attempts:
                     errors.extend(
-                        environment._close_pools(
+                        environment._collect_pool_close_attempts(
+                            pool_environment_attempts,
+                            deadline=deadline,
+                            timeout=normalized_timeout,
+                        )
+                    )
+                for environment, process_environment_attempts in process_attempts:
+                    errors.extend(
+                        environment._collect_process_close_attempts(
+                            process_environment_attempts,
                             deadline=deadline,
                             timeout=normalized_timeout,
                         )
                     )
 
             with self._lifecycle_condition:
-                remaining_pool = any(environment._has_open_pools() for environment in environments)
+                remaining_resources = any(environment._has_live_resources() for environment in environments)
             if deadline is None:
                 # Background physical reclamation was always a bounded,
                 # best-effort part of close(). Keep the reclaimer's default wait
@@ -454,7 +478,7 @@ class EnvironmentManager:
                     assert normalized_timeout is not None
                     errors.append(ManagerCloseTimeoutError("environment reclaimer", normalized_timeout))
             with self._lifecycle_condition:
-                self._close_complete = lifecycle_ready and not remaining_pool and reclaimer_closed
+                self._close_complete = lifecycle_ready and not remaining_resources and reclaimer_closed
             if errors:
                 raise ManagerCloseError(tuple(errors))
         finally:

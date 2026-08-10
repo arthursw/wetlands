@@ -12,6 +12,7 @@ The migration separates construction, provisioning, and execution and removes ap
 | Dependency dictionaries | Immutable `EnvironmentSpec` |
 | `create()` returns an environment synchronously | `provision()` returns an operation that can be observed, waited for, or awaited |
 | Environment launches itself and executes calls | `ManagedEnvironment.start()` returns a `WorkerPool` |
+| Manager executes shell commands and exposes `Popen` | `ManagedEnvironment.run()` and `spawn()` own argv-based commands |
 | Filename-stem module imports | Qualified package targets or explicit path targets |
 | Manual `NDArray` transport | Automatic ordinary-value and NumPy transport |
 | Ad hoc provisioning commands | Structured stages, events, cancellation, and failures |
@@ -124,6 +125,33 @@ with environment.start() as pool:
 Production integrations should install a worker package into the environment and use `submit_import()` or `execute_import()`.
 Path execution is explicit and never relies on filename stems or `sys.path` mutation.
 
+## External commands and services
+
+Wetlands 2 does not restore `EnvironmentManager.execute_commands()` or expose `subprocess.Popen`.
+The replacement belongs to the provisioned environment so Wetlands can preserve generation identity and own process-tree cleanup.
+
+Use `run()` for a short command installed in the environment:
+
+```python
+result = environment.run(["example-cli", "--version"], timeout=30)
+print(result.stdout)
+```
+
+Use `spawn()` for a service, GUI, or another independently supervised command:
+
+```python
+with environment.spawn(["example-server", "--port", "0"]) as process:
+    ready = process.wait_for_line(
+        lambda event: event.text.startswith("Listening on "),
+        timeout=30,
+    )
+    print(ready.text, end="")
+```
+
+Both methods accept only argument vectors and execute through the exact immutable Pixi generation.
+Managed processes block removal or same-name replacement while active and are terminated when their manager closes.
+See [Run commands and services](how-to/managed_processes.md) for output, timeout, environment-overlay, asyncio, and cross-platform cleanup semantics.
+
 ## NumPy transport
 
 Before:
@@ -225,3 +253,4 @@ Applications that require rollback should include a recipe or release identity i
 - Worker packages do not import Wetlands transport types.
 - Installed-package execution does not infer modules from filenames.
 - Debugging does not require an application-wide mode chosen before worker startup.
+- Legacy manager command APIs and raw subprocess handles are not restored.

@@ -6,10 +6,10 @@
 [![Wetlands PyPI](https://img.shields.io/pypi/v/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
 [![Wetlands Python versions](https://img.shields.io/pypi/pyversions/wetlands.svg?color=%2334D058)](https://pypi.org/project/wetlands/)
 
-Wetlands lets a Python application run functions in separate [Pixi](https://pixi.sh/) environments.
+Wetlands lets a Python application run functions and external commands in separate [Pixi](https://pixi.sh/) environments.
 
 This is useful when one application needs libraries whose dependencies cannot be installed together.
-Wetlands creates the environments, keeps worker processes ready for repeated calls, and transfers ordinary Python values between the application and workers.
+Wetlands creates the environments, keeps worker processes ready for repeated calls, transfers ordinary Python values between the application and workers, and supervises commands and services installed in an environment.
 
 > Wetlands is intended for code you trust.
 > Environments prevent dependency conflicts, but they do not restrict what code can access on your computer.
@@ -73,4 +73,4 @@ The [architecture guide](docs/developer/architecture.md) explains the runtime de
 Maintainers should follow [RELEASING.md](RELEASING.md) when publishing a release.
 
 Wetlands is licensed under the [MIT License](LICENSE).
-Read the [security policy](SECURITY.md) before executing third-party worker code or post-install commands.
+Read the [security policy](SECURITY.md) before executing third-party worker code, managed commands, or post-install commands.

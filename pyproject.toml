@@ -1,7 +1,7 @@
 [project]
 name = "wetlands"
-version = "2.3.3"
-description = "Create isolated Pixi environments and run Python functions without dependency conflicts."
+version = "2.4.0"
+description = "Create isolated Pixi environments and run Python functions or managed commands without dependency conflicts."
 authors = [{name = "Arthur Masson", email = "arthur.masson@inria.fr"}]
 license = "MIT"
 license-files = ["LICENSE"]

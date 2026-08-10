@@ -2,12 +2,12 @@
 
 ![Wetland](Wetland.svg)
 
-Wetlands lets a Python application run functions in separate environments without mixing their dependencies into the main application.
+Wetlands lets a Python application run functions and external commands in separate environments without mixing their dependencies into the main application.
 
 For example, an application can use Cellpose and StarDist even when those libraries require incompatible versions of another package.
 Each library runs in its own environment while Wetlands moves ordinary Python values and NumPy arrays between the application and worker processes.
 
-> Wetlands runs worker functions and installers with your user account's permissions.
+> Wetlands runs worker functions, managed commands, and installers with your user account's permissions.
 > Use it only with code and dependencies you trust.
 
 ## New to Wetlands?
@@ -24,6 +24,7 @@ Then follow [Run code from your own package](tutorials/own_package.md) to unders
 - [Handle execution and provisioning errors](how-to/errors.md)
 - [Handle timeouts](how-to/timeouts.md)
 - [Use Wetlands with asyncio](how-to/asyncio.md)
+- [Run commands and services](how-to/managed_processes.md)
 - [Debug a running worker](debugging.md)
 - [Define environment dependencies](dependencies.md)
 

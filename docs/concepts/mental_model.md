@@ -18,13 +18,17 @@ It names the Python version, Conda and PyPI dependencies, local packages, post-i
 
 The specification is immutable so Wetlands can compare it reliably with a ready environment.
 
-## Managed environment and worker pool
+## Managed environment, worker pools, and commands
 
 A `ManagedEnvironment` represents one successfully prepared environment.
 Starting it creates a `WorkerPool` containing one or more Python processes inside that environment.
 
 Workers stay warm between calls, which avoids paying process startup and import cost for every function.
 The pool replaces workers that crash, disconnect, or ignore cancellation.
+
+A managed environment can also run installed external commands.
+Use `run()` for a short-lived CLI and `spawn()` for a service, GUI, or other independently supervised process.
+Unlike a worker pool, a managed process does not provide Python-call or Python-value transport.
 
 ## Execution task
 

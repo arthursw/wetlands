@@ -3,7 +3,7 @@
 Wetlands environments solve dependency conflicts.
 They are not security sandboxes.
 
-Worker functions, package installers, post-install commands, and attached debuggers run with the current operating-system user's permissions.
+Worker functions, managed commands, package installers, post-install commands, and attached debuggers run with the current operating-system user's permissions.
 They can generally read and modify that user's files, inspect environment variables, use the network, start processes, and consume CPU, memory, and disk.
 
 Use Wetlands only with code and dependency sources you trust.

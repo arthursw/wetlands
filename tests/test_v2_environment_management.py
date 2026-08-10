@@ -288,6 +288,25 @@ def test_remove_refuses_an_open_pool_even_during_a_registry_gap(
     assert target.exists()
 
 
+def test_remove_refuses_a_registered_managed_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = EnvironmentManager(tmp_path / "wetlands")
+    target = _ready_environment(manager, "example")
+    environment = manager.environment("example")
+    process = SimpleNamespace()
+    environment._register_process(process)
+    monkeypatch.setattr(management_module.runtime_state, "live_workers_for_env", lambda *args, **kwargs: [])
+
+    with pytest.raises(EnvironmentInUseError) as caught:
+        manager.remove("example").wait_for()
+
+    assert caught.value.generation_id == environment.generation_id
+    assert target.exists()
+    environment._release_process(process)
+
+
 def test_remove_can_be_canceled_while_waiting_for_lifecycle_gate(tmp_path: Path) -> None:
     manager = EnvironmentManager(tmp_path / "wetlands")
     target = _incomplete_environment(manager, "example")

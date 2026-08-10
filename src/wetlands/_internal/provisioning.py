@@ -2342,6 +2342,9 @@ def provision_environment(
                             ),
                         )
                     )
+                cached_generation = manager._cached_environment_generation_in_use(name)
+                if cached_generation is not None:
+                    raise EnvironmentInUseError(name, cached_generation)
                 runtime_state.reconcile_persistent_pool(
                     manager.root,
                     name,
@@ -2371,6 +2374,9 @@ def provision_environment(
             elif target_exists:
                 if not _target_has_valid_owner_marker(manager.environments_root, target):
                     raise UnmanagedTargetError(name, target)
+                cached_generation = manager._cached_environment_generation_in_use(name)
+                if cached_generation is not None:
+                    raise EnvironmentInUseError(name, cached_generation)
                 runtime_state.reconcile_persistent_pool(
                     manager.root,
                     name,

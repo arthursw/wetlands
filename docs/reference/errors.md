@@ -40,6 +40,23 @@ The record may include task and target identities, remote traceback information,
 
 For `REMOTE_EXCEPTION`, inspect `failure.remote_exception` for the remote module, type name, message, traceback, cause, and context.
 
+## Managed-process errors
+
+Managed commands keep their process outcome separate from worker-call failures:
+
+| Exception | Meaning |
+| --- | --- |
+| `ProcessExitError` | A command exited non-zero while checked behavior was requested; inspect `result`. |
+| `ProcessTimeoutError` | A command wait deadline won and its owned tree was cleaned; inspect `timeout` and the partial `result`. |
+| `ProcessOutputLimitError` | Combined stdout and stderr crossed the configured raw-byte limit; inspect `limit`, `truncated_streams`, and the partial `result`. |
+| `ProcessLineTimeoutError` | `wait_for_line()` found no match before its deadline; the command continues. |
+| `ProcessEventLagError` | An output observer fell behind the bounded event history; the command and other observers continue. |
+| `ProcessCleanupError` | Wetlands could not verify process-tree termination, pipe-reader completion, or reaping; cleanup remains retryable. |
+
+Every `ProcessError` includes the requested argv, environment name, and generation ID.
+Input-validation and operating-system launch errors keep their ordinary Python exception types.
+See [Run commands and services](../how-to/managed_processes.md) for the process and output lifecycle.
+
 ## Lifecycle and environment errors
 
 The public API also exposes errors for recipe conflicts, missing or unmanaged environments, live workers that prevent removal, generation changes, worker startup, invalid local packages, invalid task state, unsupported values, and manager shutdown cleanup.
