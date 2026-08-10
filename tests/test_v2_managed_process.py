@@ -410,12 +410,18 @@ def test_reader_failure_keeps_ownership_until_close_retry(environment: _Environm
     with patch("wetlands.managed_process.subprocess.Popen", side_effect=broken_stdout):
         process = _spawn(environment, "pass")
 
-    with pytest.raises(ProcessCleanupError, match="reader failed"):
+    with pytest.raises(ProcessCleanupError, match="reader failed") as raised:
         process.wait()
     assert environment.processes == [process]
+    assert process._tree_clean
 
-    process.close()
+    with patch.object(process, "_terminate_tree", side_effect=AssertionError("tree cleanup repeated")):
+        process.close()
     assert environment.processes == []
+    assert process._ownership_clean
+    with pytest.raises(ProcessCleanupError) as repeated:
+        process.wait()
+    assert repeated.value is raised.value
 
 
 def test_partial_reader_start_failure_does_not_strand_registry(environment: _Environment) -> None:

@@ -323,6 +323,7 @@ class ManagedProcess:
         self._cause: tuple[str, float | None] | None = None
         self._result: ManagedProcessResult | None = None
         self._terminal_error: ProcessError | None = None
+        self._tree_clean = False
         self._ownership_clean = False
         self._registered = False
         self._released = False
@@ -689,16 +690,20 @@ class ManagedProcess:
     def _terminate_tree(self, grace: float) -> None:
         if os.name == "nt":
             self._terminate_windows_job(grace)
-            return
-        terminate_launched_process_tree(
-            self._process,
-            grace=grace,
-            close_windows_job=_close_windows_job,
-        )
+        else:
+            terminate_launched_process_tree(
+                self._process,
+                grace=grace,
+                close_windows_job=_close_windows_job,
+            )
+        with self._condition:
+            self._tree_clean = True
 
     def _kill_tree(self) -> None:
         if os.name == "nt":
             self._terminate_windows_job(0.0, force=True)
+            with self._condition:
+                self._tree_clean = True
             return
         if self._identity is None:
             raise ProcessIdentityError(f"Managed command PID {self.pid} has no recorded process identity")
@@ -719,6 +724,8 @@ class ManagedProcess:
         except ProcessLookupError:
             with contextlib.suppress(subprocess.TimeoutExpired, OSError):
                 self._process.wait(timeout=0)
+            with self._condition:
+                self._tree_clean = True
             return
         verification_timeout = max(1.0, self._environment_handle._manager.termination_grace)
         if _wait_for_posix_group_exit(
@@ -726,6 +733,8 @@ class ManagedProcess:
             process=self._process,
             timeout=verification_timeout,
         ):
+            with self._condition:
+                self._tree_clean = True
             return
         survivors = _posix_group_members(process_group_id)
         details = f"; surviving PIDs: {survivors}" if survivors else ""
@@ -904,13 +913,15 @@ class ManagedProcess:
         grace = self._environment_handle._manager.termination_grace
         if os.name != "nt":
             _terminate_posix_group(self.pid, grace=grace, process=self._process)
-            return
-        try:
-            _close_windows_job(self._process)
-        finally:
-            if self._process.poll() is None:
-                self._process.kill()
-            self._process.wait(timeout=max(1.0, grace))
+        else:
+            try:
+                _close_windows_job(self._process)
+            finally:
+                if self._process.poll() is None:
+                    self._process.kill()
+                self._process.wait(timeout=max(1.0, grace))
+        with self._condition:
+            self._tree_clean = True
 
     def _release_once(self) -> None:
         with self._condition:
@@ -924,10 +935,13 @@ class ManagedProcess:
             if self._ownership_clean:
                 return
             failures: list[BaseException] = []
-            try:
-                self._terminate_tree(self._environment_handle._manager.termination_grace)
-            except BaseException as error:
-                failures.append(error)
+            with self._condition:
+                tree_clean = self._tree_clean
+            if not tree_clean:
+                try:
+                    self._terminate_tree(self._environment_handle._manager.termination_grace)
+                except BaseException as error:
+                    failures.append(error)
             self._join_readers(failures)
             if not failures:
                 try:
