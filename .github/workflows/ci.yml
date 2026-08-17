@@ -137,11 +137,11 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
       - name: Install validation tools
-        run: uv sync --frozen --python 3.14 --group release --no-dev
+        run: uv sync --frozen --python 3.14 --only-group release --no-install-project
       - name: Build wheel and source distribution
-        run: uv build
+        run: uv build --no-build-isolation
       - name: Validate artifact metadata
-        run: uv run --frozen --group release --no-dev twine check dist/*
+        run: uv run --no-sync twine check dist/*
       - name: Install and import wheel
         shell: bash
         run: |

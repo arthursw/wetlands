@@ -13,9 +13,9 @@ Host and worker execution and management protocol versions must match exactly.
 2. Update the project version, `wetlands.protocol.WORKER_RUNTIME_VERSION`, and `CHANGELOG.md` together. If a protocol changed, update its protocol version constant and compatibility tests in the same commit.
 3. Run `uv lock --check`, `uv run ruff check`, `uv run ruff format --check`, `uv run mypy src/wetlands`, and the full test suite.
 4. Build the documentation with the same strict command as CI: `uv run --frozen --python 3.14 --extra docs --no-dev mkdocs build --strict`.
-5. From a clean checkout of the release commit, build both artifacts with `uv build`.
+5. From a clean checkout of the release commit, install the locked release tools with `uv sync --frozen --python 3.14 --only-group release --no-install-project`, then build both artifacts with `uv build --no-build-isolation`.
 6. Inspect the source distribution and confirm that it contains the source, tests, examples, documentation, `RELEASING.md`, and release metadata, but not generated `site/`, `dist/`, `.vscode/`, virtual environments, or worktrees.
-7. Validate the artifacts with `uv run --group release --no-dev twine check dist/*`.
+7. Validate the artifacts with `uv run --no-sync twine check dist/*`.
 8. Install the wheel and source distribution separately into clean environments and verify `import wetlands`, `wetlands.__version__`, and the `wetlands` CLI.
 9. Stop all persistent workers created by the release candidate before testing an upgrade or downgrade.
 10. Create and push the version tag.
