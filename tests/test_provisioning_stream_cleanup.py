@@ -155,6 +155,38 @@ def test_cancellation_closes_streams_and_reaps_process(processes, readers):
             operation.cancel()
 
 
+def test_timeout_terminates_and_closes_process(processes, readers):
+    runner = ProcessTreeRunner(ProvisioningOperation(environment="example"), grace=0.1)
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner.run(_step("import time; time.sleep(30)"), timeout=0.2)
+    _assert_clean(runner, processes, readers)
+
+
+def test_reader_failure_stops_a_running_command(processes, readers, monkeypatch):
+    operation = ProvisioningOperation(environment="example")
+    runner = ProcessTreeRunner(operation, grace=0.1)
+    emit = operation._emit
+
+    def fail_output(kind, *args, **kwargs):
+        if kind is OperationEventKind.OUTPUT:
+            raise OSError("output delivery failed")
+        return emit(kind, *args, **kwargs)
+
+    monkeypatch.setattr(operation, "_emit", fail_output)
+    operation._start_runner(
+        lambda: runner.run(_step("import time; print('ready', flush=True); time.sleep(30)")),
+        thread_name="test-failed-reader",
+    )
+    try:
+        with pytest.raises(ProvisioningError) as caught:
+            operation.wait_for(timeout=5)
+        assert "output delivery failed" in caught.value.failure.cleanup_error
+        _assert_clean(runner, processes, readers)
+    finally:
+        if not operation.state.terminal:
+            operation.cancel()
+
+
 @pytest.mark.parametrize("kill_reports_error", [False, True])
 def test_identity_failure_closes_unowned_streams(processes, readers, monkeypatch, kill_reports_error):
     runner = ProcessTreeRunner(ProvisioningOperation(environment="example"), grace=0.1)

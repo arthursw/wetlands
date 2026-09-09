@@ -2,6 +2,13 @@
 
 All notable changes to Wetlands are documented here.
 
+## Unreleased
+
+- Unified subprocess pipe ownership across provisioning, worker logging, and managed commands, including partial reader startup and failed worker launch.
+- Kept worker output cleanup bounded when readers remain blocked, and retained and reaped the VS Code launcher process.
+- Added process-tree cleanup to the managed-Python discovery timeout and cleanup after provisioning reader or managed-command supervisor failures.
+- Consolidated Windows Job Object creation and verified handle closure using pointer-safe native declarations.
+
 ## 2.4.1
 
 - Fixed provisioning subprocess pipe ownership and cleanup across successful commands, cancellation, command failures, and exceptional startup paths while preserving output and primary failure details.

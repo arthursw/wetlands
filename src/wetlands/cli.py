@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from wetlands.environment_manager import EnvironmentManager
+from wetlands._internal.process_io import start_process_reaper
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -137,12 +138,19 @@ def _launch_vscode(workspace: Path) -> None:
             "The VS Code command-line launcher 'code' was not found. "
             "Open the generated workspace manually or install the launcher from VS Code."
         )
-    subprocess.Popen(
+    process = subprocess.Popen(
         [executable, "--reuse-window", str(workspace)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    try:
+        start_process_reaper(process, name="wetlands-editor-launcher")
+    except BaseException:
+        # No waiter accepted ownership. Reap our immediate launcher child.
+        process.kill()
+        process.wait(timeout=5)
+        raise
 
 
 def _run_workers(args: argparse.Namespace, manager: EnvironmentManager) -> int:

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -374,6 +375,64 @@ def test_partial_launch_failure_kills_and_releases_child(environment: _Environme
     assert environment.processes == []
 
 
+@pytest.mark.filterwarnings("error::ResourceWarning")
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+@pytest.mark.parametrize("phase", ["handle", "identity", "construct", "stdout", "stderr", "after_start", "supervisor"])
+def test_launch_failure_closes_every_pipe(environment, monkeypatch, phase):
+    launched = []
+    real_popen = subprocess.Popen
+    real_start = threading.Thread.start
+    real_init = threading.Thread.__init__
+    original = RuntimeError("injected launch failure")
+
+    class TrackedPopen(real_popen):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            launched.append(self)
+
+    def start(thread):
+        if thread.name.endswith(f"-{phase}") or phase == "after_start":
+            if phase == "after_start":
+                real_start(thread)
+            raise original
+        real_start(thread)
+
+    def initialize(thread, *args, **kwargs):
+        if phase == "construct":
+            raise original
+        real_init(thread, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", TrackedPopen)
+    monkeypatch.setattr(threading.Thread, "start", start)
+    monkeypatch.setattr(threading.Thread, "__init__", initialize)
+    if phase == "identity":
+        monkeypatch.setattr(
+            "wetlands.managed_process.capture_process_identity", lambda pid: (_ for _ in ()).throw(original)
+        )
+    elif phase == "handle":
+
+        def fail_handle(*args, **kwargs):
+            raise original
+
+        monkeypatch.setattr(ManagedProcess, "__init__", fail_handle)
+    try:
+        with pytest.raises(RuntimeError, match="injected launch failure") as caught:
+            _spawn(environment, "import time; time.sleep(30)")
+        assert caught.value is original
+        assert len(launched) == 1
+        assert launched[0].returncode is not None
+        assert launched[0].stdout.closed
+        assert launched[0].stderr.closed
+        assert environment.processes == []
+    finally:
+        for process in launched:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+            process.stdout.close()
+            process.stderr.close()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-session ownership")
 def test_invalid_posix_session_identity_rejects_launch_and_cleans_child(environment: _Environment) -> None:
     def invalid_identity(pid: int) -> ProcessIdentity:
@@ -422,6 +481,33 @@ def test_reader_failure_keeps_ownership_until_close_retry(environment: _Environm
     with pytest.raises(ProcessCleanupError) as repeated:
         process.wait()
     assert repeated.value is raised.value
+
+
+def test_supervisor_poll_failure_still_cleans_and_finishes(environment, monkeypatch):
+    start_supervisor = ManagedProcess._start_supervisor
+
+    def fail_first_poll(handle):
+        poll = handle._process.poll
+
+        def fail():
+            monkeypatch.setattr(handle._process, "poll", poll)
+            raise OSError("supervisor poll failed")
+
+        monkeypatch.setattr(handle._process, "poll", fail)
+        start_supervisor(handle)
+
+    monkeypatch.setattr(ManagedProcess, "_start_supervisor", fail_first_poll)
+    process = _spawn(environment, "import time; time.sleep(30)")
+    try:
+        with pytest.raises(ProcessCleanupError, match="supervisor poll failed"):
+            process.wait(timeout=5)
+        assert process._process.returncode is not None
+        assert process._process.stdout.closed
+        assert process._process.stderr.closed
+        assert all(not reader.is_alive() for reader in process._readers)
+    finally:
+        process.close()
+    assert environment.processes == []
 
 
 def test_partial_reader_start_failure_does_not_strand_registry(environment: _Environment) -> None:

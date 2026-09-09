@@ -3,6 +3,8 @@
 import subprocess
 import pytest
 import logging
+import io
+import threading
 from unittest.mock import MagicMock
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands.logger import logger
@@ -33,6 +35,45 @@ def test_process_logger_initialization(mock_process, log_context):
     assert process_logger.base_logger == logger
     assert process_logger._subscribers == []
     assert process_logger._output == []
+
+
+@pytest.mark.parametrize("failure_index", [0, 1])
+@pytest.mark.parametrize("after_start", [False, True])
+def test_partial_startup_closes_unclaimed_pipes(mock_process, monkeypatch, failure_index, after_start):
+    mock_process.stdout = io.StringIO("out\n")
+    mock_process.stderr = io.StringIO("err\n")
+    process_logger = ProcessLogger(mock_process, {}, logger)
+    real_start = threading.Thread.start
+    calls = 0
+
+    def start(thread):
+        nonlocal calls
+        index = calls
+        calls += 1
+        if index == failure_index:
+            if after_start:
+                real_start(thread)
+            raise RuntimeError("reader startup failed")
+        real_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    with pytest.raises(RuntimeError, match="reader startup failed"):
+        process_logger.start_reading()
+    process_logger.join(timeout=1)
+    assert mock_process.stdout.closed
+    assert mock_process.stderr.closed
+
+
+def test_join_failure_still_closes_unclaimed_pipes(mock_process):
+    mock_process.stdout = io.StringIO()
+    mock_process.stderr = io.StringIO()
+    process_logger = ProcessLogger(mock_process, {}, logger)
+    process_logger._reader_thread = MagicMock()
+    process_logger._reader_thread.join.side_effect = RuntimeError("join failed")
+
+    assert not process_logger.join(timeout=0)
+    assert mock_process.stdout.closed
+    assert mock_process.stderr.closed
 
 
 def test_process_logger_closes_stream_after_reader_failure(mock_process, log_context):

@@ -1,12 +1,60 @@
 from __future__ import annotations
 
 import json
+import threading
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from wetlands import cli
+
+
+def test_editor_launcher_retains_and_reaps_its_process(tmp_path, monkeypatch):
+    waiting = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    references = []
+
+    class Process:
+        def wait(self):
+            waiting.set()
+            assert release.wait(5)
+            finished.set()
+
+    def popen(*args, **kwargs):
+        process = Process()
+        references.append(weakref.ref(process))
+        return process
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "code")
+    monkeypatch.setattr(cli.subprocess, "Popen", popen)
+    try:
+        cli._launch_vscode(tmp_path / "test.code-workspace")
+        assert waiting.wait(1)
+        assert references[0]() is not None
+    finally:
+        release.set()
+    assert finished.wait(1)
+
+
+def test_editor_reaper_start_failure_reaps_launcher(tmp_path, monkeypatch):
+    process = MagicMock()
+    original = RuntimeError("cannot start waiter")
+
+    def start(*args, **kwargs):
+        raise original
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "code")
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(cli, "start_process_reaper", start)
+    with pytest.raises(RuntimeError) as caught:
+        cli._launch_vscode(tmp_path / "test.code-workspace")
+    assert caught.value is original
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=5)
 
 
 class FakeManager:

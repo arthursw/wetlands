@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from wetlands.diagnostics import ExecutionFailureCategory
-from wetlands._internal.process_termination import ProcessTerminationError
+from wetlands._internal.process_termination import ProcessIdentityError, ProcessTerminationError
 from wetlands._internal.process_logger import ProcessLogger
 from wetlands.external_environment import ExternalEnvironment, _validate_worker_environments, _Worker
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
@@ -51,6 +51,180 @@ def _active_task(task_id: str = "task-1") -> ExecutionTask[Any]:
     task._payload = {"_call_target": "sample.module:run"}  # type: ignore[attr-defined]
     task._set_running()
     return task
+
+
+@pytest.mark.filterwarnings("error::ResourceWarning")
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_spawn_identity_failure_closes_unclaimed_pipes(tmp_path, monkeypatch):
+    environment = _environment(tmp_path)
+    launched = []
+    real_popen = subprocess.Popen
+    original = ProcessIdentityError("identity unavailable")
+
+    def popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        launched.append(process)
+        return process
+
+    def fail_identity(pid):
+        raise original
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr("wetlands.external_environment.capture_process_identity", fail_identity)
+    try:
+        with pytest.raises(ProcessIdentityError) as caught:
+            environment._spawn_worker_process([sys.executable, "-c", "import time; time.sleep(30)"], {}, {})
+        assert caught.value is original
+        assert launched[0].returncode is not None
+        assert launched[0].stdout.closed
+        assert launched[0].stderr.closed
+    finally:
+        for process in launched:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+            process.stdout.close()
+            process.stderr.close()
+
+
+@pytest.mark.filterwarnings("error::ResourceWarning")
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+@pytest.mark.parametrize("phase", ["logger", "reader", "handshake"])
+def test_worker_startup_failure_finishes_output_cleanup(tmp_path, monkeypatch, phase):
+    environment = _environment(tmp_path)
+    launched = []
+    loggers = []
+    real_popen = subprocess.Popen
+    real_start = threading.Thread.start
+    executable = sys._base_executable if sys.platform == "win32" else sys.executable
+
+    def popen(argv, **kwargs):
+        process = real_popen([executable, "-c", "import time; time.sleep(30)"], **kwargs)
+        launched.append(process)
+        return process
+
+    def make_logger(*args):
+        if phase == "logger":
+            raise RuntimeError("logger failed")
+        process_logger = ProcessLogger(*args)
+        loggers.append(process_logger)
+        return process_logger
+
+    def start(thread):
+        if phase == "reader" and thread._args[1] == "stderr":
+            raise RuntimeError("reader failed")
+        real_start(thread)
+
+    def fail_handshake(*args):
+        raise RuntimeError("handshake failed")
+
+    monkeypatch.setattr(environment, "_ready_identity", lambda: {"generation_id": "g", "recipe_hash": "r"})
+    monkeypatch.setattr(environment, "_environment_python", lambda: executable)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr("wetlands.external_environment.ProcessLogger", make_logger)
+    monkeypatch.setattr("wetlands.external_environment._wait_for_startup_payload", fail_handshake)
+    monkeypatch.setattr(threading.Thread, "start", start)
+    try:
+        with pytest.raises(Exception, match=f"{phase} failed"):
+            environment._launch_worker(0, {})
+        assert launched[0].returncode is not None
+        assert launched[0].stdout.closed
+        assert launched[0].stderr.closed
+        for process_logger in loggers:
+            assert process_logger.join(timeout=0)
+    finally:
+        for process in launched:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+        for process_logger in loggers:
+            process_logger.join(timeout=5)
+        for process in launched:
+            process.stdout.close()
+            process.stderr.close()
+
+
+@pytest.mark.parametrize("outcome", ["success", "nonzero", "timeout"])
+def test_python_discovery_probe_owns_its_process_tree(tmp_path, monkeypatch, outcome):
+    from wetlands._internal.provisioning import ProcessTreeRunner
+
+    environment = _environment(tmp_path)
+    environment.environment_manager.pixi_executable = Path(sys.executable)
+    environment.environment_manager.termination_grace = 0.1
+    launched = []
+    real_popen = subprocess.Popen
+    real_run = ProcessTreeRunner.run
+    executable = sys._base_executable if sys.platform == "win32" else sys.executable
+    discovered = tmp_path / "Python with spaces and 'quotes'"
+    discovered.touch()
+    code = f"print({str(discovered)!r}, flush=True)"
+    if outcome == "nonzero":
+        code += "; raise SystemExit(7)"
+    elif outcome == "timeout":
+        code += "; import time; time.sleep(30)"
+
+    def popen(argv, **kwargs):
+        assert argv[1:3] == ("run", "--manifest-path")
+        process = real_popen([executable, "-c", code], **kwargs)
+        launched.append(process)
+        return process
+
+    def run(runner, step, *, timeout, on_stdout):
+        assert timeout == 30
+        return real_run(runner, step, timeout=0.2 if outcome == "timeout" else timeout, on_stdout=on_stdout)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(ProcessTreeRunner, "run", run)
+    try:
+        if outcome == "success":
+            assert environment._environment_python() == discovered.resolve()
+        else:
+            error = subprocess.TimeoutExpired if outcome == "timeout" else RuntimeError
+            with pytest.raises(error):
+                environment._environment_python()
+        assert launched[0].returncode is not None
+        assert launched[0].stdout.closed
+        assert launched[0].stderr.closed
+    finally:
+        for process in launched:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+            process.stdout.close()
+            process.stderr.close()
+
+
+def test_worker_shutdown_does_not_close_a_pipe_owned_by_a_blocked_reader(tmp_path, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockedPipe:
+        closed = False
+
+        def readline(self):
+            entered.set()
+            assert release.wait(5)
+            return ""
+
+        def close(self):
+            assert release.is_set(), "caller closed a pipe while its reader was blocked"
+            self.closed = True
+
+    environment = _environment(tmp_path)
+    process = _worker(alive=False).process
+    pipe = process.stdout = BlockedPipe()
+    process_logger = ProcessLogger(process, {}, logger)
+    process_logger.start_reading()
+    monkeypatch.setattr(environment, "_terminate_launched_worker", lambda process: False)
+    monkeypatch.setattr("wetlands.external_environment.PROCESS_LOGGER_JOIN_TIMEOUT", 0)
+    try:
+        assert entered.wait(2)
+        assert not environment._gracefully_stop_process(process, process_logger)
+        assert not pipe.closed
+    finally:
+        release.set()
+        process_logger.join(timeout=2)
+    assert pipe.closed
 
 
 def test_detach_reaper_start_failure_keeps_pool_control(tmp_path):

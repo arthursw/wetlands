@@ -30,6 +30,8 @@ from packaging.requirements import InvalidRequirement, Requirement
 import psutil
 
 from wetlands._internal import runtime_state
+from wetlands._internal.process_io import PipeOwnership
+from wetlands._internal.windows_job import create_windows_kill_job, close_windows_job_handle
 from wetlands._internal.artifact_registry import PIXI_SHA256, PIXI_VERSION
 from wetlands._internal.process_termination import (
     ProcessIdentityError,
@@ -266,89 +268,17 @@ def environment_lifecycle_gate(
 
 
 class _WindowsJob:
-    """Minimal kill-on-close Job Object wrapper used without optional extensions."""
-
-    _KILL_ON_CLOSE = 0x00002000
-    _EXTENDED_LIMIT_INFORMATION = 9
+    """Serialize cancellation and runner cleanup of the shared Job handle."""
 
     def __init__(self, process: subprocess.Popen[str]) -> None:
-        import ctypes
-        from ctypes import wintypes
-
-        class IO_COUNTERS(ctypes.Structure):
-            _fields_ = [
-                ("ReadOperationCount", ctypes.c_uint64),
-                ("WriteOperationCount", ctypes.c_uint64),
-                ("OtherOperationCount", ctypes.c_uint64),
-                ("ReadTransferCount", ctypes.c_uint64),
-                ("WriteTransferCount", ctypes.c_uint64),
-                ("OtherTransferCount", ctypes.c_uint64),
-            ]
-
-        class BASIC_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ("PerProcessUserTimeLimit", ctypes.c_int64),
-                ("PerJobUserTimeLimit", ctypes.c_int64),
-                ("LimitFlags", wintypes.DWORD),
-                ("MinimumWorkingSetSize", ctypes.c_size_t),
-                ("MaximumWorkingSetSize", ctypes.c_size_t),
-                ("ActiveProcessLimit", wintypes.DWORD),
-                ("Affinity", ctypes.c_size_t),
-                ("PriorityClass", wintypes.DWORD),
-                ("SchedulingClass", wintypes.DWORD),
-            ]
-
-        class EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ("BasicLimitInformation", BASIC_LIMIT_INFORMATION),
-                ("IoInfo", IO_COUNTERS),
-                ("ProcessMemoryLimit", ctypes.c_size_t),
-                ("JobMemoryLimit", ctypes.c_size_t),
-                ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                ("PeakJobMemoryUsed", ctypes.c_size_t),
-            ]
-
-        kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-        kernel32.SetInformationJobObject.argtypes = (
-            wintypes.HANDLE,
-            ctypes.c_int,
-            ctypes.c_void_p,
-            wintypes.DWORD,
-        )
-        kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
-        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        handle = kernel32.CreateJobObjectW(None, None)
-        if not handle:
-            error = getattr(ctypes, "get_last_error")()
-            raise OSError(error, getattr(ctypes, "FormatError")(error))
-        try:
-            information = EXTENDED_LIMIT_INFORMATION()
-            information.BasicLimitInformation.LimitFlags = self._KILL_ON_CLOSE
-            if not kernel32.SetInformationJobObject(
-                handle,
-                self._EXTENDED_LIMIT_INFORMATION,
-                ctypes.byref(information),
-                ctypes.sizeof(information),
-            ):
-                error = getattr(ctypes, "get_last_error")()
-                raise OSError(error, getattr(ctypes, "FormatError")(error))
-            process_handle = wintypes.HANDLE(int(getattr(process, "_handle")))
-            if not kernel32.AssignProcessToJobObject(handle, process_handle):
-                error = getattr(ctypes, "get_last_error")()
-                raise OSError(error, getattr(ctypes, "FormatError")(error))
-        except BaseException:
-            kernel32.CloseHandle(handle)
-            raise
-        self._kernel32 = kernel32
-        self._handle = handle
+        self._handle = create_windows_kill_job(process)
         self._lock = threading.Lock()
 
     def close(self) -> None:
         with self._lock:
             if self._handle is None:
                 return
-            self._kernel32.CloseHandle(self._handle)
+            close_windows_job_handle(self._handle)
             self._handle = None
 
 
@@ -373,7 +303,14 @@ class ProcessTreeRunner:
         self._termination_finished = threading.Event()
         operation._set_cancel_callback(self.terminate_active)
 
-    def run(self, step: ProvisioningStep) -> tuple[str, ...]:
+    def run(
+        self,
+        step: ProvisioningStep,
+        *,
+        timeout: float | None = None,
+        on_stdout: Callable[[str], None] | None = None,
+    ) -> tuple[str, ...]:
+        deadline = None if timeout is None else time.monotonic() + timeout
         if self.operation.cancellation_requested:
             raise OperationCanceled(self.operation.id)
         command = _safe_command(step.argv, step.display)
@@ -408,7 +345,7 @@ class ProcessTreeRunner:
         job: _WindowsJob | None = None
         ownership_established = False
         readers: list[threading.Thread] = []
-        unowned_streams: dict[str, Any] = {}
+        pipes = PipeOwnership()
         stdout_tail: deque[str] = deque(maxlen=100)
         stderr_tail: deque[str] = deque(maxlen=100)
         reader_errors: list[str] = []
@@ -419,7 +356,7 @@ class ProcessTreeRunner:
 
         def close_stream(stream: Any, name: str) -> None:
             try:
-                stream.close()
+                pipes.close_claimed(name, stream)
             except BaseException as error:
                 with reader_error_lock:
                     reader_errors.append(f"{name} stream cleanup failed: {error}")
@@ -427,15 +364,13 @@ class ProcessTreeRunner:
         def drain(stream: Any, name: str, tail: deque[str]) -> None:
             if stream is None:
                 return
-            with reader_error_lock:
-                # Cleanup can win this handoff if Thread.start() was interrupted.
-                # In that case the runner closes the pipe and we must not read it.
-                if name not in unowned_streams:
-                    return
-                del unowned_streams[name]
+            if pipes.claim(name) is None:
+                return
             try:
                 for raw_line in iter(stream.readline, ""):
                     line = raw_line.rstrip("\r\n")
+                    if name == "stdout" and on_stdout is not None:
+                        on_stdout(line)
                     safe_line = _safe_command((line,))
                     tail.append(safe_line)
                     self.operation._emit(
@@ -459,7 +394,7 @@ class ProcessTreeRunner:
                     raise OperationCanceled(self.operation.id)
                 try:
                     process = subprocess.Popen(popen_command, **kwargs)
-                    unowned_streams.update(stdout=process.stdout, stderr=process.stderr)
+                    pipes = PipeOwnership(stdout=process.stdout, stderr=process.stderr)
                 except OSError as error:
                     failure = OperationFailure(
                         operation_id=self.operation.id,
@@ -516,6 +451,14 @@ class ProcessTreeRunner:
                 readers.append(reader)
                 reader.start()
             while returncode is None:
+                with reader_error_lock:
+                    if reader_errors:
+                        break
+                if deadline is not None and time.monotonic() >= deadline:
+                    assert timeout is not None
+                    raise subprocess.TimeoutExpired(
+                        step.argv, timeout, output="\n".join(stdout_tail), stderr="\n".join(stderr_tail)
+                    )
                 try:
                     returncode = process.wait(timeout=0.1)
                 except subprocess.TimeoutExpired:
@@ -569,14 +512,7 @@ class ProcessTreeRunner:
                 live_readers = [reader.name for reader in readers if reader.is_alive()]
                 if live_readers:
                     cleanup_errors.append(f"output readers did not terminate: {', '.join(live_readers)}")
-                with reader_error_lock:
-                    unstarted_streams = tuple(unowned_streams.items())
-                    unowned_streams.clear()
-                for name, stream in unstarted_streams:
-                    # Only close pipes no reader claimed. A blocked reader retains
-                    # ownership: cross-thread close can block on its read lock.
-                    if stream is not None:
-                        close_stream(stream, name)
+                cleanup_errors.extend(f"stream cleanup failed: {error}" for error in pipes.close_unclaimed())
                 with reader_error_lock:
                     cleanup_errors.extend(reader_errors)
                 with self._lock:

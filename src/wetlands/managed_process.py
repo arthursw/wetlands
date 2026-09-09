@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import psutil
 
+from wetlands._internal.process_io import PipeOwnership
 from wetlands._internal.process_termination import (
     ProcessIdentity,
     ProcessIdentityError,
@@ -313,6 +314,7 @@ class ManagedProcess:
         self._generation_id = environment.generation_id
         self._argv = argv
         self._process = process
+        self._pipes = PipeOwnership(stdout=process.stdout, stderr=process.stderr)
         self._output_limit = output_limit
         self._started_at = started_at
         self._identity: ProcessIdentity | None = None
@@ -417,13 +419,36 @@ class ManagedProcess:
             except (TypeError, ValueError):
                 contextual_error = OSError(error.errno, message, error.filename)
             raise contextual_error from error
-        handle = cls(
-            environment=environment,
-            argv=options.argv,
-            process=process,
-            output_limit=options.output_limit,
-            started_at=started_at,
-        )
+        try:
+            handle = cls(
+                environment=environment,
+                argv=options.argv,
+                process=process,
+                output_limit=options.output_limit,
+                started_at=started_at,
+            )
+        except BaseException as launch_error:
+            # No handle exists to run normal cleanup. On Windows the child is
+            # still suspended; on POSIX it already owns its isolated group.
+            errors: list[BaseException] = []
+            try:
+                if os.name == "nt":
+                    process.kill()
+                    process.wait(timeout=max(1.0, environment._manager.termination_grace))
+                else:
+                    _terminate_posix_group(process.pid, grace=environment._manager.termination_grace, process=process)
+            except BaseException as error:
+                errors.append(error)
+            errors.extend(PipeOwnership(stdout=process.stdout, stderr=process.stderr).close_unclaimed())
+            if errors:
+                raise ProcessCleanupError(
+                    errors,
+                    None,
+                    argv=options.argv,
+                    environment=environment.name,
+                    generation_id=environment.generation_id,
+                ) from launch_error
+            raise
         if os.name == "nt":
             process._wetlands_suspended = True  # type: ignore[attr-defined]
         try:
@@ -507,16 +532,9 @@ class ManagedProcess:
             name=f"wetlands-process-{self.pid}-stderr",
             daemon=True,
         )
-        for reader, pipe in (
-            (stdout_reader, self._process.stdout),
-            (stderr_reader, self._process.stderr),
-        ):
-            try:
-                reader.start()
-            except BaseException:
-                pipe.close()
-                raise
+        for reader in (stdout_reader, stderr_reader):
             self._readers.append(reader)
+            reader.start()
 
     def _resume_windows_process(self) -> None:
         """Resume a Windows child created suspended after mandatory Job assignment."""
@@ -560,9 +578,11 @@ class ManagedProcess:
         supervisor.start()
 
     def _drain(self, pipe: Any, stream: OutputStream) -> None:
-        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        pending = ""
+        if self._pipes.claim(stream.value) is None:
+            return
         try:
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            pending = ""
             while True:
                 chunk = pipe.read1(_READ_SIZE) if hasattr(pipe, "read1") else pipe.read(_READ_SIZE)
                 if not chunk:
@@ -595,9 +615,11 @@ class ManagedProcess:
             self._request("cleanup", None)
         finally:
             try:
-                pipe.close()
-            except OSError:
-                pass
+                self._pipes.close_claimed(stream.value, pipe)
+            except BaseException as error:
+                with self._condition:
+                    self._reader_errors.append(error)
+                self._request("cleanup", None)
 
     def _publish_complete_lines(self, stream: OutputStream, pending: str) -> str:
         while True:
@@ -623,7 +645,7 @@ class ManagedProcess:
 
     def _supervise(self) -> None:
         cleanup_errors: list[BaseException] = []
-        cause: tuple[str, float | None] | None
+        cause: tuple[str, float | None] | None = None
         try:
             while True:
                 with self._condition:
@@ -632,7 +654,9 @@ class ManagedProcess:
                     break
                 with self._condition:
                     self._condition.wait(0.02)
-
+        except BaseException as error:
+            cleanup_errors.append(error)
+        finally:
             grace = self._environment_handle._manager.termination_grace
             if cause is not None and cause[0] == "kill":
                 try:
@@ -649,8 +673,6 @@ class ManagedProcess:
             self._join_readers(cleanup_errors)
             with self._condition:
                 cleanup_errors.extend(self._reader_errors)
-        except BaseException as error:
-            cleanup_errors.append(error)
 
         result = self._make_result()
         if not cleanup_errors:
@@ -831,12 +853,19 @@ class ManagedProcess:
     def _join_readers(self, errors: list[BaseException]) -> None:
         timeout = max(1.0, self._environment_handle._manager.termination_grace * 2)
         for reader in self._readers:
-            reader.join(timeout)
+            if reader.ident is not None:
+                try:
+                    reader.join(timeout)
+                except BaseException as error:
+                    errors.append(error)
             if reader.is_alive():
                 errors.append(RuntimeError(f"Output reader {reader.name} did not finish"))
+        errors.extend(self._pipes.close_unclaimed())
 
     def _make_result(self) -> ManagedProcessResult:
-        returncode = self._process.poll()
+        # Supervision/termination already polls and waits. In particular, do not
+        # repeat a failed poll while publishing a cleanup failure to waiters.
+        returncode = self._process.returncode
         if returncode is None:
             returncode = -1
         with self._output_lock:

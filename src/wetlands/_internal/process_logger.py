@@ -6,6 +6,8 @@ import logging
 from typing import Callable, Any, Optional
 from collections.abc import Callable as CallableType
 
+from wetlands._internal.process_io import PipeOwnership
+
 
 class ProcessLogger:
     """Reads subprocess stdout/stderr in background threads and emits logs with context metadata.
@@ -38,6 +40,7 @@ class ProcessLogger:
         self._output: list[str] = []  # Accumulate all output lines
         self._stdout_output: list[str] = []
         self._stderr_output: list[str] = []
+        self._pipes = PipeOwnership(stdout=process.stdout, stderr=process.stderr)
 
     def subscribe(self, callback: CallableType[[str, dict], None], include_history: bool = True) -> None:
         """Register a callback to be notified of each log line.
@@ -84,15 +87,30 @@ class ProcessLogger:
             )
             self._stderr_reader_thread.start()
 
-    def join(self, timeout: Optional[float] = None) -> None:
-        """Wait for stdout/stderr reader threads to finish draining process output."""
-        if self._reader_thread is not None and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=timeout)
-        if self._stderr_reader_thread is not None and self._stderr_reader_thread.is_alive():
-            self._stderr_reader_thread.join(timeout=timeout)
+    def join(self, timeout: Optional[float] = None) -> bool:
+        """Join readers and close unclaimed pipes; report whether cleanup finished.
+
+        Call after process-tree termination. A live reader retains its pipe;
+        closing it from this thread could block beyond the join timeout.
+        """
+        errors: list[BaseException] = []
+        for reader in (self._reader_thread, self._stderr_reader_thread):
+            if reader is not None and reader.is_alive():
+                try:
+                    reader.join(timeout=timeout)
+                except BaseException as error:
+                    errors.append(error)
+        errors.extend(self._pipes.close_unclaimed())
+        for error in errors:
+            self.base_logger.error("Process output cleanup failed: %s", error)
+        return not errors and all(
+            reader is None or not reader.is_alive() for reader in (self._reader_thread, self._stderr_reader_thread)
+        )
 
     def _read_stream(self, stream, stream_name: str, level: int) -> None:
         """Read a process stream line-by-line and emit logs with context."""
+        if self._pipes.claim(stream_name) is None:
+            return
         try:
             for line in iter(stream.readline, ""):
                 line = line.strip()
@@ -128,7 +146,7 @@ class ProcessLogger:
             self.base_logger.error(f"Exception in ProcessLogger reader thread: {e}")
         finally:
             try:
-                stream.close()
+                self._pipes.close_claimed(stream_name, stream)
             except OSError as error:
                 self.base_logger.error("Could not close %s pipe: %s", stream_name, error)
 

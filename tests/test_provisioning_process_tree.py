@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -168,9 +169,11 @@ time.sleep(30)
         (sys.executable, "-c", code, str(started)),
     )
     real_popen = subprocess.Popen
+    release_error = threading.Event()
 
     class BrokenReader:
         def readline(self) -> str:
+            assert release_error.wait(5)
             raise OSError("simulated output drain failure")
 
         def close(self) -> None:
@@ -191,8 +194,11 @@ time.sleep(30)
             lambda: runner.run(step),
             thread_name="test-provisioning-reader-failure",
         )
-        _wait_for_pid_like_marker(started)
-        assert operation.cancel()
+        try:
+            _wait_for_pid_like_marker(started)
+            assert operation.cancel()
+        finally:
+            release_error.set()
         with pytest.raises(ProvisioningError) as caught:
             operation.wait_for(timeout=5)
 

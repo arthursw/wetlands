@@ -32,6 +32,32 @@ Process-tree and Windows Job Object cleanup precede bounded reader joins so desc
 A reader that outlives its join retains responsibility for closing its pipe; the runner reports incomplete cleanup without attempting a potentially blocking close from another thread.
 Cleanup diagnostics accompany the original command or setup failure.
 
+## Subprocess ownership
+
+All subprocess launch sites follow the same pipe handoff implemented by the internal `PipeOwnership` helper.
+The launcher owns stdout and stderr until each reader claims its stream; reader completion or failure closes that stream in the reader thread.
+If thread construction or startup fails, cleanup terminates the owned process tree, joins any started readers, and closes only unclaimed pipes.
+The handoff also covers a thread-start call interrupted after the reader began running.
+Worker retirement and pool shutdown use the same output cleanup path as failed worker startup.
+They retain cleanup ownership when a process or output reader cannot be verified as finished, allowing a later close attempt to retry.
+
+| Launch site | Process and output owner | Terminal cleanup |
+| --- | --- | --- |
+| Pixi preparation, provisioning, and post-install commands | `ProcessTreeRunner` | Verify tree termination, release the Windows Job, reap the child, join readers, close unclaimed pipes. |
+| Fallback managed-Python discovery | `ProcessTreeRunner` | The same cleanup applies after success, nonzero exit, or the 30-second probe timeout. |
+| Launched workers | Worker pool and `ProcessLogger` | Terminate and reap on failed startup, retirement, or close; detached persistent workers retain daemon readers and a reaper until they exit. |
+| Managed commands and services | `ManagedProcess`, retained by its environment | Complete tree and pipe cleanup before publishing the result; report incomplete cleanup and retain ownership for close retries. |
+| VS Code command-line launcher | Daemon reaper | No pipes are created; retain the `Popen` until its exit is reaped without blocking CLI shutdown. |
+
+Provisioning reader failures trigger process cleanup even when the command remains running.
+Managed-command supervision also attempts cleanup after an unexpected polling failure and publishes that failure to waiters.
+Windows Job creation and closure share pointer-safe native API declarations; setup failures close allocated handles, and a failed close of an owned Job retains its handle for retry.
+
+These guarantees apply to owned processes and normal operating-system cleanup facilities.
+Wetlands does not signal an unverified process identity or claim successful cleanup when termination or a reader join fails.
+A descendant that deliberately escapes its process group, an external process retaining a pipe handle, or an operating-system refusal to terminate cannot be treated as proof of a leak-free shutdown.
+Bounded cleanup reports the failure instead of closing another thread's blocked stream or pretending the resource was released.
+
 ## Environment removal
 
 Logical removal and physical storage reclamation are separate phases.

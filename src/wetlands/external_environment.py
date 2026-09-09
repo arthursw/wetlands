@@ -17,6 +17,7 @@ import functools
 import hmac
 import threading
 import queue
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TYPE_CHECKING
 
@@ -31,8 +32,10 @@ from wetlands._internal.process_termination import (
     terminate_launched_process_tree,
 )
 from wetlands._internal.process_logger import ProcessLogger
+from wetlands._internal.process_io import PipeOwnership, start_process_reaper
+from wetlands._internal.windows_job import create_windows_kill_job, close_windows_job_handle
 from wetlands._internal import runtime_state
-from wetlands._internal.provisioning import _read_ready, environment_lifecycle_gate
+from wetlands._internal.provisioning import ProcessTreeRunner, ProvisioningStep, _read_ready, environment_lifecycle_gate
 from wetlands._internal.value_codec import (
     REQUIRED_WORKER_CODECS,
     SharedMemoryLease,
@@ -64,6 +67,8 @@ from wetlands.protocol import (
 )
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
 from wetlands.task import ExecutionTask
+from wetlands.operation import Operation, ProvisioningError
+from wetlands.specs import ProvisioningStage
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
@@ -83,7 +88,6 @@ LAUNCHER_LOSS_TIMEOUT_MARGIN = 30.0
 WORKER_GRACEFUL_EXIT_TIMEOUT = 2.0
 PROCESS_LOGGER_JOIN_TIMEOUT = 5.0
 _NO_RESULT = object()
-_WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 
 
 class _DispatchOutcome(enum.Enum):
@@ -98,76 +102,15 @@ class _AttachTimeout(TimeoutError):
 
 
 def _assign_windows_kill_job(process: subprocess.Popen) -> None:
-    """Put a worker in a kill-on-close Job Object when Windows permits it."""
-    import ctypes
-    from ctypes import wintypes
-
-    class IO_COUNTERS(ctypes.Structure):
-        _fields_ = [
-            ("ReadOperationCount", ctypes.c_ulonglong),
-            ("WriteOperationCount", ctypes.c_ulonglong),
-            ("OtherOperationCount", ctypes.c_ulonglong),
-            ("ReadTransferCount", ctypes.c_ulonglong),
-            ("WriteTransferCount", ctypes.c_ulonglong),
-            ("OtherTransferCount", ctypes.c_ulonglong),
-        ]
-
-    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_longlong),
-            ("PerJobUserTimeLimit", ctypes.c_longlong),
-            ("LimitFlags", wintypes.DWORD),
-            ("MinimumWorkingSetSize", ctypes.c_size_t),
-            ("MaximumWorkingSetSize", ctypes.c_size_t),
-            ("ActiveProcessLimit", wintypes.DWORD),
-            ("Affinity", ctypes.c_size_t),
-            ("PriorityClass", wintypes.DWORD),
-            ("SchedulingClass", wintypes.DWORD),
-        ]
-
-    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-        _fields_ = [
-            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
-            ("IoInfo", IO_COUNTERS),
-            ("ProcessMemoryLimit", ctypes.c_size_t),
-            ("JobMemoryLimit", ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed", ctypes.c_size_t),
-        ]
-
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        error = getattr(ctypes, "get_last_error")()
-        raise OSError(error, getattr(ctypes, "FormatError")(error))
-    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-    info.BasicLimitInformation.LimitFlags = _WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    configured = kernel32.SetInformationJobObject(
-        job,
-        9,
-        ctypes.byref(info),
-        ctypes.sizeof(info),
-    )
-    assigned = configured and kernel32.AssignProcessToJobObject(
-        job,
-        wintypes.HANDLE(process._handle),  # type: ignore[attr-defined]
-    )
-    if not assigned:
-        error = getattr(ctypes, "get_last_error")()
-        kernel32.CloseHandle(job)
-        raise OSError(error, getattr(ctypes, "FormatError")(error))
-    process._wetlands_job_handle = job  # type: ignore[attr-defined]
+    process._wetlands_job_handle = create_windows_kill_job(process)  # type: ignore[attr-defined]
 
 
 def _close_windows_job(process: subprocess.Popen) -> None:
     handle = getattr(process, "_wetlands_job_handle", None)
     if handle is None:
         return
+    close_windows_job_handle(handle)
     process._wetlands_job_handle = None  # type: ignore[attr-defined]
-    import ctypes
-
-    getattr(ctypes, "WinDLL")("kernel32", use_last_error=True).CloseHandle(handle)
 
 
 def _mp_connection_attr(*names: str) -> Any:
@@ -393,13 +336,10 @@ class _Worker:
         # Detachment releases execution control, but this interpreter still owns
         # its child handle. Retain it until wait() records the eventual exit.
         # A persistent worker must not prevent its original launcher from exiting.
-        reaper = threading.Thread(
-            target=self.process.wait,
+        self._reaper_thread = start_process_reaper(
+            self.process,
             name=f"wetlands-detached-worker-{self.pid}",
-            daemon=True,
         )
-        reaper.start()
-        self._reaper_thread = reaper
 
     def alive(self) -> bool:
         if self.process is not None:
@@ -650,8 +590,6 @@ class ExternalEnvironment:
         """Launch a single module_executor process and return a _Worker."""
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
         ready = self._ready_identity()
-        startup_socket = _open_startup_socket()
-        startup_host, startup_port = startup_socket.getsockname()
         startup_token = secrets.token_urlsafe(32)
         worker_id = uuid.uuid4().hex
         root = self.environment_manager.root.resolve()
@@ -674,10 +612,6 @@ class ExternalEnvironment:
             worker_id,
             "--pool_id",
             str(self._pool_id),
-            "--startup_host",
-            str(startup_host),
-            "--startup_port",
-            str(startup_port),
         ]
         if self._persistent:
             argv.append("--persistent")
@@ -701,7 +635,10 @@ class ExternalEnvironment:
         process_logger: ProcessLogger | None = None
         recorded = False
         worker: _Worker | None = None
+        startup_socket = _open_startup_socket()
         try:
+            startup_host, startup_port = startup_socket.getsockname()
+            argv.extend(["--startup_host", str(startup_host), "--startup_port", str(startup_port)])
             process = self._spawn_worker_process(argv, env, log_context)
             process_logger = ProcessLogger(process, log_context, logger)
             process_logger.start_reading()
@@ -785,7 +722,7 @@ class ExternalEnvironment:
         except BaseException as error:
             if process is None:
                 raise
-            terminated = self._cleanup_failed_worker_launch(process, connection)
+            terminated = self._cleanup_failed_worker_launch(process, connection, process_logger)
             if recorded and terminated:
                 try:
                     runtime_state.remove_worker(
@@ -863,8 +800,13 @@ class ExternalEnvironment:
         if pixi is None and self.environment_manager._prepared is not None:
             pixi = self.environment_manager._prepared.executable
         if pixi is not None:
-            probe = subprocess.run(
-                [
+            runner = ProcessTreeRunner(
+                Operation(), grace=self.environment_manager.termination_grace, environment_name=self.name
+            )
+            step = ProvisioningStep(
+                "discover-python",
+                ProvisioningStage.VALIDATION,
+                (
                     str(pixi),
                     "run",
                     "--manifest-path",
@@ -872,14 +814,19 @@ class ExternalEnvironment:
                     "python",
                     "-c",
                     "import sys; print(sys.executable)",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
+                ),
             )
-            if probe.returncode == 0 and probe.stdout.strip():
-                discovered = Path(probe.stdout.splitlines()[-1]).resolve()
+            # Diagnostic output is shell-quoted and redacted. Resolve the exact
+            # raw path instead, including paths containing spaces or quotes.
+            output: deque[str] = deque(maxlen=1)
+            try:
+                runner.run(step, timeout=30, on_stdout=output.append)
+            except ProvisioningError as error:
+                if error.failure.cleanup_error:
+                    raise
+                output.clear()
+            if output and output[-1].strip():
+                discovered = Path(output[-1]).resolve()
                 if discovered.is_file():
                     return discovered
         raise RuntimeError(f"Managed Pixi environment has no discoverable Python executable under {prefix}")
@@ -904,6 +851,7 @@ class ExternalEnvironment:
         else:
             kwargs["start_new_session"] = True
         process = subprocess.Popen(argv, **kwargs)
+        process._wetlands_job_handle = None  # type: ignore[attr-defined]
         identity_captured = False
         try:
             identity = capture_process_identity(process.pid)
@@ -917,27 +865,42 @@ class ExternalEnvironment:
             elif identity.process_group_id != process.pid or identity.session_id != process.pid:
                 raise ProcessIdentityError(f"Worker PID {process.pid} did not start in its own POSIX session")
         except BaseException as error:
-            if identity_captured:
-                try:
+            cleanup_errors: list[BaseException] = []
+            try:
+                if identity_captured:
                     terminate_launched_process_tree(
                         process,
                         grace=WORKER_GRACEFUL_EXIT_TIMEOUT,
                         close_windows_job=_close_windows_job,
                     )
-                except ProcessTerminationError as termination_error:
-                    raise termination_error from error
-            else:
-                # Without a captured start identity there is no safe target for
-                # the normal tree terminator. This immediate child is still the
-                # Popen object we just created, so direct termination is the
-                # bounded last resort.
-                if process.poll() is None:
-                    process.kill()
-                process.wait()
+                else:
+                    # Signal only our immediate child when identity is unknown.
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=WORKER_GRACEFUL_EXIT_TIMEOUT)
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            finally:
+                cleanup_errors.extend(PipeOwnership(stdout=process.stdout, stderr=process.stderr).close_unclaimed())
+                try:
+                    _close_windows_job(process)
+                except BaseException as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+            if cleanup_errors:
+                raise WorkerStartError(
+                    self.name,
+                    str(error),
+                    cleanup_errors=tuple(str(item) for item in cleanup_errors),
+                ) from error
             raise
         return process
 
-    def _cleanup_failed_worker_launch(self, process: subprocess.Popen, connection: Connection | None = None) -> bool:
+    def _cleanup_failed_worker_launch(
+        self,
+        process: subprocess.Popen,
+        connection: Connection | None = None,
+        process_logger: ProcessLogger | None = None,
+    ) -> bool:
         if connection is not None:
             try:
                 connection.send({"action": "exit", "protocol_version": EXECUTION_PROTOCOL_VERSION})
@@ -948,7 +911,21 @@ class ExternalEnvironment:
             except Exception:
                 pass
 
-        return self._terminate_launched_worker(process)
+        terminated = self._terminate_launched_worker(process)
+        output_closed = self._finish_process_output(process, process_logger)
+        return terminated and output_closed
+
+    def _finish_process_output(self, process: subprocess.Popen, process_logger: ProcessLogger | None) -> bool:
+        if process_logger is not None:
+            if process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT):
+                return True
+            logger.error("Worker %s output cleanup did not finish", process.pid)
+            return False
+        # Logger construction failed, so no reader can own these pipes.
+        errors = PipeOwnership(stdout=process.stdout, stderr=process.stderr).close_unclaimed()
+        for error in errors:
+            logger.error("Worker %s output cleanup failed: %s", process.pid, error)
+        return not errors
 
     def _terminate_launched_worker(self, process: subprocess.Popen) -> bool:
         try:
@@ -957,7 +934,7 @@ class ExternalEnvironment:
                 grace=WORKER_GRACEFUL_EXIT_TIMEOUT,
                 close_windows_job=_close_windows_job,
             )
-        except ProcessTerminationError as error:
+        except (ProcessTerminationError, OSError) as error:
             logger.error("Worker process-tree termination failed: %s", error)
             return False
         return True
@@ -1377,6 +1354,7 @@ class ExternalEnvironment:
                         terminated = self._cleanup_failed_worker_launch(
                             worker.process,
                             worker.connection,
+                            worker.process_logger,
                         )  # type: ignore[arg-type]
                         if terminated:
                             try:
@@ -1458,22 +1436,10 @@ class ExternalEnvironment:
         cleanup_failure: WorkerStartError | None = None
         if worker.process is not None:
             terminated = self._terminate_launched_worker(worker.process)
+            output_closed = self._finish_process_output(worker.process, worker.process_logger)
+            terminated = terminated and output_closed
         elif worker.pid is not None:
             terminated = self._terminate_attached_worker(worker)
-
-        if worker.process_logger is not None:
-            worker.process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
-
-        if worker.process and worker.process.stdout:
-            try:
-                worker.process.stdout.close()
-            except OSError:
-                pass
-        if worker.process and worker.process.stderr:
-            try:
-                worker.process.stderr.close()
-            except OSError:
-                pass
 
         if terminated:
             try:
@@ -2218,21 +2184,8 @@ class ExternalEnvironment:
             pass
 
         terminated = self._terminate_launched_worker(process)
-
-        if process_logger is not None:
-            process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
-
-        if process.stdout:
-            try:
-                process.stdout.close()
-            except OSError:
-                pass
-        if process.stderr:
-            try:
-                process.stderr.close()
-            except OSError:
-                pass
-        return terminated
+        output_closed = self._finish_process_output(process, process_logger)
+        return terminated and output_closed
 
     @synchronized
     def launched(self) -> bool:
@@ -2274,8 +2227,8 @@ class ExternalEnvironment:
                         cleanup_errors.append(f"worker {worker.index} connection close failed: {error}")
                     if worker.process is not None:
                         terminated = self._terminate_launched_worker(worker.process)
-                        if worker.process_logger is not None:
-                            worker.process_logger.join(timeout=PROCESS_LOGGER_JOIN_TIMEOUT)
+                        output_closed = self._finish_process_output(worker.process, worker.process_logger)
+                        terminated = terminated and output_closed
                     elif worker.pid is not None:
                         terminated = self._terminate_attached_worker(worker)
                     else:

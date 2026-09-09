@@ -5,12 +5,64 @@ import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import call, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from wetlands._internal.process_termination import ProcessIdentity
 from wetlands.managed_process import ManagedProcess, _LaunchOptions
+from wetlands._internal.windows_job import create_windows_kill_job
+from wetlands.external_environment import _close_windows_job
+
+
+@pytest.mark.parametrize("failure", [None, "create", "configure", "assign"])
+def test_windows_job_creation_is_failure_atomic(monkeypatch, failure):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = MagicMock()
+    handle = 0x123456789
+    kernel32.CreateJobObjectW.return_value = 0 if failure == "create" else handle
+    kernel32.SetInformationJobObject.return_value = failure != "configure"
+    kernel32.AssignProcessToJobObject.return_value = failure != "assign"
+    kernel32.CloseHandle.return_value = True
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel32, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(ctypes, "FormatError", lambda code: "job diagnostic", raising=False)
+
+    if failure is None:
+        assert create_windows_kill_job(_Process()) == handle
+        kernel32.CloseHandle.assert_not_called()
+    else:
+        with pytest.raises(OSError, match="job diagnostic"):
+            create_windows_kill_job(_Process())
+        if failure == "create":
+            kernel32.CloseHandle.assert_not_called()
+        else:
+            kernel32.CloseHandle.assert_called_once_with(handle)
+    assert kernel32.SetInformationJobObject.argtypes[0] is wintypes.HANDLE
+    assert kernel32.AssignProcessToJobObject.argtypes == (wintypes.HANDLE, wintypes.HANDLE)
+
+
+def test_windows_job_close_failure_retains_handle_for_retry(monkeypatch):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = MagicMock()
+    kernel32.CloseHandle.side_effect = [False, True]
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel32, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(ctypes, "FormatError", lambda code: "close diagnostic", raising=False)
+    process = _Process()
+    process._wetlands_job_handle = 0x123456789
+
+    with pytest.raises(OSError, match="close diagnostic"):
+        _close_windows_job(process)
+    assert process._wetlands_job_handle == 0x123456789
+    _close_windows_job(process)
+    assert process._wetlands_job_handle is None
+    assert kernel32.CloseHandle.call_args_list == [call(0x123456789), call(0x123456789)]
+    assert kernel32.CloseHandle.argtypes == (wintypes.HANDLE,)
 
 
 class _Pipe:
@@ -33,6 +85,10 @@ class _Process:
         self.waited = False
 
     def poll(self) -> int | None:
+        return self._returncode
+
+    @property
+    def returncode(self) -> int | None:
         return self._returncode
 
     def send_signal(self, sent_signal: int) -> None:
@@ -139,6 +195,8 @@ def test_windows_job_assignment_failure_kills_suspended_child_and_releases_owner
 
     assert process.killed
     assert process.waited
+    assert process.stdout.closed
+    assert process.stderr.closed
     assert environment.processes == []
 
 
