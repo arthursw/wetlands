@@ -101,8 +101,8 @@ class ProcessLogger:
                 except BaseException as error:
                     errors.append(error)
         errors.extend(self._pipes.close_unclaimed())
-        for error in errors:
-            self.base_logger.error("Process output cleanup failed: %s", error)
+        for cleanup_error in errors:
+            self.base_logger.error("Process output cleanup failed: %s", cleanup_error)
         return not errors and all(
             reader is None or not reader.is_alive() for reader in (self._reader_thread, self._stderr_reader_thread)
         )
