@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from wetlands import EnvironmentManager, EnvironmentSpec, OperationCanceled
+from wetlands import EnvironmentManager, EnvironmentSpec, ExecutionError, OperationCanceled
 from wetlands._internal.value_codec import load_shared_memory_lease_ledger
+from wetlands.diagnostics import ExecutionFailureCategory
 
 
 def _fake_pixi(tmp_path: Path, *, numpy_site: Path | None = None) -> Path:
@@ -147,6 +148,9 @@ def _descriptor_segment_names(descriptor) -> list[str]:
 def _wait_for_message(task, message: str, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while task.message != message and time.monotonic() < deadline:
+        if task.state.terminal:
+            task.wait_for(timeout=0)
+            break
         time.sleep(0.01)
     assert task.message == message
 
@@ -205,6 +209,7 @@ def test_numpy_task_fails_before_dispatch_to_worker_without_numpy(transport_envi
         assert pool.execute_path(module, "runtime_info", timeout=10)["numpy"] is None
 
     assert task._input_leases is None
+    assert input_names
     _assert_segments_unlinked(input_names)
 
 
@@ -218,16 +223,19 @@ def test_worker_pool_copies_numpy_inputs_and_acknowledges_output_release(numpy_t
 
     with environment.start() as pool:
         task = pool.submit_path(module, "mutate_and_return", args=(source,))
-        input_names = [lease.name for lease in task._input_leases]
         result = task.wait_for(timeout=10)
         output_names = list(task._offered_names)
 
+    # Live leases are cleared at terminal cleanup. The submitted descriptors
+    # retain their names, so inspect those after cleanup has definitely run.
+    input_names = _descriptor_segment_names(task._payload["args"])
     assert result["original"] == 0
     numpy.testing.assert_array_equal(source, expected)
     numpy.testing.assert_array_equal(result["mask"], numpy.full(source.shape, -100)[:, ::-1])
     assert result["mask"].flags.c_contiguous
     assert result["mask"].flags.owndata
     assert task._input_leases is None
+    assert input_names
     assert output_names
     assert load_shared_memory_lease_ledger(environment._manager.root)["leases"] == {}
     _assert_segments_unlinked(input_names + output_names)
@@ -245,13 +253,14 @@ def test_worker_pool_cancellation_unlinks_input_segments_after_cleanup(numpy_tra
             args=(numpy.arange(8),),
             context_keyword="context",
         )
-        input_names = [lease.name for lease in task._input_leases]
         _wait_for_message(task, "worker-started")
         assert task.cancel()
         with pytest.raises(OperationCanceled):
             task.wait_for(timeout=10)
 
+    input_names = _descriptor_segment_names(task._payload["args"])
     assert task._input_leases is None
+    assert input_names
     assert load_shared_memory_lease_ledger(environment._manager.root)["leases"] == {}
     _assert_segments_unlinked(input_names)
 
@@ -263,10 +272,14 @@ def test_worker_death_unlinks_host_owned_input_segments(numpy_transport_environm
 
     with environment.start() as pool:
         task = pool.submit_path(module, "exit_process", args=(numpy.arange(8),))
-        input_names = [lease.name for lease in task._input_leases]
-        with pytest.raises(Exception, match="Worker"):
+        with pytest.raises(ExecutionError, match="Worker"):
             task.wait_for(timeout=10)
 
+    input_names = _descriptor_segment_names(task._payload["args"])
+    assert task._accepted
+    assert task.error is not None
+    assert task.error.category in {ExecutionFailureCategory.WORKER_DIED, ExecutionFailureCategory.WORKER_CONNECTION}
     assert task._input_leases is None
+    assert input_names
     assert load_shared_memory_lease_ledger(environment._manager.root)["leases"] == {}
     _assert_segments_unlinked(input_names)
