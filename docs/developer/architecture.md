@@ -75,6 +75,9 @@ Authentication material is stored separately with restrictive permissions and is
 
 A persistent pool has one execution controller.
 Detaching releases that claim without killing workers, while closing terminates them.
+The launching interpreter retains each detached worker's `Popen` in a daemon waiter until its exit is reaped, independently of later controllers.
+Output readers close their own pipes at EOF or on failure; detachment does not close pipes while readers are active.
+These local cleanup threads do not prevent the launcher from exiting while persistent workers remain available.
 Debug access is independent and does not claim the execution connection.
 
 ## Async integration

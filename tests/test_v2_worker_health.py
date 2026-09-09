@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 import threading
 import time
+import weakref
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, call, patch
@@ -11,8 +14,10 @@ import pytest
 
 from wetlands.diagnostics import ExecutionFailureCategory
 from wetlands._internal.process_termination import ProcessTerminationError
+from wetlands._internal.process_logger import ProcessLogger
 from wetlands.external_environment import ExternalEnvironment, _validate_worker_environments, _Worker
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
+from wetlands.logger import logger
 from wetlands.managed_environment import WorkerPool
 from wetlands.operation import ExecutionError
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, ProtocolCompatibilityError
@@ -46,6 +51,98 @@ def _active_task(task_id: str = "task-1") -> ExecutionTask[Any]:
     task._payload = {"_call_target": "sample.module:run"}  # type: ignore[attr-defined]
     task._set_running()
     return task
+
+
+def test_detach_reaper_start_failure_keeps_pool_control(tmp_path):
+    environment = _environment(tmp_path)
+    environment._persistent = True
+    worker = _worker()
+    environment._workers = [worker]
+    with (
+        patch("wetlands.external_environment.threading.Thread.start", side_effect=RuntimeError("cannot start waiter")),
+        pytest.raises(RuntimeError, match="cannot start waiter"),
+    ):
+        environment.detach()
+    assert environment._workers == [worker]
+    assert not environment._shutdown_event.is_set()
+    assert worker._reaper_thread is None
+    worker.connection.send.assert_not_called()
+    worker.connection.close.assert_not_called()
+
+
+def test_detach_reaper_is_started_once_and_only_for_launched_workers(tmp_path):
+    environment = _environment(tmp_path)
+    environment._persistent = True
+    launched = _worker(0)
+    attached = _worker(1)
+    attached.process = None
+    environment._workers = [launched, attached]
+    with patch("wetlands.external_environment.threading.Thread") as thread:
+        launched._start_detached_reaper()
+        environment.detach()
+    thread.assert_called_once_with(
+        target=launched.process.wait,
+        name=f"wetlands-detached-worker-{launched.pid}",
+        daemon=True,
+    )
+    thread.return_value.start.assert_called_once_with()
+    assert attached._reaper_thread is None
+    assert environment._workers == []
+
+
+@pytest.mark.filterwarnings("error::ResourceWarning")
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_detached_process_is_retained_and_reaped_after_output_ends():
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os, sys; print('ready', flush=True); os.close(1); os.close(2); sys.stdin.readline()",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    process_logger = ProcessLogger(process, {}, logger)
+    worker = _Worker(0, process, 0, MagicMock(), process_logger, persistent=True)
+    process_ref = weakref.ref(process)
+    stdin = process.stdin
+    assert stdin is not None
+    reaper = None
+    try:
+        process_logger.start_reading()
+        worker._start_detached_reaper()
+        reaper = worker._reaper_thread
+        assert reaper is not None
+        assert reaper.daemon
+        assert process_logger.wait_for_line(lambda line: line == "ready", timeout=5) == "ready"
+        process_logger.join(timeout=5)
+        assert not process_logger._reader_thread.is_alive()
+        assert not process_logger._stderr_reader_thread.is_alive()
+        assert process.stdout.closed
+        assert process.stderr.closed
+        del worker, process_logger, process
+        # Neither worker records nor output threads retain it now. The waiter
+        # must keep the Popen alive until the child exits, without terminating it.
+        assert process_ref() is not None
+        assert process_ref().returncode is None
+        assert reaper.is_alive()
+        stdin.write("exit\n")
+        stdin.close()
+        reaper.join(timeout=5)
+        assert not reaper.is_alive()
+        assert process_ref() is None
+    finally:
+        stdin.close()
+        remaining = process_ref()
+        if remaining is not None:
+            remaining.kill()
+            remaining.wait(timeout=5)
+            for stream in (remaining.stdout, remaining.stderr):
+                stream.close()
+        if reaper is not None:
+            reaper.join(timeout=5)
 
 
 def test_worker_count_and_liveness_follow_the_current_pool(tmp_path):

@@ -1112,19 +1112,36 @@ def test_worker_pool_executes_qualified_and_equal_stem_path_targets(tmp_path: Pa
         assert pool.execute_path(second, "value") == "second"
 
 
-def test_persistent_pool_detach_and_exclusive_attach(tmp_path: Path) -> None:
+@pytest.mark.filterwarnings("error::ResourceWarning")
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+@pytest.mark.parametrize("restart_manager", [False, True])
+def test_persistent_pool_detach_and_exclusive_attach(tmp_path: Path, restart_manager: bool) -> None:
     executable = _fake_pixi(tmp_path)
     manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
     environment = manager.provision("example", EnvironmentSpec(python="3.11")).wait_for()
     pool = environment.start(persistent=True)
+    workers = tuple(pool._runtime._workers)
     assert pool.execute_import("builtins:sum", args=([1, 2],)) == 3
 
     with pytest.raises(RuntimeError, match="controlled by another live process"):
         environment.attach_pool(timeout=0.5)
 
     pool.detach()
+    if restart_manager:
+        manager.close()
+        manager = EnvironmentManager(tmp_path / "state", pixi_executable=executable)
+        environment = manager.environment("example")
     with environment.attach_pool() as attached:
         assert attached.execute_import("builtins:sum", args=([3, 4],)) == 7
+    for worker in workers:
+        assert worker._reaper_thread is not None
+        worker._reaper_thread.join(timeout=5)
+        assert not worker._reaper_thread.is_alive()
+        assert worker.process.returncode is not None
+        worker.process_logger.join(timeout=5)
+        assert worker.process.stdout.closed
+        assert worker.process.stderr.closed
+    manager.close()
 
 
 def test_replacement_is_rejected_while_nonpersistent_pool_is_live(

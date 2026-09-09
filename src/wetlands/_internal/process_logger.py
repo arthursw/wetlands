@@ -126,6 +126,11 @@ class ProcessLogger:
             pass
         except Exception as e:
             self.base_logger.error(f"Exception in ProcessLogger reader thread: {e}")
+        finally:
+            try:
+                stream.close()
+            except OSError as error:
+                self.base_logger.error("Could not close %s pipe: %s", stream_name, error)
 
     def get_output(self) -> list[str]:
         """Get all accumulated output lines read so far.

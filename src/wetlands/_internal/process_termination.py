@@ -265,8 +265,8 @@ def _wait_for_posix_group_exit(
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
         if process is None:
-            # A pool detached and reattached in this process no longer retains
-            # its Popen, but the worker is still our child and must be reaped.
+            # An attached controller has no Popen. Reap if it is our child;
+            # a detached launcher's waiter may already have collected it.
             _reap_attached_child(process_group_id)
         else:
             _reap(process)

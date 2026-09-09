@@ -320,6 +320,7 @@ class _Worker:
         "connection",
         "process_logger",
         "reader_thread",
+        "_reaper_thread",
         "pid",
         "persistent",
         "process_started_at",
@@ -378,12 +379,27 @@ class _Worker:
             else None
         )
         self.reader_thread: threading.Thread | None = None
+        self._reaper_thread: threading.Thread | None = None
         self._current_task: ExecutionTask[Any] | None = None
         self._last_activity: float = 0.0
         self._finished_task_ids: set[str] = set()
         self._retired = False
         self._commissioned = threading.Event()
         self.capabilities = capabilities
+
+    def _start_detached_reaper(self) -> None:
+        if self.process is None or self._reaper_thread is not None:
+            return
+        # Detachment releases execution control, but this interpreter still owns
+        # its child handle. Retain it until wait() records the eventual exit.
+        # A persistent worker must not prevent its original launcher from exiting.
+        reaper = threading.Thread(
+            target=self.process.wait,
+            name=f"wetlands-detached-worker-{self.pid}",
+            daemon=True,
+        )
+        reaper.start()
+        self._reaper_thread = reaper
 
     def alive(self) -> bool:
         if self.process is not None:
@@ -2373,6 +2389,10 @@ class ExternalEnvironment:
             raise RuntimeError("Only persistent worker pools can be detached")
         if any(worker._current_task is not None for worker in self._workers) or not self._task_queue.empty():
             raise RuntimeError("Cannot detach a worker pool with running or queued tasks")
+        # Establish local reaping ownership before releasing any connections.
+        # A thread-start failure leaves the pool available for close or retry.
+        for worker in self._workers:
+            worker._start_detached_reaper()
         self._shutdown_event.set()
         for worker in list(self._workers):
             try:

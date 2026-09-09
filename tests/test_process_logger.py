@@ -35,6 +35,22 @@ def test_process_logger_initialization(mock_process, log_context):
     assert process_logger._output == []
 
 
+def test_process_logger_closes_stream_after_reader_failure(mock_process, log_context):
+    import io
+
+    class BrokenReader(io.StringIO):
+        def readline(self, *args):
+            raise OSError("read failed")
+
+    stream = BrokenReader()
+    mock_process.stdout = stream
+    process_logger = ProcessLogger(mock_process, log_context, logger)
+    process_logger.start_reading()
+    process_logger.join(timeout=2)
+    assert not process_logger._reader_thread.is_alive()
+    assert stream.closed
+
+
 def test_process_logger_subscription(mock_process, log_context):
     """Test ProcessLogger subscriber registration."""
     process_logger = ProcessLogger(mock_process, log_context, logger)
