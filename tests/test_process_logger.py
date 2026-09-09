@@ -1,6 +1,7 @@
 """Tests for ProcessLogger and logging functionality."""
 
 import subprocess
+import sys
 import pytest
 import logging
 import io
@@ -251,10 +252,14 @@ def test_process_logger_subscriber_error_handling(mock_process, log_context, cap
 class TestProcessLoggerIntegration:
     """Integration tests for ProcessLogger with actual subprocess."""
 
-    def test_process_logger_reads_echo_output(self):
+    def test_process_logger_reads_output(self):
         """Test ProcessLogger reads output from real subprocess."""
         process = subprocess.Popen(
-            ["echo", "Hello World"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+            [sys.executable, "-c", "print('Hello World')"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
 
         log_context = {"log_source": "execution", "env_name": "test"}
@@ -265,19 +270,20 @@ class TestProcessLoggerIntegration:
         process_logger.subscribe(lambda line, ctx: collected_lines.append(line))
 
         process_logger.start_reading()
-        process.wait()
-
-        # Give reader thread time to process
-        import time
-
-        time.sleep(0.1)
+        process.wait(timeout=5)
+        assert process_logger.join(timeout=5)
+        assert process.stdout.closed
 
         assert "Hello World" in collected_lines
 
     def test_process_logger_with_log_context_in_logger(self):
         """Test that log context is properly attached to log records."""
         process = subprocess.Popen(
-            ["echo", "Test message"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+            [sys.executable, "-c", "print('Test message')"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
 
         log_context = {"log_source": "execution", "env_name": "cellpose", "call_target": "segment:detect"}
@@ -301,12 +307,9 @@ class TestProcessLoggerIntegration:
         try:
             process_logger = ProcessLogger(process, log_context, logger)
             process_logger.start_reading()
-            process.wait()
-
-            # Give reader thread time to process
-            import time
-
-            time.sleep(0.1)
+            process.wait(timeout=5)
+            assert process_logger.join(timeout=5)
+            assert process.stdout.closed
 
             # Verify at least one record was logged
             assert len(records_with_extra) > 0
@@ -323,7 +326,7 @@ class TestProcessLoggerIntegration:
     def test_process_logger_stderr_logs_info_with_stream_metadata(self, log_context):
         """Test stderr is captured as stderr but emitted as routine subprocess output."""
         process = subprocess.Popen(
-            ["python", "-c", "import sys; print('pixi progress', file=sys.stderr)"],
+            [sys.executable, "-c", "import sys; print('pixi progress', file=sys.stderr)"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -343,7 +346,9 @@ class TestProcessLoggerIntegration:
             process_logger = ProcessLogger(process, log_context, logger)
             process_logger.start_reading()
             process.wait(timeout=5)
-            process_logger.join(timeout=2)
+            assert process_logger.join(timeout=5)
+            assert process.stdout.closed
+            assert process.stderr.closed
 
             assert process_logger.get_stdout_output() == []
             assert process_logger.get_stderr_output() == ["pixi progress"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -73,7 +74,9 @@ def test_spawn_identity_failure_closes_unclaimed_pipes(tmp_path, monkeypatch):
     monkeypatch.setattr("wetlands.external_environment.capture_process_identity", fail_identity)
     try:
         with pytest.raises(ProcessIdentityError) as caught:
-            environment._spawn_worker_process([sys.executable, "-c", "import time; time.sleep(30)"], {}, {})
+            environment._spawn_worker_process(
+                [sys.executable, "-c", "import time; time.sleep(30)"], os.environ.copy(), {}
+            )
         assert caught.value is original
         assert launched[0].returncode is not None
         assert launched[0].stdout.closed

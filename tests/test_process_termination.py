@@ -35,6 +35,29 @@ def _wait_for_file(path: Path, timeout: float = 5.0) -> int:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
+def test_group_exit_reaps_leader_that_exits_during_verification():
+    process = MagicMock()
+    process.returncode = None
+    exited = False
+
+    def group_terminated(group):
+        nonlocal exited
+        exited = True
+        return True
+
+    def wait(*, timeout):
+        if not exited:
+            raise subprocess.TimeoutExpired("child", timeout)
+        process.returncode = -signal.SIGTERM
+        return process.returncode
+
+    process.wait.side_effect = wait
+    with patch("wetlands._internal.process_termination._posix_group_is_terminated", side_effect=group_terminated):
+        assert _wait_for_posix_group_exit(42, process=process, timeout=0)
+    assert process.returncode == -signal.SIGTERM
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group behavior")
 def test_launched_worker_termination_kills_child_and_grandchild(tmp_path: Path) -> None:
     child_marker = tmp_path / "child.pid"
     grandchild_marker = tmp_path / "grandchild.pid"

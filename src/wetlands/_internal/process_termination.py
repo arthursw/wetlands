@@ -264,13 +264,16 @@ def _wait_for_posix_group_exit(
 ) -> bool:
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
+        terminated = _posix_group_is_terminated(process_group_id)
         if process is None:
             # An attached controller has no Popen. Reap if it is our child;
             # a detached launcher's waiter may already have collected it.
             _reap_attached_child(process_group_id)
         else:
+            # The leader can become a zombie during group enumeration. Reap
+            # after that check so success includes collecting its exit status.
             _reap(process)
-        if _posix_group_is_terminated(process_group_id):
+        if terminated and (process is None or process.returncode is not None):
             return True
         if time.monotonic() >= deadline:
             return False

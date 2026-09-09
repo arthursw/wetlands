@@ -8,6 +8,7 @@ All notable changes to Wetlands are documented here.
 - Kept worker output cleanup bounded when readers remain blocked, and retained and reaped the VS Code launcher process.
 - Added process-tree cleanup to the managed-Python discovery timeout and cleanup after provisioning reader or managed-command supervisor failures.
 - Consolidated Windows Job Object creation and verified handle closure using pointer-safe native declarations.
+- Fixed a POSIX termination race that could report a finished process group before reaping its leader.
 
 ## 2.4.1
 

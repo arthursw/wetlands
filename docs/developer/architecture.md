@@ -51,6 +51,7 @@ They retain cleanup ownership when a process or output reader cannot be verified
 
 Provisioning reader failures trigger process cleanup even when the command remains running.
 Managed-command supervision also attempts cleanup after an unexpected polling failure and publishes that failure to waiters.
+POSIX group verification reaps the launched leader after inspecting group liveness, so a concurrent transition to zombie state cannot leave its exit status uncollected.
 Windows Job creation and closure share pointer-safe native API declarations; setup failures close allocated handles, and a failed close of an owned Job retains its handle for retry.
 
 These guarantees apply to owned processes and normal operating-system cleanup facilities.
