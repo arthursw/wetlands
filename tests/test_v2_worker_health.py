@@ -93,9 +93,13 @@ def test_detach_reaper_is_started_once_and_only_for_launched_workers(tmp_path):
 @pytest.mark.filterwarnings("error::ResourceWarning")
 @pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
 def test_detached_process_is_retained_and_reaped_after_output_ends():
+    # The Windows venv launcher retains output pipe handles until Python exits.
+    # Launch the base interpreter so closing the child's outputs produces EOF
+    # while it is still running. This child only needs the standard library.
+    executable = sys._base_executable if sys.platform == "win32" else sys.executable
     process = subprocess.Popen(
         [
-            sys.executable,
+            executable,
             "-c",
             "import os, sys; print('ready', flush=True); os.close(1); os.close(2); sys.stdin.readline()",
         ],
