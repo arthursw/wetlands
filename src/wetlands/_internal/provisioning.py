@@ -22,7 +22,7 @@ import urllib.request
 import uuid
 import zipfile
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, TYPE_CHECKING
 
@@ -404,67 +404,35 @@ class ProcessTreeRunner:
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
         else:
             kwargs["start_new_session"] = True
-        with self._lock:
-            if self.operation.cancellation_requested:
-                raise OperationCanceled(self.operation.id)
-            try:
-                process = subprocess.Popen(popen_command, **kwargs)
-            except OSError as error:
-                failure = OperationFailure(
-                    operation_id=self.operation.id,
-                    stage=step.stage.value,
-                    step_id=step.id,
-                    message=f"Could not start provisioning step {step.id!r}: {error}",
-                    command=command,
-                    environment=self.environment_name,
-                )
-                raise self.error_type(failure) from error
-            try:
-                identity = capture_process_identity(process.pid)
-                process._wetlands_started_at = identity.started_at  # type: ignore[attr-defined]
-                process._wetlands_process_group_id = identity.process_group_id  # type: ignore[attr-defined]
-                process._wetlands_session_id = identity.session_id  # type: ignore[attr-defined]
-                if os.name != "nt" and (identity.process_group_id != process.pid or identity.session_id != process.pid):
-                    raise ProcessIdentityError(
-                        f"Provisioning process {process.pid} did not start in its own POSIX session"
-                    )
-            except BaseException as error:
-                with contextlib.suppress(OSError):
-                    process.kill()
-                with contextlib.suppress(subprocess.TimeoutExpired):
-                    process.wait(timeout=self.grace)
-                failure = OperationFailure(
-                    operation_id=self.operation.id,
-                    stage=step.stage.value,
-                    step_id=step.id,
-                    message=f"Could not establish process ownership for provisioning step {step.id!r}",
-                    command=command,
-                    environment=self.environment_name,
-                    cleanup_error=str(error),
-                )
-                raise self.error_type(failure) from error
-            self._active = process
-            self._termination_error = None
-            self._termination_finished.clear()
-            if os.name == "nt":
-                try:
-                    self._active_job = _WindowsJob(process)
-                except Exception:
-                    self.operation._emit(
-                        OperationEventKind.STEP,
-                        "Windows Job Object unavailable; using recursive process termination",
-                        stage=step.stage.value,
-                        step_id=step.id,
-                        environment=self.environment_name,
-                    )
+        process: subprocess.Popen[str] | None = None
+        job: _WindowsJob | None = None
+        ownership_established = False
+        readers: list[threading.Thread] = []
+        unowned_streams: dict[str, Any] = {}
         stdout_tail: deque[str] = deque(maxlen=100)
         stderr_tail: deque[str] = deque(maxlen=100)
         reader_errors: list[str] = []
         reader_error_lock = threading.Lock()
+        cleanup_errors: list[str] = []
+        returncode: int | None = None
+        primary_error: BaseException | None = None
+
+        def close_stream(stream: Any, name: str) -> None:
+            try:
+                stream.close()
+            except BaseException as error:
+                with reader_error_lock:
+                    reader_errors.append(f"{name} stream cleanup failed: {error}")
 
         def drain(stream: Any, name: str, tail: deque[str]) -> None:
             if stream is None:
                 return
+            with reader_error_lock:
+                # Cleanup can win this handoff if Thread.start() was interrupted.
+                # In that case the runner closes the pipe and we must not read it.
+                if name not in unowned_streams:
+                    return
+                del unowned_streams[name]
             try:
                 for raw_line in iter(stream.readline, ""):
                     line = raw_line.rstrip("\r\n")
@@ -482,62 +450,166 @@ class ProcessTreeRunner:
             except BaseException as error:
                 with reader_error_lock:
                     reader_errors.append(f"{name} reader failed: {error}")
+            finally:
+                close_stream(stream, name)
 
-        readers = [
-            threading.Thread(target=drain, args=(process.stdout, "stdout", stdout_tail), daemon=True),
-            threading.Thread(target=drain, args=(process.stderr, "stderr", stderr_tail), daemon=True),
-        ]
-        for reader in readers:
-            reader.start()
-        returncode: int | None = None
-        while returncode is None:
-            try:
-                returncode = process.wait(timeout=0.1)
-            except subprocess.TimeoutExpired:
-                if self.operation.cancellation_requested and self._termination_finished.is_set():
-                    with self._lock:
-                        termination_error = self._termination_error
-                    if termination_error is not None:
-                        break
+        try:
+            with self._lock:
+                if self.operation.cancellation_requested:
+                    raise OperationCanceled(self.operation.id)
+                try:
+                    process = subprocess.Popen(popen_command, **kwargs)
+                    unowned_streams.update(stdout=process.stdout, stderr=process.stderr)
+                except OSError as error:
+                    failure = OperationFailure(
+                        operation_id=self.operation.id,
+                        stage=step.stage.value,
+                        step_id=step.id,
+                        message=f"Could not start provisioning step {step.id!r}: {error}",
+                        command=command,
+                        environment=self.environment_name,
+                    )
+                    raise self.error_type(failure) from error
+                try:
+                    identity = capture_process_identity(process.pid)
+                    process._wetlands_started_at = identity.started_at  # type: ignore[attr-defined]
+                    process._wetlands_process_group_id = identity.process_group_id  # type: ignore[attr-defined]
+                    process._wetlands_session_id = identity.session_id  # type: ignore[attr-defined]
+                    if os.name != "nt" and (
+                        identity.process_group_id != process.pid or identity.session_id != process.pid
+                    ):
+                        raise ProcessIdentityError(
+                            f"Provisioning process {process.pid} did not start in its own POSIX session"
+                        )
+                except BaseException as error:
+                    failure = OperationFailure(
+                        operation_id=self.operation.id,
+                        stage=step.stage.value,
+                        step_id=step.id,
+                        message=f"Could not establish process ownership for provisioning step {step.id!r}",
+                        command=command,
+                        environment=self.environment_name,
+                        cleanup_error=str(error),
+                    )
+                    raise self.error_type(failure) from error
+                ownership_established = True
+                self._active = process
+                self._termination_error = None
+                self._termination_finished.clear()
+                if os.name == "nt":
+                    try:
+                        job = self._active_job = _WindowsJob(process)
+                    except Exception:
+                        self.operation._emit(
+                            OperationEventKind.STEP,
+                            "Windows Job Object unavailable; using recursive process termination",
+                            stage=step.stage.value,
+                            step_id=step.id,
+                            environment=self.environment_name,
+                        )
+            for stream, name, tail in (
+                (process.stdout, "stdout", stdout_tail),
+                (process.stderr, "stderr", stderr_tail),
+            ):
+                reader = threading.Thread(target=drain, args=(stream, name, tail), daemon=True)
+                # Register before start so a partial startup still has a cleanup path.
+                readers.append(reader)
+                reader.start()
+            while returncode is None:
+                try:
+                    returncode = process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    if self.operation.cancellation_requested and self._termination_finished.is_set():
+                        with self._lock:
+                            termination_error = self._termination_error
+                        if termination_error is not None:
+                            break
+        except BaseException as error:
+            primary_error = error
+        finally:
+            if process is not None:
+                if ownership_established:
+                    if self.operation.cancellation_requested:
+                        wait_timeout = max(1.0, (self.grace * 2) + 0.1)
+                        if not self._termination_finished.wait(timeout=wait_timeout):
+                            cleanup_errors.append("process-tree termination callback did not finish")
+                    try:
+                        self._verify_finished_tree(process, job)
+                    except BaseException as error:
+                        cleanup_errors.append(str(error))
+                else:
+                    # Ownership could not be proved: retain the existing direct-child
+                    # kill policy, without signaling an unverified process group.
+                    try:
+                        process.kill()
+                    except BaseException as error:
+                        cleanup_errors.append(f"provisioning process kill failed: {error}")
 
-        cleanup_errors: list[str] = []
-        if returncode is None:
-            try:
-                returncode = process.wait(timeout=max(1.0, self.grace))
-            except subprocess.TimeoutExpired:
-                pass
-        if self.operation.cancellation_requested:
-            wait_timeout = max(1.0, (self.grace * 2) + 0.1)
-            if not self._termination_finished.wait(timeout=wait_timeout):
-                cleanup_errors.append("process-tree termination callback did not finish")
-        if returncode is not None:
-            try:
-                self._verify_finished_tree(process, self._active_job)
-            except ProcessTerminationError as error:
-                cleanup_errors.append(str(error))
-        else:
-            cleanup_errors.append("provisioning process did not terminate and could not be reaped")
+                # Release the job even if tree verification failed, before joining
+                # readers whose EOF can depend on descendants holding pipe handles.
+                if job is not None:
+                    try:
+                        job.close()
+                    except BaseException as error:
+                        cleanup_errors.append(f"Windows Job Object cleanup failed: {error}")
+                if returncode is None:
+                    try:
+                        returncode = process.wait(timeout=max(1.0, self.grace))
+                    except subprocess.TimeoutExpired:
+                        cleanup_errors.append("provisioning process did not terminate and could not be reaped")
+                    except BaseException as error:
+                        cleanup_errors.append(f"provisioning process wait failed: {error}")
 
-        for reader in readers:
-            reader.join(timeout=max(1.0, self.grace))
-        live_readers = [reader.name for reader in readers if reader.is_alive()]
-        if live_readers:
-            cleanup_errors.append(f"output readers did not terminate: {', '.join(live_readers)}")
-        with reader_error_lock:
-            cleanup_errors.extend(reader_errors)
-        with self._lock:
-            if self._active is process:
-                self._active = None
-            termination_error = self._termination_error
-            job = self._active_job
-            self._active_job = None
-        if termination_error is not None:
-            cleanup_errors.append(termination_error)
-        if job is not None:
-            try:
-                job.close()
-            except BaseException as error:
-                cleanup_errors.append(f"Windows Job Object cleanup failed: {error}")
+                for reader in readers:
+                    if reader.ident is not None:
+                        try:
+                            reader.join(timeout=max(1.0, self.grace))
+                        except BaseException as error:
+                            cleanup_errors.append(f"output reader join failed: {error}")
+                live_readers = [reader.name for reader in readers if reader.is_alive()]
+                if live_readers:
+                    cleanup_errors.append(f"output readers did not terminate: {', '.join(live_readers)}")
+                with reader_error_lock:
+                    unstarted_streams = tuple(unowned_streams.items())
+                    unowned_streams.clear()
+                for name, stream in unstarted_streams:
+                    # Only close pipes no reader claimed. A blocked reader retains
+                    # ownership: cross-thread close can block on its read lock.
+                    if stream is not None:
+                        close_stream(stream, name)
+                with reader_error_lock:
+                    cleanup_errors.extend(reader_errors)
+                with self._lock:
+                    if self._active is process:
+                        self._active = None
+                        self._active_job = None
+                        if self._termination_error is not None:
+                            cleanup_errors.append(self._termination_error)
+
+        if primary_error is not None:
+            if not cleanup_errors:
+                raise primary_error.with_traceback(primary_error.__traceback__)
+            if isinstance(primary_error, OperationError):
+                if primary_error.failure.cleanup_error:
+                    cleanup_errors.insert(0, primary_error.failure.cleanup_error)
+                failure = replace(
+                    primary_error.failure,
+                    cleanup_error="; ".join(dict.fromkeys(cleanup_errors)),
+                )
+                raise type(primary_error)(failure) from primary_error
+            failure = OperationFailure(
+                operation_id=self.operation.id,
+                stage=step.stage.value,
+                step_id=step.id,
+                message=f"Provisioning step {step.id!r} failed: {primary_error}",
+                command=command,
+                returncode=returncode,
+                stdout_tail=tuple(stdout_tail),
+                stderr_tail=tuple(stderr_tail),
+                environment=self.environment_name,
+                cleanup_error="; ".join(dict.fromkeys(cleanup_errors)),
+            )
+            raise self.error_type(failure) from primary_error
         if self.operation.cancellation_requested:
             if cleanup_errors:
                 failure = OperationFailure(
@@ -554,7 +626,7 @@ class ProcessTreeRunner:
                 )
                 raise self.error_type(failure)
             raise OperationCanceled(self.operation.id)
-        if cleanup_errors:
+        if cleanup_errors and returncode in (None, 0):
             failure = OperationFailure(
                 operation_id=self.operation.id,
                 stage=step.stage.value,
@@ -575,6 +647,7 @@ class ProcessTreeRunner:
                 stage=step.stage.value,
                 step_id=step.id,
                 message=f"Provisioning step {step.id!r} failed with exit code {returncode}",
+                cleanup_error="; ".join(dict.fromkeys(cleanup_errors)) or None,
                 command=command,
                 returncode=returncode,
                 stdout_tail=tuple(stdout_tail),

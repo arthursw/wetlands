@@ -20,6 +20,11 @@ from wetlands.operation import (
 )
 from wetlands.specs import ProvisioningStage
 
+pytestmark = [
+    pytest.mark.filterwarnings("error::ResourceWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 
 def _wait_for_pid(path: Path, timeout: float = 5.0) -> int:
     deadline = time.monotonic() + timeout
@@ -167,6 +172,9 @@ time.sleep(30)
     class BrokenReader:
         def readline(self) -> str:
             raise OSError("simulated output drain failure")
+
+        def close(self) -> None:
+            pass
 
     def popen_with_broken_stdout(*args, **kwargs):
         process = real_popen(*args, **kwargs)

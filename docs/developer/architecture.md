@@ -26,6 +26,12 @@ The ready metadata is written only after every preceding stage succeeds.
 Failure or cancellation terminates the active subprocess tree and removes the incomplete environment.
 After a host crash, the next attempt treats an environment without matching ready metadata as incomplete and rebuilds it.
 
+Each provisioning output reader owns its pipe and closes it when draining finishes or fails.
+The runner closes pipes whose readers never started, including failures while establishing process ownership.
+Process-tree and Windows Job Object cleanup precede bounded reader joins so descendant pipe handles can reach EOF.
+A reader that outlives its join retains responsibility for closing its pipe; the runner reports incomplete cleanup without attempting a potentially blocking close from another thread.
+Cleanup diagnostics accompany the original command or setup failure.
+
 ## Environment removal
 
 Logical removal and physical storage reclamation are separate phases.
