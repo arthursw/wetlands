@@ -2,6 +2,12 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.4.1
+
+- Fixed provisioning subprocess pipe ownership and cleanup across successful commands, cancellation, command failures, and exceptional startup paths while preserving output and primary failure details.
+- Retained and reaped detached persistent worker process handles without stopping their workers, and explicitly closed worker logging streams after draining.
+- Added strict resource-warning regressions for subprocess cleanup and persistent-pool detachment and reattachment.
+
 ## 2.4.0
 
 - Added generation-owned managed processes for running trusted external commands and services inside an exact provisioned Pixi environment.
