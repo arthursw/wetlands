@@ -1397,6 +1397,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#subprocess-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      Subprocess ownership
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#environment-removal" class="md-nav__link">
     <span class="md-ellipsis">
       Environment removal
@@ -1525,6 +1534,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#subprocess-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      Subprocess ownership
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#environment-removal" class="md-nav__link">
     <span class="md-ellipsis">
       Environment removal
@@ -1611,6 +1629,57 @@ The runner closes pipes whose readers never started, including failures while es
 Process-tree and Windows Job Object cleanup precede bounded reader joins so descendant pipe handles can reach EOF.
 A reader that outlives its join retains responsibility for closing its pipe; the runner reports incomplete cleanup without attempting a potentially blocking close from another thread.
 Cleanup diagnostics accompany the original command or setup failure.</p>
+<h2 id="subprocess-ownership">Subprocess ownership</h2>
+<p>All subprocess launch sites follow the same pipe handoff implemented by the internal <code>PipeOwnership</code> helper.
+The launcher owns stdout and stderr until each reader claims its stream; reader completion or failure closes that stream in the reader thread.
+If thread construction or startup fails, cleanup terminates the owned process tree, joins any started readers, and closes only unclaimed pipes.
+The handoff also covers a thread-start call interrupted after the reader began running.
+Worker retirement and pool shutdown use the same output cleanup path as failed worker startup.
+They retain cleanup ownership when a process or output reader cannot be verified as finished, allowing a later close attempt to retry.</p>
+<table>
+<thead>
+<tr>
+<th>Launch site</th>
+<th>Process and output owner</th>
+<th>Terminal cleanup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pixi preparation, provisioning, and post-install commands</td>
+<td><code>ProcessTreeRunner</code></td>
+<td>Verify tree termination, release the Windows Job, reap the child, join readers, close unclaimed pipes.</td>
+</tr>
+<tr>
+<td>Fallback managed-Python discovery</td>
+<td><code>ProcessTreeRunner</code></td>
+<td>The same cleanup applies after success, nonzero exit, or the 30-second probe timeout.</td>
+</tr>
+<tr>
+<td>Launched workers</td>
+<td>Worker pool and <code>ProcessLogger</code></td>
+<td>Terminate and reap on failed startup, retirement, or close; detached persistent workers retain daemon readers and a reaper until they exit.</td>
+</tr>
+<tr>
+<td>Managed commands and services</td>
+<td><code>ManagedProcess</code>, retained by its environment</td>
+<td>Complete tree and pipe cleanup before publishing the result; report incomplete cleanup and retain ownership for close retries.</td>
+</tr>
+<tr>
+<td>VS Code command-line launcher</td>
+<td>Daemon reaper</td>
+<td>No pipes are created; retain the <code>Popen</code> until its exit is reaped without blocking CLI shutdown.</td>
+</tr>
+</tbody>
+</table>
+<p>Provisioning reader failures trigger process cleanup even when the command remains running.
+Managed-command supervision also attempts cleanup after an unexpected polling failure and publishes that failure to waiters.
+POSIX group verification reaps the launched leader after inspecting group liveness, so a concurrent transition to zombie state cannot leave its exit status uncollected.
+Windows Job creation and closure share pointer-safe native API declarations; setup failures close allocated handles, and a failed close of an owned Job retains its handle for retry.</p>
+<p>These guarantees apply to owned processes and normal operating-system cleanup facilities.
+Wetlands does not signal an unverified process identity or claim successful cleanup when termination or a reader join fails.
+A descendant that deliberately escapes its process group, an external process retaining a pipe handle, or an operating-system refusal to terminate cannot be treated as proof of a leak-free shutdown.
+Bounded cleanup reports the failure instead of closing another thread's blocked stream or pretending the resource was released.</p>
 <h2 id="environment-removal">Environment removal</h2>
 <p>Logical removal and physical storage reclamation are separate phases.
 While holding the per-environment lifecycle gate, the manager proves ownership and worker liveness, persists a quarantine sidecar, and atomically renames the target into a manager-owned quarantine directory beside the environment root.
