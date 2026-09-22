@@ -88,6 +88,12 @@ The host rejects incompatible capabilities before dispatch.
 Task dispatch uses a versioned execution envelope containing the task ID, qualified target, encoded positional arguments, encoded keyword arguments, and required codecs.
 Control messages carry progress, cancellation, results, failures, acknowledgements, and health information.
 
+Worker reuse follows semantic execution state rather than Python thread liveness.
+The worker publishes a result offer, failure, or cancellation and makes its execution slot reusable as one synchronized transition, so the controller may dispatch the next task even if the prior thread is only unwinding after that publication.
+Successful result offers retain a separate output-ownership barrier: the worker may not begin another task until the controller sends the matching release, the worker disposes the output leases, and the worker acknowledges `released`.
+Failure and cancellation have no output-lease phase, so their terminal messages make the worker immediately eligible for reuse.
+Connection-loss cleanup still tracks and joins every surviving execution thread within the bounded grace period, and persistent detach is allowed only when no target execution is semantically active.
+
 The worker's management connection is separate from execution ownership.
 Worker discovery reads the durable runtime registry.
 The management connection verifies the selected live worker's exact identity and supports lazy debugger startup while the application continues controlling execution.

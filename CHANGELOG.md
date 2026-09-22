@@ -9,6 +9,7 @@ All notable changes to Wetlands are documented here.
 - Added process-tree cleanup to the managed-Python discovery timeout and cleanup after provisioning reader or managed-command supervisor failures.
 - Consolidated Windows Job Object creation and verified handle closure using pointer-safe native declarations.
 - Fixed a POSIX termination race that could report a finished process group before reaping its leader.
+- Fixed worker reuse racing with the prior task thread's terminal unwind after success, failure, or cancellation.
 
 ## 2.4.1
 

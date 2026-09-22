@@ -107,6 +107,46 @@ REMOTE_EXCEPTION_CHAIN_LIMIT = 32
 DEBUG_HOST = "127.0.0.1"
 
 
+class _ExecutionGate:
+    """Track semantic task execution independently of thread lifetime."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active_task_id: str | None = None
+
+    def reserve(self, task_id: str) -> None:
+        """Reserve the worker for one validated execution envelope."""
+        with self._lock:
+            if self._active_task_id is not None:
+                raise RuntimeError("Worker received a second task while one is still active")
+            self._active_task_id = task_id
+
+    def abandon(self, task_id: str) -> None:
+        """Release a reservation whose execution thread did not start."""
+        with self._lock:
+            if self._active_task_id == task_id:
+                self._active_task_id = None
+
+    def publish_terminal(self, task_id: str, publish: Callable[[], None]) -> None:
+        """Publish a terminal message before making the worker reusable."""
+        with self._lock:
+            if self._active_task_id != task_id:
+                raise RuntimeError(f"Task {task_id!r} does not own the worker execution slot")
+            publish()
+            self._active_task_id = None
+
+    def require_idle(self) -> None:
+        """Reject lifecycle transitions while target execution is active."""
+        with self._lock:
+            if self._active_task_id is not None:
+                raise RuntimeError("Cannot detach a worker with an active task")
+
+    def reset_after_quiesce(self) -> None:
+        """Clear execution ownership after all execution threads have stopped."""
+        with self._lock:
+            self._active_task_id = None
+
+
 class _MaxLevelFilter(logging.Filter):
     def __init__(self, max_level: int) -> None:
         super().__init__()
@@ -330,6 +370,7 @@ def handle_execution_error(
     call_target: str | None = None,
     category: str | None = None,
     serialization_context: str | None = None,
+    execution_gate: _ExecutionGate | None = None,
 ):
     """Common error handling for any execution type."""
     failure = _failure_payload(
@@ -350,7 +391,13 @@ def handle_execution_error(
     if task_id is not None:
         msg["task_id"] = task_id
         msg["protocol_version"] = EXECUTION_PROTOCOL_VERSION
-    send_message(lock, connection, msg)
+    if execution_gate is None or task_id is None:
+        send_message(lock, connection, msg)
+    else:
+        execution_gate.publish_terminal(
+            task_id,
+            lambda: send_message(lock, connection, msg),
+        )
     logger.debug("Error sent")
 
 
@@ -432,7 +479,12 @@ def _resolve_protocol_target(target: dict[str, Any]) -> Callable[..., Any]:
     raise ValueError(f"Unsupported execution target kind: {kind!r}")
 
 
-def execute_protocol_envelope(message: dict[str, Any], lock: threading.Lock, connection: Connection) -> None:
+def execute_protocol_envelope(
+    message: dict[str, Any],
+    lock: threading.Lock,
+    connection: Connection,
+    execution_gate: _ExecutionGate | None = None,
+) -> None:
     action, task_id = validate_task_message(message)
     if action != "execute":
         raise ValueError(f"Expected an execute envelope, got {action!r}")
@@ -503,12 +555,30 @@ def execute_protocol_envelope(message: dict[str, Any], lock: threading.Lock, con
         with contextlib.suppress(Exception):
             send_message(lock, connection, protocol_message("input_released", task_id))
     if canceled:
-        send_message(lock, connection, protocol_message("canceled", task_id))
+
+        def publish_canceled() -> None:
+            send_message(lock, connection, protocol_message("canceled", task_id))
+
+        if execution_gate is None:
+            publish_canceled()
+        else:
+            execution_gate.publish_terminal(task_id, publish_canceled)
         return
     with _output_leases_lock:
         _output_leases[task_id] = output_leases
     try:
-        send_message(lock, connection, protocol_message("result_offer", task_id, result=encoded_result))
+
+        def publish_result() -> None:
+            send_message(
+                lock,
+                connection,
+                protocol_message("result_offer", task_id, result=encoded_result),
+            )
+
+        if execution_gate is None:
+            publish_result()
+        else:
+            execution_gate.publish_terminal(task_id, publish_result)
     except BaseException:
         with _output_leases_lock:
             leases = _output_leases.pop(task_id, [])
@@ -516,7 +586,12 @@ def execute_protocol_envelope(message: dict[str, Any], lock: threading.Lock, con
         raise
 
 
-def execution_worker(lock: threading.Lock, connection: Connection, message: dict):
+def execution_worker(
+    lock: threading.Lock,
+    connection: Connection,
+    message: dict,
+    execution_gate: _ExecutionGate | None = None,
+):
     """Execute one versioned task envelope and report a structured failure."""
     task_id = message.get("task_id")
     target = message.get("target")
@@ -527,9 +602,16 @@ def execution_worker(lock: threading.Lock, connection: Connection, message: dict
         elif target.get("kind") == "path":
             call_target = f"{target.get('path')}:{target.get('qualname')}"
     try:
-        execute_protocol_envelope(message, lock, connection)
+        execute_protocol_envelope(message, lock, connection, execution_gate)
     except BaseException as e:
-        handle_execution_error(lock, connection, e, task_id=task_id, call_target=call_target)
+        handle_execution_error(
+            lock,
+            connection,
+            e,
+            task_id=task_id,
+            call_target=call_target,
+            execution_gate=execution_gate,
+        )
 
 
 def get_message(connection: Connection) -> dict[str, Any]:
@@ -549,9 +631,8 @@ def _quiesce_task_threads(task_threads: list[threading.Thread], timeout: float) 
     deadline = time.monotonic() + timeout
     for thread in task_threads:
         thread.join(max(0.0, deadline - time.monotonic()))
-    quiesced = not any(thread.is_alive() for thread in task_threads)
-    task_threads.clear()
-    return quiesced
+    task_threads[:] = [thread for thread in task_threads if thread.is_alive()]
+    return not task_threads
 
 
 def load_root_authkey(root: Path) -> bytes:
@@ -738,6 +819,7 @@ def launch_listener(
             name="wetlands-worker-management",
         ).start()
         task_threads: list[threading.Thread] = []
+        execution_gate = _ExecutionGate()
         commission_event = threading.Event()
         if commissioned:
             commission_event.set()
@@ -780,18 +862,26 @@ def launch_listener(
                 logger.debug(f"Connection accepted {listener.address}")
                 send_message(lock, connection, hello)
                 message: dict[str, Any] = {}
+                incoming_task_id: str | None = None
                 try:
                     while True:
+                        incoming_task_id = None
                         try:
                             message = get_message(connection)
                         except (EOFError, OSError):
                             logger.debug("Client connection closed")
-                            if _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE) and persistent:
-                                break
+                            quiesced = _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE)
+                            if quiesced:
+                                execution_gate.reset_after_quiesce()
+                                if persistent:
+                                    break
                             return
                         if not message:
-                            if _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE) and persistent:
-                                break
+                            quiesced = _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE)
+                            if quiesced:
+                                execution_gate.reset_after_quiesce()
+                                if persistent:
+                                    break
                             return
 
                         target = message.get("target") if isinstance(message, dict) else None
@@ -807,26 +897,29 @@ def launch_listener(
                             target_name,
                         )
 
-                        if message["action"] == "execute":
+                        if message.get("action") == "execute":
+                            _action, incoming_task_id = validate_task_message(message)
                             task_threads[:] = [thread for thread in task_threads if thread.is_alive()]
-                            if task_threads:
-                                raise RuntimeError("Worker received a second task while one is still active")
-                            with _output_leases_lock:
-                                if _output_leases:
-                                    raise RuntimeError(
-                                        "Worker received a new task before the prior result was released"
-                                    )
-                            validate_task_message(message)
-                            logger.debug(f"Launch thread for action {message['action']}")
-                            thread = threading.Thread(
-                                target=execution_worker,
-                                args=(lock, connection, message),
-                                daemon=True,
-                            )
-                            thread.start()
-                            task_threads.append(thread)
+                            execution_gate.reserve(incoming_task_id)
+                            try:
+                                with _output_leases_lock:
+                                    if _output_leases:
+                                        raise RuntimeError(
+                                            "Worker received a new task before the prior result was released"
+                                        )
+                                logger.debug(f"Launch thread for action {message['action']}")
+                                thread = threading.Thread(
+                                    target=execution_worker,
+                                    args=(lock, connection, message, execution_gate),
+                                    daemon=True,
+                                )
+                                thread.start()
+                                task_threads.append(thread)
+                            except BaseException:
+                                execution_gate.abandon(incoming_task_id)
+                                raise
 
-                        elif message["action"] == "cancel":
+                        elif message.get("action") == "cancel":
                             _action, cancel_task_id = validate_task_message(message)
                             with _active_tasks_lock:
                                 handle = _active_tasks.get(cancel_task_id)
@@ -837,7 +930,7 @@ def launch_listener(
                             else:
                                 logger.debug(f"Cancel requested for unknown task {cancel_task_id}")
 
-                        elif message["action"] == "release":
+                        elif message.get("action") == "release":
                             _action, release_task_id = validate_task_message(message)
                             with _output_leases_lock:
                                 leases = _output_leases.pop(release_task_id, [])
@@ -863,7 +956,7 @@ def launch_listener(
                                 ),
                             )
 
-                        elif message["action"] == "exit":
+                        elif message.get("action") == "exit":
                             if message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION:
                                 raise ValueError("Exit request used an incompatible protocol")
                             logger.info("exit")
@@ -878,16 +971,15 @@ def launch_listener(
                             listener.close()
                             return
 
-                        elif message["action"] == "detach":
+                        elif message.get("action") == "detach":
                             if message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION:
                                 raise ValueError("Detach request used an incompatible protocol")
                             logger.info("detach")
                             if persistent:
-                                if not _quiesce_task_threads(task_threads, 0.0):
-                                    raise RuntimeError("Cannot detach a worker with an active task")
+                                execution_gate.require_idle()
                                 break
                             return
-                        elif message["action"] == "commission":
+                        elif message.get("action") == "commission":
                             if not persistent:
                                 raise RuntimeError("Cannot commission a nonpersistent worker")
                             if message.get("protocol_version") != EXECUTION_PROTOCOL_VERSION:
@@ -905,10 +997,17 @@ def launch_listener(
                                 },
                             )
                         else:
-                            raise ValueError(f"Unknown worker control action: {message['action']!r}")
+                            raise ValueError(f"Unknown worker control action: {message.get('action')!r}")
                 except Exception as e:
                     quiesced = _quiesce_task_threads(task_threads, CONNECTION_LOSS_GRACE)
-                    handle_execution_error(lock, connection, e)
+                    if quiesced:
+                        execution_gate.reset_after_quiesce()
+                    handle_execution_error(
+                        lock,
+                        connection,
+                        e,
+                        task_id=incoming_task_id,
+                    )
                     if not quiesced:
                         return
                 finally:

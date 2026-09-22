@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import queue
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
+from multiprocessing.connection import Client, Connection
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -35,6 +39,97 @@ from wetlands.protocol import (
     worker_hello,
 )
 from wetlands.task import RemoteTaskHandle, ExecutionTask, ExecutionState
+
+
+@contextlib.contextmanager
+def _in_process_worker() -> Iterator[Connection]:
+    authkey = b"wetlands-worker-reuse-test"
+    ready: queue.Queue[dict] = queue.Queue()
+    failures: list[BaseException] = []
+
+    def notify_startup(_host, _port, _token, payload):
+        ready.put(payload)
+
+    def run_worker() -> None:
+        try:
+            module_executor.launch_listener(
+                authkey=authkey,
+                startup_host="127.0.0.1",
+                startup_port=1,
+                startup_token="test-token",
+                environment_path="/managed/example",
+                generation_id="generation-1",
+                recipe_hash="recipe-1",
+                worker_index=0,
+                worker_id="worker-1",
+            )
+        except BaseException as error:
+            failures.append(error)
+
+    with patch.object(module_executor, "_notify_startup", side_effect=notify_startup):
+        worker_thread = threading.Thread(target=run_worker, daemon=True)
+        worker_thread.start()
+        startup = ready.get(timeout=2)
+        connection = Client(("127.0.0.1", startup["port"]), authkey=authkey)
+        connection.recv()
+        try:
+            yield connection
+        finally:
+            with contextlib.suppress(OSError, EOFError):
+                if worker_thread.is_alive():
+                    connection.send(
+                        {
+                            "action": "exit",
+                            "protocol_version": EXECUTION_PROTOCOL_VERSION,
+                        }
+                    )
+            connection.close()
+            worker_thread.join(2)
+    assert not worker_thread.is_alive()
+    assert failures == []
+
+
+def _test_envelope(
+    task_id: str,
+    qualname: str,
+    *,
+    args: tuple = (),
+    context_keyword: str | None = None,
+) -> dict:
+    encoded_args, argument_leases = encode_value(args, path="args")
+    encoded_kwargs, keyword_leases = encode_value({}, path="kwargs")
+    assert not argument_leases
+    assert not keyword_leases
+    return execution_envelope(
+        task_id=task_id,
+        target=import_target(f"worker_reuse_test:{qualname}"),
+        args=encoded_args,
+        kwargs=encoded_kwargs,
+        codecs=descriptor_codecs(encoded_args, encoded_kwargs),
+        context_keyword=context_keyword,
+    )
+
+
+def _receive_until(connection: Connection, task_id: str, terminal_action: str) -> list[dict]:
+    messages = []
+    while True:
+        assert connection.poll(2), f"Timed out waiting for {terminal_action} for {task_id}"
+        message = connection.recv()
+        messages.append(message)
+        if message.get("task_id") == task_id and message.get("action") == terminal_action:
+            return messages
+
+
+def _complete_success(connection: Connection, task_id: str) -> tuple[list[dict], object]:
+    messages = _receive_until(connection, task_id, "result_offer")
+    offer = messages[-1]
+    attachments = []
+    result = decode_value(offer["result"], copy_arrays=True, attachments=attachments)
+    names = [lease.name for lease in attachments]
+    module_executor.dispose_leases(attachments, unlink=False)
+    connection.send(module_executor.protocol_message("release", task_id, names=names))
+    messages.extend(_receive_until(connection, task_id, "released"))
+    return messages, result
 
 
 def _hello(**updates):
@@ -250,6 +345,171 @@ def test_execution_worker_reports_self_caused_exception_without_hanging(tmp_path
         )
         == "error"
     )
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancellation"])
+def test_terminal_task_thread_unwind_does_not_block_worker_reuse(outcome):
+    first_thread_terminal = threading.Event()
+    allow_first_thread_return = threading.Event()
+    cancellation_target_entered = threading.Event()
+    allow_cancellation_target_return = threading.Event()
+    cancellation_requested = threading.Event()
+    original_execution_worker = module_executor.execution_worker
+    original_set_cancel_requested = module_executor.RemoteTaskHandle._set_cancel_requested
+
+    def resolve(target):
+        qualname = target["qualname"]
+        if qualname == "succeed":
+            return lambda value: value + 1
+        if qualname == "fail":
+
+            def fail():
+                raise ValueError("expected task failure")
+
+            return fail
+        if qualname == "wait_for_cancellation":
+
+            def wait_for_cancellation(task):
+                cancellation_target_entered.set()
+                assert allow_cancellation_target_return.wait(2)
+                return "canceled"
+
+            return wait_for_cancellation
+        raise AssertionError(f"Unexpected target {qualname!r}")
+
+    def hold_first_thread(lock, connection, message, execution_gate=None):
+        original_execution_worker(lock, connection, message, execution_gate)
+        if message["task_id"] == "task-1":
+            first_thread_terminal.set()
+            assert allow_first_thread_return.wait(2)
+
+    def observe_cancellation(handle):
+        original_set_cancel_requested(handle)
+        cancellation_requested.set()
+
+    with (
+        patch.object(module_executor, "_resolve_protocol_target", side_effect=resolve),
+        patch.object(module_executor, "execution_worker", side_effect=hold_first_thread),
+        patch.object(
+            module_executor.RemoteTaskHandle,
+            "_set_cancel_requested",
+            autospec=True,
+            side_effect=observe_cancellation,
+        ),
+        _in_process_worker() as connection,
+    ):
+        try:
+            if outcome == "success":
+                connection.send(_test_envelope("task-1", "succeed", args=(1,)))
+                first_messages, first_result = _complete_success(connection, "task-1")
+                assert first_result == 2
+            elif outcome == "failure":
+                connection.send(_test_envelope("task-1", "fail"))
+                first_messages = _receive_until(connection, "task-1", "error")
+            else:
+                connection.send(
+                    _test_envelope(
+                        "task-1",
+                        "wait_for_cancellation",
+                        context_keyword="task",
+                    )
+                )
+                _receive_until(connection, "task-1", "accepted")
+                assert cancellation_target_entered.wait(2)
+                connection.send(module_executor.protocol_message("cancel", "task-1"))
+                assert cancellation_requested.wait(2)
+                allow_cancellation_target_return.set()
+                first_messages = _receive_until(connection, "task-1", "canceled")
+
+            assert first_thread_terminal.wait(2)
+            assert not allow_first_thread_return.is_set()
+
+            connection.send(_test_envelope("task-2", "succeed", args=(40,)))
+            second_messages, second_result = _complete_success(connection, "task-2")
+
+            assert second_result == 41
+            all_messages = first_messages + second_messages
+            assert not any(
+                "Worker received a second task while one is still active" in str(message) for message in all_messages
+            )
+            assert not any("protocol mismatch" in str(message).lower() for message in all_messages)
+        finally:
+            allow_cancellation_target_return.set()
+            allow_first_thread_return.set()
+
+
+def test_genuine_overlap_is_rejected_with_complete_task_failure():
+    active_target_entered = threading.Event()
+    allow_active_target_return = threading.Event()
+    cancellation_requested = threading.Event()
+    second_target_started = threading.Event()
+    original_set_cancel_requested = module_executor.RemoteTaskHandle._set_cancel_requested
+
+    def resolve(target):
+        if target["qualname"] == "active":
+
+            def active(task):
+                active_target_entered.set()
+                assert allow_active_target_return.wait(2)
+                return "finished"
+
+            return active
+        if target["qualname"] == "second":
+
+            def second():
+                second_target_started.set()
+                return "unsafe"
+
+            return second
+        raise AssertionError(f"Unexpected target {target['qualname']!r}")
+
+    def observe_cancellation(handle):
+        original_set_cancel_requested(handle)
+        cancellation_requested.set()
+
+    with (
+        patch.object(module_executor, "_resolve_protocol_target", side_effect=resolve),
+        patch.object(
+            module_executor.RemoteTaskHandle,
+            "_set_cancel_requested",
+            autospec=True,
+            side_effect=observe_cancellation,
+        ),
+        _in_process_worker() as connection,
+    ):
+        try:
+            connection.send(_test_envelope("task-active", "active", context_keyword="task"))
+            _receive_until(connection, "task-active", "accepted")
+            assert active_target_entered.wait(2)
+
+            connection.send(_test_envelope("task-overlap", "second"))
+            assert cancellation_requested.wait(2)
+            allow_active_target_return.set()
+            messages = _receive_until(connection, "task-overlap", "error")
+        finally:
+            allow_active_target_return.set()
+
+    failure = messages[-1]
+    assert validate_worker_task_message(failure, expected_task_id="task-overlap") == "error"
+    assert failure["protocol_version"] == EXECUTION_PROTOCOL_VERSION
+    assert failure["task_id"] == "task-overlap"
+    assert "Worker received a second task while one is still active" in failure["exception"]
+    assert "protocol mismatch" not in failure["exception"].lower()
+    assert not second_target_started.is_set()
+
+
+def test_quiescing_retains_threads_that_outlive_the_bounded_join():
+    allow_return = threading.Event()
+    thread = threading.Thread(target=allow_return.wait)
+    thread.start()
+    threads = [thread]
+
+    assert not module_executor._quiesce_task_threads(threads, 0.0)
+    assert threads == [thread]
+
+    allow_return.set()
+    assert module_executor._quiesce_task_threads(threads, 2.0)
+    assert threads == []
 
 
 def test_worker_failure_rejects_recursive_remote_exception_payload():
