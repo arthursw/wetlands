@@ -253,32 +253,14 @@ def _validate_worker_environments(
     return tuple(worker_environments)
 
 
-def _windows_worker_environment(
-    environment: Mapping[str, str],
-    environment_python: Path,
-    worker_environment: Mapping[str, str],
-) -> dict[str, str]:
-    """Return a worker environment activated for a Windows Pixi prefix."""
-    prefix = environment_python.parent
-    inherited_path = next(
-        (value for key, value in environment.items() if key.casefold() == "path"),
-        "",
-    )
-    activated = {key: value for key, value in environment.items() if key.casefold() not in {"path", "conda_prefix"}}
-    prefix_paths = (
-        prefix,
-        prefix / "Library" / "mingw-w64" / "bin",
-        prefix / "Library" / "usr" / "bin",
-        prefix / "Library" / "bin",
-        prefix / "Scripts",
-        prefix / "bin",
-    )
-    activated["PATH"] = ";".join([*(str(path) for path in prefix_paths), inherited_path])
-    activated["CONDA_PREFIX"] = str(prefix)
-    override_names = {key.casefold() for key in worker_environment}
-    activated = {key: value for key, value in activated.items() if key.casefold() not in override_names}
-    activated.update(worker_environment)
-    return activated
+def _merge_windows_environments(*environments: Mapping[str, str]) -> dict[str, str]:
+    """Merge environment mappings using Windows' case-insensitive names."""
+    merged: dict[str, str] = {}
+    for environment in environments:
+        override_names = {key.casefold() for key in environment}
+        merged = {key: value for key, value in merged.items() if key.casefold() not in override_names}
+        merged.update(environment)
+    return merged
 
 
 class _Worker:
@@ -400,6 +382,7 @@ class ExternalEnvironment:
         self._idle_workers: queue.Queue[_Worker] = queue.Queue()
         self._task_queue: queue.Queue[ExecutionTask[Any]] = queue.Queue()
         self._worker_environments: tuple[dict[str, str], ...] = ()
+        self._pixi_worker_environment: dict[str, str] | None = None
         self._worker_timeout: float | None = None
         self._persistent: bool = False
         self._pool_commissioned = False
@@ -610,6 +593,42 @@ class ExternalEnvironment:
             except queue.Empty:
                 return
 
+    def _load_pixi_worker_environment(self, ready: Mapping[str, Any]) -> dict[str, str]:
+        """Return Pixi's complete activated environment for workers."""
+        if self._pixi_worker_environment is not None:
+            return self._pixi_worker_environment
+        pixi = Path(str(ready["pixi_executable"]))
+        runner = ProcessTreeRunner(
+            Operation(), grace=self.environment_manager.termination_grace, environment_name=self.name
+        )
+        step = ProvisioningStep(
+            "activate-worker-environment",
+            ProvisioningStage.VALIDATION,
+            (
+                str(pixi),
+                "shell-hook",
+                "--json",
+                "--as-is",
+                "--manifest-path",
+                str(self.path),
+            ),
+        )
+        output: deque[str] = deque(maxlen=1)
+        runner.run(step, timeout=30, on_stdout=output.append)
+        if not output:
+            raise RuntimeError("Pixi did not return worker activation data")
+        try:
+            payload = json.loads(output[-1])
+        except (TypeError, ValueError) as error:
+            raise RuntimeError("Pixi returned invalid worker activation data") from error
+        environment = payload.get("environment_variables") if isinstance(payload, dict) else None
+        if not isinstance(environment, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str) for key, value in environment.items()
+        ):
+            raise RuntimeError("Pixi returned invalid worker activation data")
+        self._pixi_worker_environment = dict(environment)
+        return self._pixi_worker_environment
+
     def _launch_worker(
         self,
         index: int,
@@ -655,7 +674,7 @@ class ExternalEnvironment:
 
         env = os.environ.copy()
         if os.name == "nt":
-            env = _windows_worker_environment(env, environment_python, worker_environment)
+            env = _merge_windows_environments(env, self._load_pixi_worker_environment(ready), worker_environment)
         else:
             env.update(worker_environment)
         env[STARTUP_TOKEN_ENV] = startup_token

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -16,10 +17,11 @@ import pytest
 from wetlands.diagnostics import ExecutionFailureCategory
 from wetlands._internal.process_termination import ProcessIdentityError, ProcessTerminationError
 from wetlands._internal.process_logger import ProcessLogger
+from wetlands._internal.provisioning import ProcessTreeRunner
 from wetlands.external_environment import (
     ExternalEnvironment,
+    _merge_windows_environments,
     _validate_worker_environments,
-    _windows_worker_environment,
     _Worker,
 )
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
@@ -38,28 +40,30 @@ def _environment(tmp_path: Path) -> ExternalEnvironment:
     return ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
 
 
-def test_windows_worker_environment_activates_pixi_prefix(tmp_path):
-    prefix = tmp_path / "project" / ".pixi" / "envs" / "default"
+def test_windows_worker_environment_overrides_are_case_insensitive():
     original = {
         "Path": "inherited-path",
         "conda_prefix": "stale-prefix",
         "EXAMPLE": "value",
     }
 
-    environment = _windows_worker_environment(
+    environment = _merge_windows_environments(
         original,
-        prefix / "python.exe",
+        {
+            "PATH": "activated-path",
+            "CONDA_PREFIX": "activated-prefix",
+            "ACTIVATED": "yes",
+        },
         {
             "Path": "worker-path",
-            "conda_prefix": "worker-prefix",
         },
     )
 
     assert environment["Path"] == "worker-path"
-    assert environment["conda_prefix"] == "worker-prefix"
+    assert environment["CONDA_PREFIX"] == "activated-prefix"
     assert environment["EXAMPLE"] == "value"
+    assert environment["ACTIVATED"] == "yes"
     assert "PATH" not in environment
-    assert "CONDA_PREFIX" not in environment
     assert original == {
         "Path": "inherited-path",
         "conda_prefix": "stale-prefix",
@@ -67,22 +71,47 @@ def test_windows_worker_environment_activates_pixi_prefix(tmp_path):
     }
 
 
-def test_windows_worker_environment_prepends_pixi_prefix(tmp_path):
-    prefix = tmp_path / "project" / ".pixi" / "envs" / "default"
+def test_windows_worker_environment_uses_pixi_activation_json(tmp_path, monkeypatch):
+    environment = _environment(tmp_path)
+    pixi = tmp_path / "pixi.exe"
+    calls = []
 
-    environment = _windows_worker_environment({"Path": "inherited-path"}, prefix / "python.exe", {})
+    def run(_runner, step, *, timeout, on_stdout):
+        calls.append(step)
+        assert timeout == 30
+        on_stdout(
+            json.dumps(
+                {
+                    "environment_variables": {
+                        "PATH": "activated-path",
+                        "CONDA_PREFIX": "activated-prefix",
+                        "ACTIVATED": "yes",
+                    },
+                    "activation_scripts": [],
+                }
+            )
+        )
+        return ()
 
-    assert environment["PATH"].split(";") == [
-        str(prefix),
-        str(prefix / "Library" / "mingw-w64" / "bin"),
-        str(prefix / "Library" / "usr" / "bin"),
-        str(prefix / "Library" / "bin"),
-        str(prefix / "Scripts"),
-        str(prefix / "bin"),
-        "inherited-path",
-    ]
-    assert environment["CONDA_PREFIX"] == str(prefix)
-    assert "Path" not in environment
+    monkeypatch.setattr(ProcessTreeRunner, "run", run)
+
+    activated = environment._load_pixi_worker_environment({"pixi_executable": str(pixi)})
+
+    assert activated == {
+        "PATH": "activated-path",
+        "CONDA_PREFIX": "activated-prefix",
+        "ACTIVATED": "yes",
+    }
+    assert calls[0].argv == (
+        str(pixi),
+        "shell-hook",
+        "--json",
+        "--as-is",
+        "--manifest-path",
+        str(environment.path),
+    )
+    assert environment._load_pixi_worker_environment({"pixi_executable": "unused"}) is activated
+    assert len(calls) == 1
 
 
 def _worker(index: int = 0, *, alive: bool = True) -> _Worker:
@@ -201,8 +230,6 @@ def test_worker_startup_failure_finishes_output_cleanup(tmp_path, monkeypatch, p
 
 @pytest.mark.parametrize("outcome", ["success", "nonzero", "timeout"])
 def test_python_discovery_probe_owns_its_process_tree(tmp_path, monkeypatch, outcome):
-    from wetlands._internal.provisioning import ProcessTreeRunner
-
     environment = _environment(tmp_path)
     environment.environment_manager.pixi_executable = Path(sys.executable)
     environment.environment_manager.termination_grace = 0.1

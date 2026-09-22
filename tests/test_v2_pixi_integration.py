@@ -404,6 +404,8 @@ def test_real_pixi_release_acceptance(tmp_path: Path) -> None:
         with environment.start(
             worker_environment=lambda index: {"CUDA_VISIBLE_DEVICES": str(index)},
         ) as pool:
+            activation = pool._runtime._load_pixi_worker_environment(pool._runtime._ready_identity())
+            assert Path(activation["CONDA_PREFIX"]).resolve() == environment.path / ".pixi" / "envs" / "default"
             assert (
                 pool.execute_import(
                     "wetlands_acceptance_worker:read_environment",
