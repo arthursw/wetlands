@@ -204,6 +204,7 @@ def test_worker_startup_failure_finishes_output_cleanup(tmp_path, monkeypatch, p
 
     monkeypatch.setattr(environment, "_ready_identity", lambda: {"generation_id": "g", "recipe_hash": "r"})
     monkeypatch.setattr(environment, "_environment_python", lambda: executable)
+    monkeypatch.setattr(environment, "_load_pixi_worker_environment", lambda ready: {})
     monkeypatch.setattr(subprocess, "Popen", popen)
     monkeypatch.setattr("wetlands.external_environment.ProcessLogger", make_logger)
     monkeypatch.setattr("wetlands.external_environment._wait_for_startup_payload", fail_handshake)
@@ -1212,6 +1213,7 @@ def test_failed_recorded_launch_retains_worker_until_death_is_verified(
             "_environment_python",
             return_value=tmp_path / "python",
         ),
+        patch.object(environment, "_load_pixi_worker_environment", return_value={}),
         patch(
             "wetlands.external_environment._open_startup_socket",
             return_value=startup_socket,

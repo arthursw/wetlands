@@ -94,7 +94,7 @@ elif arguments and arguments[0] == "install":
     if "--locked" not in arguments or {mutate_locked!r}:
         lock.write_text("version: 6\\n", encoding="utf-8")
 elif arguments and arguments[0] == "shell-hook":
-    pass
+    print('{{"environment_variables": {{}}, "activation_scripts": []}}')
 elif arguments and arguments[0] == "run":
     manifest_index = arguments.index("--manifest-path")
     command = arguments[manifest_index + 2:]
