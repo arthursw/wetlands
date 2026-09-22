@@ -2,7 +2,7 @@
 
 All notable changes to Wetlands are documented here.
 
-## Unreleased
+## 2.4.2
 
 - Unified subprocess pipe ownership across provisioning, worker logging, and managed commands, including partial reader startup and failed worker launch.
 - Kept worker output cleanup bounded when readers remain blocked, and retained and reaped the VS Code launcher process.
