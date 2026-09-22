@@ -17,6 +17,7 @@ It dispatches work to warm workers, reports worker failure, and replaces unhealt
 
 Each worker imports qualified module targets or canonical path targets inside the Pixi environment.
 Worker code receives ordinary Python values and returns ordinary Python values.
+On Windows, worker launch restores the Pixi prefix paths before applying optional `worker_environment` overrides so native commands and their DLLs are discoverable.
 
 ## Provisioning publication
 

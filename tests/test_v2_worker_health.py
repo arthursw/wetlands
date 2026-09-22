@@ -16,7 +16,12 @@ import pytest
 from wetlands.diagnostics import ExecutionFailureCategory
 from wetlands._internal.process_termination import ProcessIdentityError, ProcessTerminationError
 from wetlands._internal.process_logger import ProcessLogger
-from wetlands.external_environment import ExternalEnvironment, _validate_worker_environments, _Worker
+from wetlands.external_environment import (
+    ExternalEnvironment,
+    _validate_worker_environments,
+    _windows_worker_environment,
+    _Worker,
+)
 from wetlands.lifecycle import EnvironmentGenerationChangedError, WorkerStartError
 from wetlands.logger import logger
 from wetlands.managed_environment import WorkerPool
@@ -31,6 +36,53 @@ def _environment(tmp_path: Path) -> ExternalEnvironment:
     manager.environments_root = tmp_path / "wetlands" / "environments"
     manager.state_root = tmp_path / "wetlands" / "state"
     return ExternalEnvironment("example", tmp_path / "pixi.toml", manager)
+
+
+def test_windows_worker_environment_activates_pixi_prefix(tmp_path):
+    prefix = tmp_path / "project" / ".pixi" / "envs" / "default"
+    original = {
+        "Path": "inherited-path",
+        "conda_prefix": "stale-prefix",
+        "EXAMPLE": "value",
+    }
+
+    environment = _windows_worker_environment(
+        original,
+        prefix / "python.exe",
+        {
+            "Path": "worker-path",
+            "conda_prefix": "worker-prefix",
+        },
+    )
+
+    assert environment["Path"] == "worker-path"
+    assert environment["conda_prefix"] == "worker-prefix"
+    assert environment["EXAMPLE"] == "value"
+    assert "PATH" not in environment
+    assert "CONDA_PREFIX" not in environment
+    assert original == {
+        "Path": "inherited-path",
+        "conda_prefix": "stale-prefix",
+        "EXAMPLE": "value",
+    }
+
+
+def test_windows_worker_environment_prepends_pixi_prefix(tmp_path):
+    prefix = tmp_path / "project" / ".pixi" / "envs" / "default"
+
+    environment = _windows_worker_environment({"Path": "inherited-path"}, prefix / "python.exe", {})
+
+    assert environment["PATH"].split(";") == [
+        str(prefix),
+        str(prefix / "Library" / "mingw-w64" / "bin"),
+        str(prefix / "Library" / "usr" / "bin"),
+        str(prefix / "Library" / "bin"),
+        str(prefix / "Scripts"),
+        str(prefix / "bin"),
+        "inherited-path",
+    ]
+    assert environment["CONDA_PREFIX"] == str(prefix)
+    assert "Path" not in environment
 
 
 def _worker(index: int = 0, *, alive: bool = True) -> _Worker:

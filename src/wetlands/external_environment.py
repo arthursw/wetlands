@@ -253,6 +253,34 @@ def _validate_worker_environments(
     return tuple(worker_environments)
 
 
+def _windows_worker_environment(
+    environment: Mapping[str, str],
+    environment_python: Path,
+    worker_environment: Mapping[str, str],
+) -> dict[str, str]:
+    """Return a worker environment activated for a Windows Pixi prefix."""
+    prefix = environment_python.parent
+    inherited_path = next(
+        (value for key, value in environment.items() if key.casefold() == "path"),
+        "",
+    )
+    activated = {key: value for key, value in environment.items() if key.casefold() not in {"path", "conda_prefix"}}
+    prefix_paths = (
+        prefix,
+        prefix / "Library" / "mingw-w64" / "bin",
+        prefix / "Library" / "usr" / "bin",
+        prefix / "Library" / "bin",
+        prefix / "Scripts",
+        prefix / "bin",
+    )
+    activated["PATH"] = ";".join([*(str(path) for path in prefix_paths), inherited_path])
+    activated["CONDA_PREFIX"] = str(prefix)
+    override_names = {key.casefold() for key in worker_environment}
+    activated = {key: value for key, value in activated.items() if key.casefold() not in override_names}
+    activated.update(worker_environment)
+    return activated
+
+
 class _Worker:
     """Holds state for a single module_executor process."""
 
@@ -588,13 +616,14 @@ class ExternalEnvironment:
         worker_environment: Mapping[str, str],
     ) -> _Worker:
         """Launch a single module_executor process and return a _Worker."""
+        environment_python = self._environment_python()
         module_executor_path = Path(__file__).parent.resolve() / MODULE_EXECUTOR_FILE
         ready = self._ready_identity()
         startup_token = secrets.token_urlsafe(32)
         worker_id = uuid.uuid4().hex
         root = self.environment_manager.root.resolve()
         argv = [
-            str(self._environment_python()),
+            str(environment_python),
             "-u",
             str(module_executor_path),
             self.name,
@@ -625,7 +654,10 @@ class ExternalEnvironment:
             log_context["worker_index"] = str(index)
 
         env = os.environ.copy()
-        env.update(worker_environment)
+        if os.name == "nt":
+            env = _windows_worker_environment(env, environment_python, worker_environment)
+        else:
+            env.update(worker_environment)
         env[STARTUP_TOKEN_ENV] = startup_token
         for variable in ("PYTHONEXECUTABLE", "PYTHONHOME", "PYTHONPATH"):
             env.pop(variable, None)

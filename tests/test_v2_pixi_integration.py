@@ -231,6 +231,7 @@ version = "1.0.0"
     (module / "__init__.py").write_text(
         """
 import os
+import shutil
 import time
 
 import numpy as np
@@ -242,6 +243,10 @@ def add(left, right):
 
 def read_environment(name):
     return os.environ.get(name)
+
+
+def find_environment_python():
+    return shutil.which("python")
 
 
 def transform_array(array):
@@ -407,6 +412,15 @@ def test_real_pixi_release_acceptance(tmp_path: Path) -> None:
                 )
                 == "0"
             )
+            if sys.platform == "win32":
+                activated_python = pool.execute_import(
+                    "wetlands_acceptance_worker:find_environment_python",
+                    timeout=60,
+                )
+                assert activated_python is not None
+                assert Path(activated_python).resolve() == (
+                    environment.path / ".pixi" / "envs" / "default" / "python.exe"
+                )
             installed_sample_version = pool.execute_import(
                 "importlib.metadata:version",
                 args=("sampleproject",),
