@@ -2,6 +2,11 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.4.3
+
+- Added automated PyPI releases through GitHub Actions trusted publishing, including release version checks, distribution validation, and clean-install smoke tests.
+- Documented how maintainers and agents publish and retry releases with the GitHub CLI.
+
 ## 2.4.2
 
 - Unified subprocess pipe ownership across provisioning, worker logging, and managed commands, including partial reader startup and failed worker launch.
