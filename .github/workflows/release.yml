@@ -1,0 +1,126 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published release tag (for example, v2.4.3)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.11.16"
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+concurrency:
+  group: pypi-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate and build release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require a published versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9] ]] || { echo "Expected a v-prefixed version tag"; exit 1; }
+          is_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          [[ "$is_draft" == false ]] || { echo "Release must be published before uploading to PyPI"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          # Release events supply the tagged commit; manual runs resolve the requested tag.
+          ref: ${{ github.event_name == 'release' && github.sha || format('refs/tags/{0}', inputs.tag) }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install locked validation and release tools
+        run: uv sync --frozen --python 3.14 --group dev --group release --extra shared-memory
+      - name: Check release versions
+        run: |
+          uv run --no-sync python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          from wetlands.protocol import WORKER_RUNTIME_VERSION
+
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          tag = os.environ["RELEASE_TAG"]
+          if tag != f"v{version}" or WORKER_RUNTIME_VERSION != version:
+              raise SystemExit(
+                  f"Release tag {tag!r}, package version {version!r}, and "
+                  f"worker runtime version {WORKER_RUNTIME_VERSION!r} must match"
+              )
+          PY
+      - name: Check lockfile
+        run: uv lock --check
+      - name: Check source
+        run: uv run --no-sync ruff check
+      - name: Check formatting
+        run: uv run --no-sync ruff format --check
+      - name: Check typing
+        run: uv run --no-sync mypy src/wetlands
+      - name: Run fast tests
+        run: uv run --no-sync pytest -m "not integration and not compat and not manual"
+      - name: Build wheel and source distribution
+        run: uv build --no-build-isolation
+      - name: Validate artifact metadata
+        run: uv run --no-sync twine check --strict dist/*
+      - name: Smoke test installed distributions
+        shell: bash
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            smoke_env="$(mktemp -d "$RUNNER_TEMP/wetlands-smoke.XXXXXX")"
+            uv venv "$smoke_env"
+            uv pip install --python "$smoke_env/bin/python" "$artifact"
+            "$smoke_env/bin/python" - "$RELEASE_TAG" <<'PY'
+          import sys
+          import wetlands
+          from wetlands import EnvironmentManager, EnvironmentSpec
+          from wetlands.protocol import WORKER_RUNTIME_VERSION
+
+          expected_version = sys.argv[1][1:]
+          assert wetlands.__version__ == expected_version
+          assert WORKER_RUNTIME_VERSION == expected_version
+          PY
+            "$smoke_env/bin/wetlands" --help
+          done
+      - name: Store validated distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish validated distributions
+    if: github.repository == 'arthursw/wetlands'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/wetlands/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download validated distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: distributions
+          path: dist/
+      - name: Publish to PyPI with trusted publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
