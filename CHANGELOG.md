@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `Operation.wait_for_completion()` to wait independently of a stored result, failure, or cancellation.
+- Isolate all operation listener exceptions during live delivery and replay, and refuse incomplete same-operation waits from runner or notification threads.
+
 All notable changes to Wetlands are documented here.
 
 ## 2.4.3

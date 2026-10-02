@@ -4,6 +4,13 @@ import asyncio
 import json
 import threading
 import time
+import warnings
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator
+
+import wetlands.environment_manager as manager_module
+from wetlands import EnvironmentManager
 
 import pytest
 
@@ -144,11 +151,20 @@ def test_wait_timeout_does_not_cancel_operation() -> None:
     assert operation.wait_for() == "done"
 
 
-def test_listener_failure_does_not_fail_operation() -> None:
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("listener failed"),
+        KeyboardInterrupt("listener failed"),
+        SystemExit("listener failed"),
+        asyncio.CancelledError("listener failed"),
+    ],
+)
+def test_listener_failure_does_not_fail_operation(failure: BaseException) -> None:
     operation: Operation[int] = Operation()
 
     def broken_listener(event) -> None:
-        raise RuntimeError("listener failed")
+        raise failure
 
     operation.listen(broken_listener)
     operation._start_runner(lambda: 1, thread_name="test-listener-operation")
@@ -377,3 +393,138 @@ def test_cancellation_notification_precedes_terminal_notification(monkeypatch: p
     with pytest.raises(OperationCanceled):
         operation.wait_for(timeout=1)
     assert received[-2:] == [OperationEventKind.CANCELLATION_REQUESTED, OperationEventKind.STATE]
+
+
+@contextmanager
+def _public_gated_removal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, failure: BaseException | None = None
+) -> Iterator[tuple[Operation[Any], threading.Event]]:
+    started = threading.Event()
+    release = threading.Event()
+
+    def remove(manager, operation, name):
+        started.set()
+        assert release.wait(timeout=2)
+        operation._emit(OperationEventKind.STEP, "fixture cleanup finished")
+        if operation.cancellation_requested:
+            raise OperationCanceled(operation.id)
+        if failure is not None:
+            raise failure
+        return "removed"
+
+    monkeypatch.setattr(manager_module, "remove_managed_environment", remove)
+    manager = EnvironmentManager(tmp_path)
+    operation = manager.remove("example")
+    body_error: BaseException | None = None
+    try:
+        assert started.wait(timeout=1)
+        yield operation, release
+    except BaseException as error:
+        body_error = error
+        raise
+    finally:
+        release.set()
+        try:
+            manager.close(timeout=1)
+        except BaseException as cleanup_error:
+            if body_error is None:
+                raise
+            warnings.warn(
+                f"Gated removal cleanup also failed: {type(cleanup_error).__name__}", RuntimeWarning, stacklevel=2
+            )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [KeyboardInterrupt("stored"), SystemExit("stored"), asyncio.CancelledError("stored")],
+    ids=["keyboard", "system-exit", "cancelled"],
+)
+def test_public_removal_completion_does_not_raise_stored_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: BaseException
+) -> None:
+    with _public_gated_removal(monkeypatch, tmp_path, failure=failure) as (operation, release):
+        release.set()
+        assert operation.wait_for_completion(timeout=1) is None
+        for _ in range(2):
+            with pytest.raises(type(failure)) as caught:
+                operation.wait_for(timeout=1)
+            assert caught.value is failure
+            assert operation.wait_for_completion(timeout=0) is None
+
+
+@pytest.mark.parametrize("phase", ["progress", "terminal", "replay"])
+def test_public_removal_listener_baseexception_cannot_strand_completion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, phase: str
+) -> None:
+    class ListenerInterrupt(BaseException):
+        pass
+
+    delivered = threading.Event()
+    with _public_gated_removal(monkeypatch, tmp_path) as (operation, release):
+
+        def listener(event):
+            matches = (
+                (phase == "progress" and event.kind is OperationEventKind.STEP)
+                or (phase == "terminal" and event.state.terminal)
+                or (phase == "replay" and event.state is OperationState.RUNNING)
+            )
+            if matches:
+                delivered.set()
+                raise ListenerInterrupt("observational listener failed")
+
+        operation.listen(listener)
+        release.set()
+        assert operation.wait_for(timeout=1) == "removed"
+        assert delivered.wait(timeout=1)
+
+
+@pytest.mark.parametrize("method", ["wait_for", "wait_for_completion"])
+def test_public_terminal_listener_self_wait_is_refused_without_blocking(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, method: str
+) -> None:
+    observed: list[type[BaseException]] = []
+    with _public_gated_removal(monkeypatch, tmp_path) as (operation, release):
+
+        def listener(event):
+            if event.state.terminal:
+                try:
+                    getattr(operation, method)(timeout=0.05)
+                except BaseException as error:
+                    observed.append(type(error))
+
+        operation.listen(listener)
+        release.set()
+        assert operation.wait_for(timeout=1) == "removed"
+        assert observed == [RuntimeError]
+        assert getattr(operation, method)(timeout=0) in (None, "removed")
+        replayed: list[Any] = []
+        operation.listen(lambda event: replayed.append(getattr(operation, method)(timeout=0)))
+        assert replayed and all(value in (None, "removed") for value in replayed)
+
+
+def test_public_completion_timeout_does_not_cancel_and_cancel_waits_for_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with _public_gated_removal(monkeypatch, tmp_path) as (operation, release):
+        with pytest.raises(TimeoutError):
+            operation.wait_for_completion(timeout=0)
+        assert not operation.cancellation_requested
+        assert operation.cancel()
+        with pytest.raises(TimeoutError):
+            operation.wait_for_completion(timeout=0)
+        release.set()
+        assert operation.wait_for_completion(timeout=1) is None
+        with pytest.raises(OperationCanceled):
+            operation.wait_for(timeout=0)
+
+
+def test_runner_cannot_wait_for_its_own_completion() -> None:
+    operation: Operation[int] = Operation()
+
+    def runner() -> int:
+        with pytest.raises(RuntimeError, match="own incomplete completion"):
+            operation.wait_for_completion(timeout=0.05)
+        return 42
+
+    operation._start_runner(runner, thread_name="test-refuse-runner-self-wait")
+    assert operation.wait_for(timeout=1) == 42

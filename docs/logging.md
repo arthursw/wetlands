@@ -95,3 +95,13 @@ Common credentials in URLs, tokens, passwords, authorization values, and proxies
 
 Applications must still avoid printing arbitrary secrets from their own post-install commands or worker functions.
 Use a `PostInstallCommand.display` value whenever a shell command contains sensitive expansion.
+
+
+## Listener failure and completion
+
+Operation listeners are observational callbacks during both live delivery and replay.
+Wetlands logs and isolates callback exceptions, including `BaseException`, so a listener cannot replace the operation outcome or strand completion publication.
+This also isolates a `KeyboardInterrupt` that occurs inside callback execution; Wetlands cannot distinguish it from an explicitly raised callback error.
+Interruption of an owner waiting outside callback execution still propagates.
+Listeners must not block the event publisher; waiting on that same incomplete operation from its runner or live publisher fails fast with `RuntimeError`.
+Use `operation.wait_for_completion()` from another thread to wait without raising a stored outcome, then `wait_for()` when the outcome is wanted.
