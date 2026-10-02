@@ -2,6 +2,11 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.5.0
+
+- Add `Operation.wait_for_completion()` to wait independently of a stored result, failure, or cancellation.
+- Isolate all operation listener exceptions during live delivery and replay, and refuse incomplete same-operation waits from runner or notification threads.
+
 ## 2.4.3
 
 - Added automated PyPI releases through GitHub Actions trusted publishing, including release version checks, distribution validation, and clean-install smoke tests.

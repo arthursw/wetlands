@@ -36,6 +36,15 @@ environment = operation.wait_for(timeout=600)
 `wait_for()` blocks the current thread until the operation finishes.
 It returns the result for a completed operation and raises a public exception for failure, cancellation, or a waiting timeout.
 
+Use `operation.wait_for_completion(timeout=600)` when the caller must wait for completion without interpreting or raising the stored result, failure, or cancellation.
+It returns `None` after completion; a caller deadline raises `TimeoutError` without canceling the operation.
+A later `wait_for()` still returns the original result or raises the original stored failure.
+Completion follows runner cleanup and ordered event delivery, so `state.terminal` and a terminal event are not substitutes for completion waiting.
+This API does not join every background thread, wait for deferred environment reclamation, or independently certify physical process cleanup beyond the operation's documented contract.
+
+Waiting on an incomplete operation from its own runner or live event publisher raises `RuntimeError` instead of blocking that operation's completion.
+Waiting during replay of an already completed operation remains supported.
+
 ## Execution tasks
 
 Submitting a call returns immediately with an `ExecutionTask`:

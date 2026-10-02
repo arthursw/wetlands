@@ -193,9 +193,26 @@ class Operation(Generic[T]):
                 logger.exception("Operation cancellation callback failed")
         return True
 
-    def wait_for(self, timeout: float | None = None) -> T:
+    def wait_for_completion(self, timeout: float | None = None) -> None:
+        """Wait for ordered completion without raising the stored outcome.
+
+        A waiting timeout does not cancel the operation. An incomplete operation
+        cannot be waited on by its own runner or live notification publisher.
+        Callback execution is observational: all callback-raised exceptions,
+        including BaseExceptions during live delivery and replay, are isolated.
+        Interruption of a waiter outside callback execution still propagates.
+        """
+        with self._lock:
+            current_thread = threading.current_thread()
+            if not self._done.is_set() and (
+                self._thread is current_thread or self._notification_thread_id == current_thread.ident
+            ):
+                raise RuntimeError("An operation cannot wait for its own incomplete completion")
         if not self._done.wait(timeout):
             raise TimeoutError(f"Operation {self.id} did not finish within {timeout} seconds")
+
+    def wait_for(self, timeout: float | None = None) -> T:
+        self.wait_for_completion(timeout)
         with self._lock:
             state = self._state
             result = self._result
@@ -394,7 +411,7 @@ class Operation(Generic[T]):
     def _notify_listener(self, listener: Callable[[OperationEvent], None], event: OperationEvent) -> None:
         try:
             listener(event)
-        except Exception:
+        except BaseException:
             logger.exception("Operation listener failed")
 
     def _set_cancel_callback(self, callback: Callable[[], None]) -> None:

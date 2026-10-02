@@ -120,6 +120,10 @@ Wetlands uses threads and subprocesses internally and does not own an applicatio
 Operations and tasks adapt completion and event delivery to the caller's current `asyncio` loop when awaited.
 
 Any new callback path must remain safe when invoked from a Wetlands background thread.
+Operation callback failures, including `BaseException` during live delivery or replay, are logged and isolated from runner outcomes and ordered completion publication.
+Incomplete same-operation waiting from its runner or live notification publisher is refused; completed replay may inspect its outcome.
+`Operation.wait_for_completion()` waits for completion without raising the stored outcome, while `wait_for()` preserves ordinary result/failure behavior.
+Terminal state becomes visible before ordered notification finishes, so consumers must use public completion waiting rather than infer completion from terminal state or exception identity.
 Any new terminal path must complete mandatory process and transfer-resource cleanup before publishing its terminal state.
 Environment removal is terminal after its namespace detachment commits; recursive storage reclamation is explicitly deferred and does not emit events on the completed removal operation.
 If directory durability cannot be confirmed after the rename, Wetlands logs the condition and retains the recovery record instead of reporting a misleading pre-commit failure.
