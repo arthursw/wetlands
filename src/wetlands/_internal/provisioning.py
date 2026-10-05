@@ -2671,7 +2671,15 @@ def provision_environment(
             manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
             lock_hash = hashlib.sha256(lock_bytes).hexdigest()
             generation = operation.id
-            probe_source = Path(__file__).with_name("runtime_content.py").read_text(encoding="utf-8")
+            probe_name = ".wetlands-runtime-content.py"
+            _write_target_file(
+                manager.environments_root,
+                target,
+                probe_name,
+                Path(__file__).with_name("runtime_content.py").read_bytes(),
+                expected_identity=created_target_identity,
+                require_marker=True,
+            )
             captured_lines: deque[str] = deque(maxlen=1)
             runner.run(
                 ProvisioningStep(
@@ -2684,8 +2692,7 @@ def provision_environment(
                         str(manifest_path),
                         "python",
                         "-I",
-                        "-c",
-                        probe_source,
+                        str(target / probe_name),
                     ),
                     cwd=target,
                     environment=pixi_environment,

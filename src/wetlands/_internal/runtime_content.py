@@ -96,19 +96,29 @@ def _file_content(path: Path, *, materialize: bool = False, python_shebang: bool
         after_open = os.fstat(stream.fileno())
 
     def identity(value: os.stat_result) -> tuple[int, int, int, int]:
-        return value.st_dev, value.st_ino, value.st_mode, value.st_size
+        mode = value.st_mode
+        if os.name == "nt":
+            # Path stat synthesizes execute bits from .exe/.bat/.cmd/.com names;
+            # a descriptor has no filename from which to derive those bits.
+            mode &= ~0o111
+        return value.st_dev, value.st_ino, mode, value.st_size
 
     def signature(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
-        return (*identity(value), value.st_mtime_ns, value.st_ctime_ns)
+        return value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns
 
     # Windows path stat and fstat can expose different ctime semantics.
     # Match physical identity across APIs, then fence each API's full signature.
+    after = path.stat()
     if (
         identity(before) != identity(opened)
         or signature(opened) != signature(after_open)
-        or signature(path.stat()) != signature(before)
+        or signature(after) != signature(before)
     ):
-        raise ValueError(f"Runtime content changed while being captured: {path}")
+        raise ValueError(
+            f"Runtime content changed while being captured: {path}; "
+            f"path_before={signature(before)!r}, opened={signature(opened)!r}, "
+            f"after_open={signature(after_open)!r}, path_after={signature(after)!r}"
+        )
     return opened.st_size + delta, b"".join(chunks) if materialize else digest.digest()
 
 

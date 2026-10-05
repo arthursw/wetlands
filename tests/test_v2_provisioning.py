@@ -116,7 +116,12 @@ elif arguments and arguments[0] == "run":
             )
             raise SystemExit(1)
         print(sys.executable)
-    elif command[:3] == ["python", "-I", "-c"] and "def capture_runtime_content" in command[3]:
+    elif (
+        command[:2] == ["python", "-I"]
+        and len(command) == 3
+        and pathlib.Path(command[2]).name == ".wetlands-runtime-content.py"
+        and "def capture_runtime_content" in pathlib.Path(command[2]).read_text(encoding="utf-8")
+    ):
         if {capture_exit_code!r}:
             print("fixture content capture failure", file=sys.stderr)
             raise SystemExit({capture_exit_code!r})
@@ -1226,6 +1231,32 @@ def test_stale_environment_handle_rejects_start_and_attach(tmp_path: Path) -> No
 
     assert start_error.value.expected_generation_id == stale.generation_id
     assert start_error.value.actual_generation_id == current.generation_id
+
+
+def test_runtime_capture_uses_a_short_isolated_command_and_owned_kernel(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    original_run = provisioning_module.ProcessTreeRunner.run
+    captures = []
+
+    def inspect_capture(runner, step, **kwargs):
+        if step.id == "capture-runtime-content":
+            script = Path(step.argv[-1])
+            assert step.argv[-3:-1] == ("python", "-I")
+            assert "-c" not in step.argv
+            assert sum(len(part) + 1 for part in step.argv) < 4096
+            assert script.parent == step.cwd
+            assert (script.parent / OWNER_MARKER).is_file()
+            assert (
+                script.read_bytes() == Path(provisioning_module.__file__).with_name("runtime_content.py").read_bytes()
+            )
+            captures.append(script)
+        return original_run(runner, step, **kwargs)
+
+    with patch.object(provisioning_module.ProcessTreeRunner, "run", new=inspect_capture):
+        with EnvironmentManager(tmp_path / "state", pixi_executable=executable) as manager:
+            environment = manager.provision("proof", EnvironmentSpec(python="3.12")).wait_for()
+            assert environment.runtime_content_receipt().generation_id == environment.generation_id
+    assert len(captures) == 1
 
 
 def test_runtime_content_capture_failure_never_publishes_ready(tmp_path: Path) -> None:
