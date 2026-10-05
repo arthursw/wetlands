@@ -54,6 +54,7 @@ from wetlands.operation import (
     ProvisioningError,
 )
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION
+from wetlands.runtime_content import RuntimeContentReceipt, _validate_editable_roots
 from wetlands.specs import (
     MANAGED_DEBUGPY_VERSION,
     MANAGED_RUNTIME_PYPI,
@@ -1657,6 +1658,18 @@ def _valid_ready_payload(
         or hashlib.sha256(lock).hexdigest() != value["lock_sha256"]
     ):
         return None
+    if "runtime_content" in value:
+        try:
+            receipt = RuntimeContentReceipt._from_payload(value["runtime_content"])
+            _validate_editable_roots(receipt, value.get("editable_roots"))
+        except (ValueError, TypeError, KeyError):
+            return None
+        if (receipt.generation_id, receipt.recipe_hash, receipt.lockfile_hash) != (
+            value["generation_id"],
+            value["recipe_hash"],
+            value["lock_sha256"],
+        ):
+            return None
     return value
 
 
@@ -2328,6 +2341,7 @@ def provision_environment(
                     and ready.get("pixi_version") == pixi.version
                     and ready.get("pixi_executable") == str(pixi.executable)
                     and (supplied_lock_hash is None or ready.get("lock_sha256") == supplied_lock_hash)
+                    and "runtime_content" in ready
                 )
                 if matches:
                     _discard_matching_journals(manager, target)
@@ -2657,6 +2671,46 @@ def provision_environment(
             manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
             lock_hash = hashlib.sha256(lock_bytes).hexdigest()
             generation = operation.id
+            probe_name = ".wetlands-runtime-content.py"
+            _write_target_file(
+                manager.environments_root,
+                target,
+                probe_name,
+                Path(__file__).with_name("runtime_content.py").read_bytes(),
+                expected_identity=created_target_identity,
+                require_marker=True,
+            )
+            captured_lines: deque[str] = deque(maxlen=1)
+            runner.run(
+                ProvisioningStep(
+                    "capture-runtime-content",
+                    ProvisioningStage.VALIDATION,
+                    (
+                        str(pixi.executable),
+                        "run",
+                        "--manifest-path",
+                        str(manifest_path),
+                        "python",
+                        "-I",
+                        str(target / probe_name),
+                    ),
+                    cwd=target,
+                    environment=pixi_environment,
+                    display="Capture installed runtime content",
+                ),
+                on_stdout=captured_lines.append,
+            )
+            try:
+                captured = json.loads(captured_lines[-1])
+                receipt = RuntimeContentReceipt(
+                    generation_id=generation,
+                    recipe_hash=spec.recipe_hash,
+                    lockfile_hash=lock_hash,
+                    scientific_facts=captured["scientific_facts"],
+                )
+                _validate_editable_roots(receipt, captured["editable_roots"])
+            except (IndexError, ValueError, TypeError, KeyError) as error:
+                raise RuntimeError("Managed interpreter produced an invalid runtime content receipt") from error
             canonical_target = str(manager.environments_root.resolve(strict=True) / target.name)
             metadata = {
                 "schema_version": READY_SCHEMA_VERSION,
@@ -2673,6 +2727,8 @@ def provision_environment(
                 "pixi_executable": str(pixi.executable),
                 "protocol_version": EXECUTION_PROTOCOL_VERSION,
                 "completed_at": time.time(),
+                "runtime_content": receipt._to_payload(),
+                "editable_roots": captured["editable_roots"],
             }
             operation._emit(
                 OperationEventKind.STEP,

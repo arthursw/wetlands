@@ -23,6 +23,13 @@ On Windows, worker launch applies Pixi's computed environment activation before 
 
 Provisioning serializes work for one physical environment and performs preparation, project materialization, lock validation or resolution, installation, validation, and ready-metadata publication.
 The ready metadata is written only after every preceding stage succeeds.
+The managed interpreter captures installed runtime content before publication, using one stdlib capture kernel and streamed member hashing.
+The kernel is written through the guarded generation owner and invoked as an isolated Python script with a short supervised command.
+Its stored script is operational generation metadata, separate from the installed distribution content facts.
+The stored receipt is bound to the same generation, recipe, and lockfile as the ready owner.
+Public ready inspection is write-free; receipt admission verifies that binding and checks bounded editable import roots without launching a worker or rescanning installed bytes.
+Lifecycle mutation and process start remain gated independently of this read-only snapshot.
+See [environment identity](../concepts/environment_identity.md#installed-runtime-content) for normalization and ownership limits.
 
 Failure or cancellation terminates the active subprocess tree and removes the incomplete environment.
 After a host crash, the next attempt treats an environment without matching ready metadata as incomplete and rebuilds it.

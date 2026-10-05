@@ -26,6 +26,7 @@ groups = {
         "PostInstallCommand",
         "PixiInfo",
         "ProvisioningStage",
+        "RuntimeContentReceipt",
         "WorkerPool",
         "local_package_content_identity",
     ),
@@ -43,6 +44,7 @@ groups = {
         "RemovalOperation",
     ),
     "Errors and diagnostics": (
+        "EditableRuntimeSourceChangedError",
         "EnvironmentGenerationChangedError",
         "EnvironmentInUseError",
         "EnvironmentNotFoundError",
@@ -69,6 +71,7 @@ groups = {
         "ProcessTimeoutError",
         "RemoteExceptionInfo",
         "RemovalError",
+        "RuntimeContentUnavailableError",
         "UnmanagedTargetError",
         "ValueDecodingError",
         "ValueEncodingError",

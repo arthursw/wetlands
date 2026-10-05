@@ -63,6 +63,7 @@ def _fake_pixi(
     *,
     install_delay: float = 0,
     install_exit_code: int = 0,
+    capture_exit_code: int = 0,
     managed_debugpy_importable: bool = True,
     managed_debugpy_version: str | None = MANAGED_DEBUGPY_VERSION,
     mutate_locked: bool = False,
@@ -75,6 +76,7 @@ def _fake_pixi(
     implementation.write_text(
         f"""#!/usr/bin/env python3
 import pathlib
+import json
 import subprocess
 import sys
 import time
@@ -114,6 +116,20 @@ elif arguments and arguments[0] == "run":
             )
             raise SystemExit(1)
         print(sys.executable)
+    elif (
+        command[:2] == ["python", "-I"]
+        and len(command) == 3
+        and pathlib.Path(command[2]).name == ".wetlands-runtime-content.py"
+        and "def capture_runtime_content" in pathlib.Path(command[2]).read_text(encoding="utf-8")
+    ):
+        if {capture_exit_code!r}:
+            print("fixture content capture failure", file=sys.stderr)
+            raise SystemExit({capture_exit_code!r})
+        print(json.dumps({{"scientific_facts": {{"schema_version": 1, "python": {{
+            "implementation": "cpython", "version": [3, 12, 0], "cache_tag": "cpython-312",
+            "soabi": "fixture", "platform": "fixture", "machine": "fixture",
+            "executable_digest": "0" * 64}}, "distributions": [], "resolved_artifacts": [],
+            "editable_sources": []}}, "editable_roots": []}}))
     else:
         raise SystemExit(subprocess.run(command, check=False).returncode)
 else:
@@ -241,6 +257,7 @@ def test_prepare_and_provision_with_external_pixi(tmp_path: Path) -> None:
     assert environment.pixi_manifest_path.is_file()
     assert environment.pixi_lock_path.is_file()
     assert environment.lockfile_hash
+    assert environment.runtime_content_receipt().generation_id == environment.generation_id
     assert manager.environment("example").generation_id == environment.generation_id
     assert events[-1].state is OperationState.COMPLETED
     assert all(event.environment == "example" for event in events)
@@ -453,8 +470,8 @@ def test_content_identified_local_package_is_staged_restored_and_reused(tmp_path
     mutations: list[str] = []
     original_run = provisioning_module.ProcessTreeRunner.run
 
-    def mutate_build_source(runner, step):
-        result = original_run(runner, step)
+    def mutate_build_source(runner, step, **kwargs):
+        result = original_run(runner, step, **kwargs)
         if step.id == "pixi-install":
             stage = manager.environments_root / "example" / ".wetlands-local-worker-package"
             (stage / "build").mkdir()
@@ -1214,3 +1231,41 @@ def test_stale_environment_handle_rejects_start_and_attach(tmp_path: Path) -> No
 
     assert start_error.value.expected_generation_id == stale.generation_id
     assert start_error.value.actual_generation_id == current.generation_id
+
+
+def test_runtime_capture_uses_a_short_isolated_command_and_owned_kernel(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path)
+    original_run = provisioning_module.ProcessTreeRunner.run
+    captures = []
+
+    def inspect_capture(runner, step, **kwargs):
+        if step.id == "capture-runtime-content":
+            script = Path(step.argv[-1])
+            assert step.argv[-3:-1] == ("python", "-I")
+            assert "-c" not in step.argv
+            assert sum(len(part) + 1 for part in step.argv) < 4096
+            assert script.parent == step.cwd
+            assert (script.parent / OWNER_MARKER).is_file()
+            assert (
+                script.read_bytes() == Path(provisioning_module.__file__).with_name("runtime_content.py").read_bytes()
+            )
+            captures.append(script)
+        return original_run(runner, step, **kwargs)
+
+    with patch.object(provisioning_module.ProcessTreeRunner, "run", new=inspect_capture):
+        with EnvironmentManager(tmp_path / "state", pixi_executable=executable) as manager:
+            environment = manager.provision("proof", EnvironmentSpec(python="3.12")).wait_for()
+            assert environment.runtime_content_receipt().generation_id == environment.generation_id
+    assert len(captures) == 1
+
+
+def test_runtime_content_capture_failure_never_publishes_ready(tmp_path: Path) -> None:
+    executable = _fake_pixi(tmp_path, capture_exit_code=17)
+    with EnvironmentManager(tmp_path / "state", pixi_executable=executable) as manager:
+        with pytest.raises(ProvisioningError) as failure:
+            manager.provision("proof", EnvironmentSpec(python="3.12")).wait_for()
+        assert failure.value.failure.stage == ProvisioningStage.VALIDATION.value
+        assert "fixture content capture failure" in "\n".join(failure.value.failure.stderr_tail)
+        assert not (manager.environments_root / "proof").exists()
+        with pytest.raises(EnvironmentNotReadyError):
+            manager.environment("proof")

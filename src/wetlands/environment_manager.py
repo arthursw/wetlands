@@ -13,7 +13,6 @@ from typing import Any, Iterator
 
 from wetlands._internal.provisioning import (
     _read_ready,
-    environment_lifecycle_gate,
     prepare_pixi,
     provision_environment,
 )
@@ -213,29 +212,32 @@ class EnvironmentManager:
         return operation
 
     def environment(self, name: str) -> ManagedEnvironment:
+        """Inspect a ready generation without creating directories or locks.
+
+        The handle is a snapshot. Execution and removal keep their existing
+        lifecycle gates and verify that the selected generation is current.
+        """
         with self._manager_work():
             normalized_name = validate_environment_name(name)
             key = environment_name_key(normalized_name)
-            with environment_lifecycle_gate(self, normalized_name):
+            with self._environment_lock:
+                existing = self._environments.get(key)
+            if existing is not None and existing.name != normalized_name:
+                raise EnvironmentNotReadyError(
+                    f"Environment name {normalized_name!r} aliases managed name {existing.name!r}"
+                )
+            target = self.environments_root / normalized_name
+            metadata = _read_ready(target)
+            if metadata is None:
                 with self._environment_lock:
-                    existing = self._environments.get(key)
-                if existing is not None:
-                    if existing.name != normalized_name:
-                        raise EnvironmentNotReadyError(
-                            f"Environment name {normalized_name!r} aliases managed name {existing.name!r}"
-                        )
-                target = self.environments_root / normalized_name
-                metadata = _read_ready(target)
-                if metadata is None:
-                    with self._environment_lock:
-                        self._environments.pop(key, None)
-                    raise EnvironmentNotReadyError(f"Environment {normalized_name!r} is not ready")
-                if existing is not None and existing.generation_id == metadata.get("generation_id"):
-                    return existing
-                environment = ManagedEnvironment._from_ready(self, normalized_name, target, metadata)
-                with self._environment_lock:
-                    self._environments[key] = environment
-                return environment
+                    self._environments.pop(key, None)
+                raise EnvironmentNotReadyError(f"Environment {normalized_name!r} is not ready")
+            if existing is not None and existing.generation_id == metadata.get("generation_id"):
+                return existing
+            environment = ManagedEnvironment._from_ready(self, normalized_name, target, metadata)
+            with self._environment_lock:
+                self._environments[key] = environment
+            return environment
 
     def managed_environments(self) -> tuple[ManagedEnvironmentInfo, ...]:
         """Discover ready and incomplete environment targets owned by this root."""

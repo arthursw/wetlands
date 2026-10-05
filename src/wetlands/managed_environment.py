@@ -16,6 +16,13 @@ from wetlands.external_environment import ExternalEnvironment, _validate_worker_
 from wetlands.lifecycle import EnvironmentGenerationChangedError, ManagerCloseError, ManagerCloseTimeoutError
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION, WORKER_RUNTIME_VERSION
 from wetlands.task import ExecutionTask
+from wetlands.runtime_content import (
+    _validate_editable_roots,
+    RuntimeContentReceipt,
+    RuntimeContentUnavailableError,
+    EditableRuntimeSourceChangedError,
+)
+from wetlands._internal.runtime_content import editable_content_digest
 
 if TYPE_CHECKING:
     from wetlands.environment_manager import EnvironmentManager
@@ -112,6 +119,51 @@ class ManagedEnvironment:
     def lockfile_hash(self) -> str:
         """Return the SHA-256 hash of this generation's lockfile."""
         return str(self._metadata["lock_sha256"])
+
+    def runtime_content_receipt(self) -> RuntimeContentReceipt:
+        """Read admitted generation content without starting a process or worker.
+
+        Editable import roots are checked against their captured content. Changed
+        source requires explicit worker retirement and reprovisioning; this method
+        does not reload modules or mutate the environment.
+        """
+        with self._manager._manager_work():
+            ready = _read_ready(self.path)
+            if ready is None or ready.get("generation_id") != self.generation_id:
+                raise RuntimeContentUnavailableError("The selected runtime generation is no longer ready")
+            try:
+                receipt = RuntimeContentReceipt._from_payload(ready.get("runtime_content"))
+            except (ValueError, TypeError, KeyError) as error:
+                raise RuntimeContentUnavailableError(
+                    "The selected runtime has no valid installed-content receipt"
+                ) from error
+            if (receipt.recipe_hash, receipt.lockfile_hash) != (self.recipe_hash, self.lockfile_hash):
+                raise RuntimeContentUnavailableError("The selected runtime receipt fences changed")
+            try:
+                operational = _validate_editable_roots(receipt, ready.get("editable_roots"))
+            except ValueError as error:
+                raise RuntimeContentUnavailableError("Invalid editable source authority") from error
+            for item in operational:
+                try:
+                    source_root = Path(item["source_root"])
+                    if source_root.resolve(strict=True) != source_root:
+                        raise ValueError("Editable source root changed physical authority")
+                    for root in item["import_roots"]:
+                        Path(root).resolve(strict=True).relative_to(source_root)
+                    actual = editable_content_digest(item["import_roots"])
+                except (OSError, ValueError) as error:
+                    raise RuntimeContentUnavailableError(f"Editable source {item['name']!r} is unavailable") from error
+                if actual != item["content_digest"]:
+                    raise EditableRuntimeSourceChangedError(
+                        item["name"], item["source_root"], item["content_digest"], actual
+                    )
+            after = _read_ready(self.path)
+            if after is None or (after.get("runtime_content"), after.get("editable_roots")) != (
+                ready.get("runtime_content"),
+                ready.get("editable_roots"),
+            ):
+                raise RuntimeContentUnavailableError("Runtime generation changed during content admission")
+            return receipt
 
     def spawn(
         self,
