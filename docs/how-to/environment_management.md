@@ -13,6 +13,9 @@ for info in manager.managed_environments():
 ```
 
 Discovery returns immutable snapshots and ignores directories that Wetlands cannot prove it owns.
+`manager.environment(name)` reads an existing ready generation without writing files or provisioning it.
+Read its `runtime_content_receipt()` when a cache needs admitted installed-content facts rather than requested recipe identity alone.
+Missing or stale authority raises an error and does not recreate the environment automatically.
 
 ## Replace a different recipe
 

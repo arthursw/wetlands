@@ -21,6 +21,13 @@ An `OperationError` has a `failure` record containing:
 - bounded `stdout_tail` and `stderr_tail` values;
 - an optional `cleanup_error`.
 
+## Runtime content admission
+
+`RuntimeContentUnavailableError` reports missing, inconsistent, or stale ready-content authority without changing the environment.
+`EditableRuntimeSourceChangedError` specializes it for a changed editable import footprint and exposes `distribution_name`, `source_root`, `expected_digest`, and `actual_digest`.
+Close workers and explicitly recreate that environment before executing changed source; receipt inspection does not hot reload or remove it.
+See [installed runtime content](../concepts/environment_identity.md#installed-runtime-content) for the owner-managed scope and manual-mutation limits.
+
 ## Execution failures
 
 `ExecutionError.failure` is an `ExecutionFailure` with a stable category:

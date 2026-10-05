@@ -2,6 +2,12 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.6.0
+
+- Add immutable `RuntimeContentReceipt` values captured from the managed interpreter before ready publication, separating scientific installed-content identity from recipe, lockfile, and generation fences.
+- Read ready environments and their receipts without filesystem writes, worker startup, or warm installed-content rescans.
+- Admit editable packages through bounded actual import roots and refuse changed source until explicit environment recreation; support owned Hatch activation without requiring `top_level.txt`.
+
 ## 2.5.0
 
 - Add `Operation.wait_for_completion()` to wait independently of a stored result, failure, or cancellation.

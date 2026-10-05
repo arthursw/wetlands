@@ -7,6 +7,11 @@ from wetlands.debugging import DebugEndpoint, RunningWorker
 from wetlands.diagnostics import ExecutionFailure, ExecutionFailureCategory, RemoteExceptionInfo, WorkerInfo
 from wetlands.environment_info import ManagedEnvironmentInfo, ManagedEnvironmentState
 from wetlands.environment_manager import EnvironmentManager, EnvironmentNotReadyError
+from wetlands.runtime_content import (
+    RuntimeContentReceipt,
+    RuntimeContentUnavailableError,
+    EditableRuntimeSourceChangedError,
+)
 from wetlands.lifecycle import (
     EnvironmentGenerationChangedError,
     EnvironmentInUseError,
@@ -69,6 +74,9 @@ except PackageNotFoundError:
     __version__ = "0+unknown"
 
 __all__ = [
+    "RuntimeContentReceipt",
+    "RuntimeContentUnavailableError",
+    "EditableRuntimeSourceChangedError",
     "DebugEndpoint",
     "EnvironmentManager",
     "EnvironmentGenerationChangedError",
