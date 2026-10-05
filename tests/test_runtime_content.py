@@ -5,6 +5,9 @@ import json
 import subprocess
 import sys
 import io
+import os
+from pathlib import Path
+from types import SimpleNamespace
 import zipfile
 
 import pytest
@@ -16,7 +19,7 @@ from wetlands import (
     RuntimeContentReceipt,
     RuntimeContentUnavailableError,
 )
-from wetlands._internal.runtime_content import capture_runtime_content, editable_content_digest
+from wetlands._internal.runtime_content import _file_content, capture_runtime_content, editable_content_digest
 from wetlands._internal.provisioning import OWNER_MARKER, READY_SCHEMA_VERSION, _path_identity, _publish_ready
 from wetlands.protocol import EXECUTION_PROTOCOL_VERSION
 
@@ -319,3 +322,39 @@ def test_generated_launchers_ignore_only_admitted_interpreter_prefix(tmp_path, m
         )
     assert captures[0].content_digest == captures[1].content_digest
     assert captures[0].content_digest != captures[2].content_digest
+
+
+@pytest.mark.parametrize("damage", [None, "identity", "descriptor", "path"])
+def test_file_capture_preserves_identity_and_each_metadata_api_fence(tmp_path, monkeypatch, damage):
+    path = tmp_path / "member.py"
+    payload = b"VALUE = 4\n"
+    path.write_bytes(payload)
+    real = path.stat()
+
+    def metadata(*, ctime, inode=real.st_ino):
+        return SimpleNamespace(
+            st_dev=real.st_dev,
+            st_ino=inode,
+            st_mode=real.st_mode,
+            st_size=real.st_size,
+            st_mtime_ns=real.st_mtime_ns,
+            st_ctime_ns=ctime,
+        )
+
+    path_stats = iter([metadata(ctime=10), metadata(ctime=11 if damage == "path" else 10)])
+    fd_stats = iter(
+        [
+            metadata(ctime=20, inode=real.st_ino + 1 if damage == "identity" else real.st_ino),
+            metadata(ctime=21 if damage == "descriptor" else 20),
+        ]
+    )
+    original_stat = Path.stat
+    monkeypatch.setattr(
+        Path, "stat", lambda self, *a, **kw: next(path_stats) if self == path else original_stat(self, *a, **kw)
+    )
+    monkeypatch.setattr(os, "fstat", lambda fd: next(fd_stats))
+    if damage is None:
+        assert _file_content(path) == (len(payload), hashlib.sha256(payload).digest())
+    else:
+        with pytest.raises(ValueError, match="changed while being captured"):
+            _file_content(path)

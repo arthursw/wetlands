@@ -11,6 +11,7 @@ import wetlands
 def test_public_api_exports_only_v2_lifecycle_types() -> None:
     expected = {
         "DebugEndpoint",
+        "EditableRuntimeSourceChangedError",
         "EnvironmentGenerationChangedError",
         "EnvironmentInUseError",
         "EnvironmentNotFoundError",
@@ -63,6 +64,8 @@ def test_public_api_exports_only_v2_lifecycle_types() -> None:
         "RemovalError",
         "RemovalOperation",
         "RunningWorker",
+        "RuntimeContentReceipt",
+        "RuntimeContentUnavailableError",
         "ValueDecodingError",
         "ValueEncodingError",
         "UnmanagedTargetError",

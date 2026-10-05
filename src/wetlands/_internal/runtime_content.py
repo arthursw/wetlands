@@ -95,11 +95,16 @@ def _file_content(path: Path, *, materialize: bool = False, python_shebang: bool
                     raise ValueError(f"Runtime activation metadata exceeds its bound: {path}")
         after_open = os.fstat(stream.fileno())
 
-    def signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
-        return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+    def identity(value: os.stat_result) -> tuple[int, int, int, int]:
+        return value.st_dev, value.st_ino, value.st_mode, value.st_size
 
+    def signature(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+        return (*identity(value), value.st_mtime_ns, value.st_ctime_ns)
+
+    # Windows path stat and fstat can expose different ctime semantics.
+    # Match physical identity across APIs, then fence each API's full signature.
     if (
-        signature(before) != signature(opened)
+        identity(before) != identity(opened)
         or signature(opened) != signature(after_open)
         or signature(path.stat()) != signature(before)
     ):
