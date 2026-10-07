@@ -10,7 +10,7 @@ import importlib.util
 import json
 import io
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import re
 import shlex
@@ -163,11 +163,69 @@ def editable_content_digest(roots: list[str]) -> str:
     return _members_digest(members)
 
 
-def _distribution_members(distribution: Any) -> list[importlib.metadata.PackagePath]:
+def _conda_members(
+    distribution: Any, prefix: Path, records: list[dict[str, Any]]
+) -> list[importlib.metadata.PackagePath] | None:
+    """Admit a complete installed manifest by its exact owned metadata anchor."""
+    base = Path(distribution.locate_file("")).resolve(strict=True)
+    base.relative_to(prefix)
+    owners = []
+    for record in records:
+        files = record.get("files", [])
+        if not isinstance(files, list) or any(
+            not isinstance(member, str)
+            or not member
+            or "\\" in member
+            or ":" in member
+            or PurePosixPath(member).is_absolute()
+            or any(part in {"", ".", ".."} for part in member.split("/"))
+            for member in files
+        ):
+            raise ValueError("Invalid installed Conda member authority")
+        anchored = False
+        for member in files:
+            path = prefix / member
+            if (
+                not (
+                    (path.name == "METADATA" and path.parent.suffix == ".dist-info")
+                    or (path.name == "PKG-INFO" and path.parent.suffix == ".egg-info")
+                )
+                or path.parent.parent.resolve(strict=True) != base
+            ):
+                continue
+            path = path.resolve(strict=True)
+            path.relative_to(prefix)
+            public_text = distribution.read_text(path.name)
+            if (
+                public_text is None
+                or _file_content(path, materialize=True)[1].decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+                != public_text
+            ):
+                continue
+            metadata = importlib.metadata.Distribution.at(path.parent).metadata
+            if metadata["Name"] == distribution.metadata["Name"] and metadata["Version"] == distribution.version:
+                anchored = True
+        if anchored:
+            owners.append(files)
+    if not owners:
+        return None
+    if len(owners) != 1:
+        raise ValueError("Installed distribution has ambiguous installed Conda owners")
+    return [
+        importlib.metadata.PackagePath(Path(os.path.relpath(prefix / member, base)).as_posix()) for member in owners[0]
+    ]
+
+
+def _distribution_members(
+    distribution: Any, prefix: Path, records: list[dict[str, Any]]
+) -> list[importlib.metadata.PackagePath]:
     """Capture complete installed authority before stdlib existence filtering."""
+    conda = _conda_members(distribution, prefix, records)
+    if conda is not None:
+        return conda
     record = distribution.read_text("RECORD")
     if not record:
-        raise ValueError(f"Installed distribution {distribution.metadata['Name']!r} has no complete RECORD authority")
+        raise ValueError("Installed distribution has no complete RECORD authority or installed Conda owner")
     members = []
     for row in csv.reader(io.StringIO(record)):
         if not row:
@@ -305,6 +363,7 @@ def capture_runtime_content(
 ) -> dict[str, Any]:
     """Hash actual installed Python members once, without importing tool packages."""
     prefix = (prefix or Path(sys.prefix)).resolve()
+    records = [json.loads(metadata.read_text()) for metadata in sorted((prefix / "conda-meta").glob("*.json"))]
     distributions = (
         importlib.metadata.distributions(path=distribution_paths)
         if distribution_paths is not None
@@ -317,7 +376,7 @@ def capture_runtime_content(
         if not name or name in names:
             raise ValueError(f"Missing or duplicate installed distribution: {name!r}")
         names.add(name)
-        files = _distribution_members(distribution)
+        files = _distribution_members(distribution, prefix, records)
         direct_url = distribution.read_text("direct_url.json")
         url = json.loads(direct_url) if direct_url else {}
         is_editable = url.get("dir_info", {}).get("editable") is True
@@ -373,8 +432,7 @@ def capture_runtime_content(
             members.append((relative, size, file_digest))
         installed.append({"name": name, "version": distribution.version, "content_digest": _members_digest(members)})
     artifacts = []
-    for metadata in sorted((prefix / "conda-meta").glob("*.json")):
-        value = json.loads(metadata.read_text())
+    for value in records:
         artifacts.append(
             {
                 "name": _name(value["name"]),
