@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import csv
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -162,11 +163,32 @@ def editable_content_digest(roots: list[str]) -> str:
     return _members_digest(members)
 
 
-def _editable_layout(distribution: Any, source: Path) -> tuple[set[str], set[str]]:
+def _distribution_members(distribution: Any) -> list[importlib.metadata.PackagePath]:
+    """Capture complete installed authority before stdlib existence filtering."""
+    record = distribution.read_text("RECORD")
+    if not record:
+        raise ValueError(f"Installed distribution {distribution.metadata['Name']!r} has no complete RECORD authority")
+    members = []
+    for row in csv.reader(io.StringIO(record)):
+        if not row:
+            continue
+        if len(row) != 3 or not row[0]:
+            raise ValueError("Invalid installed RECORD member")
+        if row[2]:
+            int(row[2])
+        members.append(importlib.metadata.PackagePath(row[0]))
+    if not members:
+        raise ValueError("Installed RECORD has no member authority")
+    return members
+
+
+def _editable_layout(
+    distribution: Any, source: Path, files: list[importlib.metadata.PackagePath]
+) -> tuple[set[str], set[str]]:
     """Use owned activation members, not a guessed distribution/import name."""
     names = set((distribution.read_text("top_level.txt") or "").split())
     finders: set[str] = set()
-    for member in distribution.files or ():
+    for member in files:
         path = Path(distribution.locate_file(member))
         if path.suffix != ".pth":
             continue
@@ -178,7 +200,7 @@ def _editable_layout(distribution: Any, source: Path) -> tuple[set[str], set[str
             if match:
                 finder_name = match.group(1)
                 finder = path.parent / (finder_name + ".py")
-                if finder.name not in {Path(str(item)).name for item in distribution.files or ()}:
+                if finder.name not in {Path(str(item)).name for item in files}:
                     raise ValueError("Editable finder has no owned member authority")
                 tree = ast.parse(_file_content(finder, materialize=True)[1].decode("utf-8"))
                 mappings = _finder_mappings(tree)
@@ -223,8 +245,8 @@ def _finder_mappings(tree: ast.Module) -> dict[str, Any]:
     return mappings
 
 
-def _editable_roots(distribution: Any, source: Path) -> list[str]:
-    names, _ = _editable_layout(distribution, source)
+def _editable_roots(distribution: Any, source: Path, files: list[importlib.metadata.PackagePath]) -> list[str]:
+    names, _ = _editable_layout(distribution, source, files)
     if not names:
         raise ValueError(f"Editable distribution lacks bounded import-root metadata: {distribution.metadata['Name']}")
     roots = []
@@ -295,9 +317,7 @@ def capture_runtime_content(
         if not name or name in names:
             raise ValueError(f"Missing or duplicate installed distribution: {name!r}")
         names.add(name)
-        files = distribution.files
-        if files is None:
-            raise ValueError(f"Installed distribution {name!r} has no member authority")
+        files = _distribution_members(distribution)
         direct_url = distribution.read_text("direct_url.json")
         url = json.loads(direct_url) if direct_url else {}
         is_editable = url.get("dir_info", {}).get("editable") is True
@@ -309,8 +329,8 @@ def capture_runtime_content(
             if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
                 raise ValueError(f"Editable distribution {name!r} has no local source authority")
             source = Path(urllib.request.url2pathname(urllib.parse.unquote(parsed.path))).resolve(strict=True)
-            roots = _editable_roots(distribution, source)
-            _, finders = _editable_layout(distribution, source)
+            roots = _editable_roots(distribution, source, files)
+            _, finders = _editable_layout(distribution, source, files)
             content_digest = editable_content_digest(roots)
             editable.append({"name": name, "content_digest": content_digest})
             operational.append(

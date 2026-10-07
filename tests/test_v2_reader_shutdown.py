@@ -14,6 +14,7 @@ from multiprocessing.connection import Client, Connection, Pipe
 from unittest.mock import MagicMock
 
 import pytest
+import psutil
 
 from wetlands import external_environment as runtime_module
 from wetlands import managed_environment as managed_module
@@ -158,12 +159,14 @@ module_executor.launch_listener(authkey=b"reader-test", persistent=True, commiss
         [sys.executable, "-B", "-c", child_code], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     connection = None
+    listener = None
     try:
         assert process.stdout is not None
         startup = json.loads(process.stdout.readline())
+        listener = psutil.Process(startup["pid"])
         connection = Client(("127.0.0.1", startup["port"]), authkey=b"reader-test")
         hello = connection.recv()
-        assert hello["pid"] == process.pid
+        assert hello["pid"] == listener.pid
         runtime = _runtime(tmp_path)
         runtime._persistent = True
         worker = _Worker(0, None, startup["port"], connection, None, persistent=True)
@@ -174,14 +177,24 @@ module_executor.launch_listener(authkey=b"reader-test", persistent=True, commiss
         assert not worker.reader_thread.is_alive()
         assert runtime.worker_count == 0
         assert process.poll() is None
+        assert listener.is_running()
         # The same real persistent listener accepts a new controller after detach.
         with Client(("127.0.0.1", startup["port"]), authkey=b"reader-test") as reattached:
-            assert reattached.recv()["pid"] == process.pid
+            assert reattached.recv()["pid"] == listener.pid
             reattached.send({"action": "exit", "protocol_version": EXECUTION_PROTOCOL_VERSION})
         assert process.wait(timeout=3) == 0
+        listener.wait(timeout=3)
+        assert not listener.is_running()
     finally:
         if connection is not None:
             connection.close()
+        if listener is not None and listener.is_running():
+            listener.terminate()
+            try:
+                listener.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                listener.kill()
+                listener.wait(timeout=3)
         if process.poll() is None:
             process.kill()
         process.communicate(timeout=3)

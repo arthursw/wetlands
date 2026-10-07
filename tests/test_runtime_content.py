@@ -396,3 +396,12 @@ def test_missing_retained_record_member_still_refuses_capture(tmp_path, member):
         stream.write(f"\n{member},,\n")
     with pytest.raises(FileNotFoundError):
         capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+
+
+def test_missing_complete_record_refuses_installed_content(tmp_path):
+    site = installed(tmp_path, 4)
+    record = site / "dependency-0.1.0.dist-info" / "RECORD"
+    record.unlink()
+    assert (site / "dependency" / "__init__.py").is_file()
+    with pytest.raises(ValueError, match="no complete RECORD authority"):
+        capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)

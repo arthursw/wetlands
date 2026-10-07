@@ -8,6 +8,7 @@ All notable changes to Wetlands are documented here.
 - Preserve worker, controller, and public manager retry ownership when a bounded reader handoff remains incomplete, while allowing idle persistent workers to detach and reconnect without stopping.
 
 - Ignore recorded operational bytecode-cache members before resolving their physical paths, while continuing to refuse missing retained runtime content.
+- Enumerate complete installed `RECORD` metadata before stdlib existence filtering, using the same inventory for hashing and editable activation admission.
 
 ## 2.6.0
 
