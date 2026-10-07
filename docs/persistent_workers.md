@@ -21,7 +21,10 @@ pool.detach()
 manager.close()
 ```
 
-`detach()` closes the controller connection without stopping the workers.
+`detach()` asks the idle worker to disconnect, waits for the controller reader to finish, and then closes the captured connection without stopping the worker process.
+Pool close likewise stops the process before closing a connection owned by a live reader.
+If a bounded reader handoff or process cleanup remains incomplete, the pool and controller ownership stay registered for an explicit close retry; a failed attach that has started a reader retains this retry ownership through the manager.
+These failures do not mean that resources were released successfully.
 After detaching, that `WorkerPool` object is closed and cannot submit more tasks.
 
 Calling `pool.close()` instead stops the worker processes.

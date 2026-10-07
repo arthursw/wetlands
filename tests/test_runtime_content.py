@@ -374,3 +374,121 @@ def test_file_capture_preserves_identity_and_each_metadata_api_fence(tmp_path, m
     else:
         with pytest.raises(ValueError, match="changed while being captured"):
             _file_content(path)
+
+
+def test_absent_recorded_compiled_caches_do_not_change_installed_content(tmp_path):
+    site = installed(tmp_path, 4)
+    before = capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+    record = site / "dependency-0.1.0.dist-info" / "RECORD"
+    with record.open("a") as stream:
+        stream.write("\ndependency/__pycache__/absent.cpython-310.pyc,,\n")
+        stream.write("dependency/generated.pyo,,\n")
+        stream.write("dependency/__pycache__/absent.other,,\n")
+    assert not (site / "dependency" / "__pycache__").exists()
+    assert capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path) == before
+
+
+@pytest.mark.parametrize("member", ["dependency/missing.py", "dependency/missing.bin"])
+def test_missing_retained_record_member_still_refuses_capture(tmp_path, member):
+    site = installed(tmp_path, 4)
+    record = site / "dependency-0.1.0.dist-info" / "RECORD"
+    with record.open("a") as stream:
+        stream.write(f"\n{member},,\n")
+    with pytest.raises(FileNotFoundError):
+        capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+
+
+def test_missing_complete_record_refuses_installed_content(tmp_path):
+    site = installed(tmp_path, 4)
+    record = site / "dependency-0.1.0.dist-info" / "RECORD"
+    record.unlink()
+    assert (site / "dependency" / "__init__.py").is_file()
+    with pytest.raises(ValueError, match="no complete RECORD authority"):
+        capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+
+
+def conda_installed(root, value, retained_record=False):
+    site = installed(root, value)
+    metadata = site / "dependency-0.1.0.dist-info"
+    (metadata / "RECORD").unlink()
+    metadata.rename(site / "dependency-0.1.0.egg-info")
+    metadata = site / "dependency-0.1.0.egg-info"
+    (metadata / "METADATA").rename(metadata / "PKG-INFO")
+    (metadata / "direct_url.json").unlink()
+    (metadata / "INSTALLER").unlink()
+    (metadata / "SOURCES.txt").write_text("dependency/__init__.py\n")
+    data = root / "share" / "owned-data.bin"
+    data.parent.mkdir()
+    data.write_bytes(b"owned data")
+    if retained_record:
+        (metadata / "RECORD").write_text("dependency/missing-wheel-entrypoint,,\n")
+    files = [path.relative_to(root).as_posix() for path in site.rglob("*") if path.is_file()]
+    files.append(data.relative_to(root).as_posix())
+    conda = root / "conda-meta"
+    conda.mkdir()
+    manifest = conda / "artifact-0.1.0-build.json"
+    manifest.write_text(json.dumps({"name": "different-artifact-name", "version": "0.1.0", "files": files}))
+    return site, manifest
+
+
+@pytest.mark.parametrize("retained_record", [False, True])
+def test_conda_owned_metadata_admits_complete_content_across_prefixes(tmp_path, retained_record):
+    captures = []
+    for suffix in ("one", "two"):
+        root = tmp_path / suffix
+        site, _ = conda_installed(root, 4, retained_record)
+        captures.append(capture_runtime_content(distribution_paths=[str(site)], prefix=root))
+    assert captures[0] == captures[1]
+    (tmp_path / "two" / "share" / "owned-data.bin").write_bytes(b"changed outside site-packages")
+    assert capture_runtime_content(distribution_paths=[str(site)], prefix=root) != captures[0]
+
+
+@pytest.mark.parametrize("member", ["missing.py", "missing.bin"])
+def test_conda_missing_retained_owned_member_refuses_capture(tmp_path, member):
+    site, manifest = conda_installed(tmp_path, 4)
+    value = json.loads(manifest.read_text())
+    value["files"].append(f"share/{member}")
+    manifest.write_text(json.dumps(value))
+    with pytest.raises(FileNotFoundError):
+        capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+
+
+def test_conda_absent_owned_cache_does_not_change_complete_content(tmp_path):
+    site, manifest = conda_installed(tmp_path, 4)
+    before = capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+    value = json.loads(manifest.read_text())
+    value["files"].append("lib/python3.12/site-packages/dependency/__pycache__/absent.pyc")
+    manifest.write_text(json.dumps(value))
+    assert capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path) == before
+
+
+@pytest.mark.parametrize("ownership", ["unowned", "ambiguous", "invalid"])
+def test_conda_metadata_requires_unique_valid_installed_owner(tmp_path, ownership):
+    site, manifest = conda_installed(tmp_path, 4)
+    if ownership == "unowned":
+        manifest.unlink()
+    elif ownership == "ambiguous":
+        manifest.with_name("other-owner.json").write_bytes(manifest.read_bytes())
+    else:
+        value = json.loads(manifest.read_text())
+        value["files"].append("../outside.py")
+        manifest.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="Conda"):
+        capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+
+
+def test_conda_anchor_outside_prefix_refuses_before_content_read(tmp_path, monkeypatch):
+    root = tmp_path / "prefix"
+    site, _ = conda_installed(root, 4)
+    anchor = site / "dependency-0.1.0.egg-info"
+    outside = tmp_path / "outside"
+    anchor.rename(outside)
+    try:
+        anchor.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("Directory links unavailable")
+    reads = []
+    monkeypatch.setattr(capture_kernel, "_file_content", lambda path, **kwargs: reads.append(path))
+    with pytest.raises(ValueError):
+        capture_runtime_content(distribution_paths=[str(site)], prefix=root)
+    assert reads == []

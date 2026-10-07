@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import ast
+import csv
 import hashlib
 import importlib.metadata
 import importlib.util
 import json
 import io
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import re
 import shlex
@@ -162,11 +163,90 @@ def editable_content_digest(roots: list[str]) -> str:
     return _members_digest(members)
 
 
-def _editable_layout(distribution: Any, source: Path) -> tuple[set[str], set[str]]:
+def _conda_members(
+    distribution: Any, prefix: Path, records: list[dict[str, Any]]
+) -> list[importlib.metadata.PackagePath] | None:
+    """Admit a complete installed manifest by its exact owned metadata anchor."""
+    base = Path(distribution.locate_file("")).resolve(strict=True)
+    base.relative_to(prefix)
+    owners = []
+    for record in records:
+        files = record.get("files", [])
+        if not isinstance(files, list) or any(
+            not isinstance(member, str)
+            or not member
+            or "\\" in member
+            or ":" in member
+            or PurePosixPath(member).is_absolute()
+            or any(part in {"", ".", ".."} for part in member.split("/"))
+            for member in files
+        ):
+            raise ValueError("Invalid installed Conda member authority")
+        anchored = False
+        for member in files:
+            path = prefix / member
+            if (
+                not (
+                    (path.name == "METADATA" and path.parent.suffix == ".dist-info")
+                    or (path.name == "PKG-INFO" and path.parent.suffix == ".egg-info")
+                )
+                or path.parent.parent.resolve(strict=True) != base
+            ):
+                continue
+            path = path.resolve(strict=True)
+            path.relative_to(prefix)
+            public_text = distribution.read_text(path.name)
+            if (
+                public_text is None
+                or _file_content(path, materialize=True)[1].decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+                != public_text
+            ):
+                continue
+            metadata = importlib.metadata.Distribution.at(path.parent).metadata
+            if metadata["Name"] == distribution.metadata["Name"] and metadata["Version"] == distribution.version:
+                anchored = True
+        if anchored:
+            owners.append(files)
+    if not owners:
+        return None
+    if len(owners) != 1:
+        raise ValueError("Installed distribution has ambiguous installed Conda owners")
+    return [
+        importlib.metadata.PackagePath(Path(os.path.relpath(prefix / member, base)).as_posix()) for member in owners[0]
+    ]
+
+
+def _distribution_members(
+    distribution: Any, prefix: Path, records: list[dict[str, Any]]
+) -> list[importlib.metadata.PackagePath]:
+    """Capture complete installed authority before stdlib existence filtering."""
+    conda = _conda_members(distribution, prefix, records)
+    if conda is not None:
+        return conda
+    record = distribution.read_text("RECORD")
+    if not record:
+        raise ValueError("Installed distribution has no complete RECORD authority or installed Conda owner")
+    members = []
+    for row in csv.reader(io.StringIO(record)):
+        if not row:
+            continue
+        if len(row) != 3 or not row[0]:
+            raise ValueError("Invalid installed RECORD member")
+        if row[2]:
+            int(row[2])
+        members.append(importlib.metadata.PackagePath(row[0]))
+    if not members:
+        raise ValueError("Installed RECORD has no member authority")
+    return members
+
+
+def _editable_layout(
+    distribution: Any, source: Path, files: list[importlib.metadata.PackagePath]
+) -> tuple[set[str], set[str]]:
     """Use owned activation members, not a guessed distribution/import name."""
     names = set((distribution.read_text("top_level.txt") or "").split())
     finders: set[str] = set()
-    for member in distribution.files or ():
+    for member in files:
         path = Path(distribution.locate_file(member))
         if path.suffix != ".pth":
             continue
@@ -178,7 +258,7 @@ def _editable_layout(distribution: Any, source: Path) -> tuple[set[str], set[str
             if match:
                 finder_name = match.group(1)
                 finder = path.parent / (finder_name + ".py")
-                if finder.name not in {Path(str(item)).name for item in distribution.files or ()}:
+                if finder.name not in {Path(str(item)).name for item in files}:
                     raise ValueError("Editable finder has no owned member authority")
                 tree = ast.parse(_file_content(finder, materialize=True)[1].decode("utf-8"))
                 mappings = _finder_mappings(tree)
@@ -223,8 +303,8 @@ def _finder_mappings(tree: ast.Module) -> dict[str, Any]:
     return mappings
 
 
-def _editable_roots(distribution: Any, source: Path) -> list[str]:
-    names, _ = _editable_layout(distribution, source)
+def _editable_roots(distribution: Any, source: Path, files: list[importlib.metadata.PackagePath]) -> list[str]:
+    names, _ = _editable_layout(distribution, source, files)
     if not names:
         raise ValueError(f"Editable distribution lacks bounded import-root metadata: {distribution.metadata['Name']}")
     roots = []
@@ -283,6 +363,7 @@ def capture_runtime_content(
 ) -> dict[str, Any]:
     """Hash actual installed Python members once, without importing tool packages."""
     prefix = (prefix or Path(sys.prefix)).resolve()
+    records = [json.loads(metadata.read_text()) for metadata in sorted((prefix / "conda-meta").glob("*.json"))]
     distributions = (
         importlib.metadata.distributions(path=distribution_paths)
         if distribution_paths is not None
@@ -295,9 +376,7 @@ def capture_runtime_content(
         if not name or name in names:
             raise ValueError(f"Missing or duplicate installed distribution: {name!r}")
         names.add(name)
-        files = distribution.files
-        if files is None:
-            raise ValueError(f"Installed distribution {name!r} has no member authority")
+        files = _distribution_members(distribution, prefix, records)
         direct_url = distribution.read_text("direct_url.json")
         url = json.loads(direct_url) if direct_url else {}
         is_editable = url.get("dir_info", {}).get("editable") is True
@@ -309,8 +388,8 @@ def capture_runtime_content(
             if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
                 raise ValueError(f"Editable distribution {name!r} has no local source authority")
             source = Path(urllib.request.url2pathname(urllib.parse.unquote(parsed.path))).resolve(strict=True)
-            roots = _editable_roots(distribution, source)
-            _, finders = _editable_layout(distribution, source)
+            roots = _editable_roots(distribution, source, files)
+            _, finders = _editable_layout(distribution, source, files)
             content_digest = editable_content_digest(roots)
             editable.append({"name": name, "content_digest": content_digest})
             operational.append(
@@ -321,6 +400,9 @@ def capture_runtime_content(
         }
         members = []
         for file in files:
+            # Operational bytecode caches can be recorded without still existing.
+            if file.suffix in {".pyc", ".pyo"} or "__pycache__" in file.parts:
+                continue
             path = Path(str(distribution.locate_file(file))).resolve(strict=True)
             relative = path.relative_to(prefix).as_posix()
             if path.suffix in {".pyc", ".pyo"} or "__pycache__" in path.parts:
@@ -350,8 +432,7 @@ def capture_runtime_content(
             members.append((relative, size, file_digest))
         installed.append({"name": name, "version": distribution.version, "content_digest": _members_digest(members)})
     artifacts = []
-    for metadata in sorted((prefix / "conda-meta").glob("*.json")):
-        value = json.loads(metadata.read_text())
+    for value in records:
         artifacts.append(
             {
                 "name": _name(value["name"]),

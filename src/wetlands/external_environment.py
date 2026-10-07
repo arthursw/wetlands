@@ -87,6 +87,7 @@ POOL_COMMISSION_ACK_TIMEOUT = 5.0
 LAUNCHER_LOSS_TIMEOUT_MARGIN = 30.0
 WORKER_GRACEFUL_EXIT_TIMEOUT = 2.0
 PROCESS_LOGGER_JOIN_TIMEOUT = 5.0
+WORKER_READER_JOIN_TIMEOUT = 2.0
 _NO_RESULT = object()
 
 
@@ -216,6 +217,17 @@ def synchronized(method):
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def lifecycle_synchronized(method):
+    """Serialize pool transitions while a reader handoff releases the state lock."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lifecycle_lock:
             return method(self, *args, **kwargs)
 
     return wrapper
@@ -377,6 +389,7 @@ class ExternalEnvironment:
         self._pool_id: str | None = uuid.uuid4().hex
         self._fatal_error: BaseException | None = None
         self._lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
         # Worker pool state
         self._workers: list[_Worker] = []
         self._idle_workers: queue.Queue[_Worker] = queue.Queue()
@@ -424,6 +437,7 @@ class ExternalEnvironment:
         if error is not None:
             raise error
 
+    @lifecycle_synchronized
     @synchronized
     def launch(
         self,
@@ -533,7 +547,7 @@ class ExternalEnvironment:
             cleanup_complete = True
             for worker in started:
                 try:
-                    if not self._remove_dead_worker(worker):
+                    if not self._remove_dead_worker(worker, state_lock_held=True):
                         cleanup_complete = False
                         cleanup_errors.append(f"worker {worker.index} process tree could not be verified as terminated")
                 except Exception as cleanup_error:
@@ -553,7 +567,7 @@ class ExternalEnvironment:
                         )
                 except Exception as cleanup_error:
                     cleanup_errors.append(str(cleanup_error))
-            if self._controller_id is not None:
+            if self._controller_id is not None and cleanup_complete:
                 try:
                     runtime_state.release_controller(
                         self.environment_manager.root,
@@ -562,7 +576,8 @@ class ExternalEnvironment:
                     )
                 except Exception as cleanup_error:
                     cleanup_errors.append(str(cleanup_error))
-                self._controller_id = None
+                else:
+                    self._controller_id = None
             if isinstance(
                 error,
                 (EnvironmentGenerationChangedError, WorkerStartError),
@@ -951,20 +966,30 @@ class ExternalEnvironment:
         process: subprocess.Popen,
         connection: Connection | None = None,
         process_logger: ProcessLogger | None = None,
+        *,
+        worker: _Worker | None = None,
+        state_lock_held: bool = False,
     ) -> bool:
         if connection is not None:
             try:
                 connection.send({"action": "exit", "protocol_version": EXECUTION_PROTOCOL_VERSION})
             except Exception:
                 pass
-            try:
-                connection.close()
-            except Exception:
-                pass
+            if worker is None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
 
         terminated = self._terminate_launched_worker(process)
         output_closed = self._finish_process_output(process, process_logger)
-        return terminated and output_closed
+        connection_closed = True
+        if worker is not None:
+            try:
+                connection_closed = self._finish_worker_connection(worker, state_lock_held=state_lock_held)
+            except OSError:
+                connection_closed = False
+        return terminated and output_closed and connection_closed
 
     def _finish_process_output(self, process: subprocess.Popen, process_logger: ProcessLogger | None) -> bool:
         if process_logger is not None:
@@ -1386,6 +1411,7 @@ class ExternalEnvironment:
                         if retired:
                             self._try_replace_worker(worker.index)
 
+    @lifecycle_synchronized
     def _try_replace_worker(self, index: int) -> None:
         """Attempt to launch a replacement worker at the given index."""
         with self._lock:
@@ -1406,6 +1432,8 @@ class ExternalEnvironment:
                             worker.process,
                             worker.connection,
                             worker.process_logger,
+                            worker=worker,
+                            state_lock_held=True,
                         )  # type: ignore[arg-type]
                         if terminated:
                             try:
@@ -1461,11 +1489,31 @@ class ExternalEnvironment:
             with self._lock:
                 self._fatal_error = replacement_error
 
+    def _finish_worker_connection(self, worker: _Worker, *, state_lock_held: bool = False) -> bool:
+        """Close the captured connection only after its other-thread reader finishes."""
+        reader = worker.reader_thread
+        if reader is not None and reader is not threading.current_thread() and reader.is_alive():
+            # A received message can still need the state lock before the reader
+            # reaches its terminal state. Pool transitions retain the lifecycle lock.
+            if state_lock_held:
+                self._lock.release()
+            try:
+                reader.join(timeout=WORKER_READER_JOIN_TIMEOUT)
+            finally:
+                if state_lock_held:
+                    self._lock.acquire()
+            if reader.is_alive():
+                return False
+        if not worker.connection.closed:
+            worker.connection.close()
+        return True
+
     def _remove_dead_worker(
         self,
         worker: _Worker,
         *,
         retirement_claimed: bool = False,
+        state_lock_held: bool = False,
     ) -> bool:
         """Remove a dead worker from all pools and clean up its resources."""
         with self._lock:
@@ -1477,12 +1525,6 @@ class ExternalEnvironment:
                     return False
                 worker._retired = True
 
-        try:
-            if worker.connection and not worker.connection.closed:
-                worker.connection.close()
-        except OSError:
-            pass
-
         terminated = True
         cleanup_failure: WorkerStartError | None = None
         if worker.process is not None:
@@ -1491,6 +1533,12 @@ class ExternalEnvironment:
             terminated = terminated and output_closed
         elif worker.pid is not None:
             terminated = self._terminate_attached_worker(worker)
+
+        try:
+            connection_closed = self._finish_worker_connection(worker, state_lock_held=state_lock_held)
+        except OSError:
+            connection_closed = False
+        terminated = terminated and connection_closed
 
         if terminated:
             try:
@@ -1894,6 +1942,7 @@ class ExternalEnvironment:
         task._payload["_call_target"] = call_target  # type: ignore[attr-defined]
         return self._submit_task(task, True)
 
+    @lifecycle_synchronized
     def attach_workers(
         self,
         worker_entries: Iterable[dict[str, Any]],
@@ -2016,23 +2065,48 @@ class ExternalEnvironment:
                     "no live authenticated persistent workers were found",
                     phase="attach",
                 )
-        except BaseException:
-            self._workers.clear()
+        except BaseException as error:
+            self._shutdown_event.set()
             self._drain_idle_workers()
+            pending: list[_Worker] = []
+            rollback_errors: list[str] = []
             for worker in attached:
                 try:
                     if not worker.connection.closed:
                         worker.connection.send({"action": "detach", "protocol_version": EXECUTION_PROTOCOL_VERSION})
-                        worker.connection.close()
+                    if not self._finish_worker_connection(worker):
+                        pending.append(worker)
+                        rollback_errors.append(f"worker {worker.index} reader remains active")
+                except Exception as cleanup_error:
+                    pending.append(worker)
+                    rollback_errors.append(str(cleanup_error))
+            self._workers[:] = pending
+            if self._controller_id is not None and not pending:
+                try:
+                    runtime_state.release_controller(
+                        self.environment_manager.root,
+                        self.name,
+                        self._controller_id,
+                    )
+                except Exception as cleanup_error:
+                    rollback_errors.append(str(cleanup_error))
+                else:
+                    self._controller_id = None
+            if rollback_errors:
+                logger.error("Attach rollback retains cleanup ownership: %s", "; ".join(rollback_errors))
+                try:
+                    setattr(error, "_wetlands_cleanup_owner", self)
+                    setattr(
+                        error,
+                        "wetlands_cleanup",
+                        {
+                            "pending_workers": tuple(worker.index for worker in pending),
+                            "controller_id": self._controller_id,
+                            "errors": tuple(rollback_errors),
+                        },
+                    )
                 except Exception:
                     pass
-            if self._controller_id is not None:
-                runtime_state.release_controller(
-                    self.environment_manager.root,
-                    self.name,
-                    self._controller_id,
-                )
-                self._controller_id = None
             raise
 
         self._pool_commissioned = True
@@ -2249,6 +2323,7 @@ class ExternalEnvironment:
         with self._lock:
             return len(self._workers)
 
+    @lifecycle_synchronized
     @synchronized
     def _exit(self) -> None:
         """Close connections and kill all worker processes."""
@@ -2272,10 +2347,6 @@ class ExternalEnvironment:
                         call_target=self._task_call_target(active_task),
                     )
                 if active:
-                    try:
-                        worker.connection.close()
-                    except OSError as error:
-                        cleanup_errors.append(f"worker {worker.index} connection close failed: {error}")
                     if worker.process is not None:
                         terminated = self._terminate_launched_worker(worker.process)
                         output_closed = self._finish_process_output(worker.process, worker.process_logger)
@@ -2289,10 +2360,6 @@ class ExternalEnvironment:
                         worker.connection.send({"action": "exit", "protocol_version": EXECUTION_PROTOCOL_VERSION})
                     except OSError:
                         pass
-                    try:
-                        worker.connection.close()
-                    except OSError as error:
-                        cleanup_errors.append(f"worker {worker.index} connection close failed: {error}")
                     if worker.process is not None:
                         terminated = self._gracefully_stop_process(
                             worker.process,
@@ -2302,6 +2369,14 @@ class ExternalEnvironment:
                         terminated = self._terminate_attached_worker(worker)
                     else:
                         terminated = True
+                try:
+                    connection_closed = self._finish_worker_connection(worker, state_lock_held=True)
+                except OSError as error:
+                    connection_closed = False
+                    cleanup_errors.append(f"worker {worker.index} connection close failed: {error}")
+                if not connection_closed:
+                    cleanup_errors.append(f"worker {worker.index} reader remains active; connection retained for retry")
+                terminated = terminated and connection_closed
                 if active_task is not None:
                     self._cleanup_task_inputs(active_task)
                     worker._current_task = None
@@ -2386,6 +2461,7 @@ class ExternalEnvironment:
         with self._lock:
             self._fatal_error = None
 
+    @lifecycle_synchronized
     @synchronized
     def detach(self) -> None:
         """Close local connections without stopping persistent worker processes."""
@@ -2398,14 +2474,18 @@ class ExternalEnvironment:
         for worker in self._workers:
             worker._start_detached_reaper()
         self._shutdown_event.set()
+        pending: list[_Worker] = []
+        cleanup_errors: list[str] = []
         for worker in list(self._workers):
             try:
-                if worker.connection and not worker.connection.closed:
-                    if worker.persistent:
-                        worker.connection.send({"action": "detach", "protocol_version": EXECUTION_PROTOCOL_VERSION})
-                    worker.connection.close()
-            except OSError:
-                pass
+                if worker.connection and not worker.connection.closed and worker.persistent:
+                    worker.connection.send({"action": "detach", "protocol_version": EXECUTION_PROTOCOL_VERSION})
+                if not self._finish_worker_connection(worker, state_lock_held=True):
+                    pending.append(worker)
+                    cleanup_errors.append(f"worker {worker.index} reader remains active; connection retained for retry")
+            except OSError as error:
+                pending.append(worker)
+                cleanup_errors.append(f"worker {worker.index} connection handoff failed: {error}")
             if worker._current_task is not None and not worker._current_task.state.terminal:
                 task = worker._current_task
                 failure = ExecutionFailure.environment(
@@ -2416,7 +2496,13 @@ class ExternalEnvironment:
                 self._cleanup_task_inputs(task)
                 task._set_failed(failure)
             worker._current_task = None
-        self._workers.clear()
+        self._workers[:] = pending
+        if pending:
+            detach_error = WorkerStartError(
+                self.name, "worker detach did not complete", phase="detach", cleanup_errors=tuple(cleanup_errors)
+            )
+            self._fatal_error = detach_error
+            raise detach_error
         self._drain_idle_workers()
         while True:
             try:

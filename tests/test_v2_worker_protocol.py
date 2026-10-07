@@ -766,7 +766,7 @@ def test_multi_worker_launch_is_failure_atomic(tmp_path):
     ):
         runtime.launch(max_workers=2)
 
-    remove.assert_called_once_with(first)
+    remove.assert_called_once_with(first, state_lock_held=True)
     assert runtime.worker_count == 0
 
 
