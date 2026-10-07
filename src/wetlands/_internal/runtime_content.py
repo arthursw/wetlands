@@ -321,6 +321,9 @@ def capture_runtime_content(
         }
         members = []
         for file in files:
+            # Operational bytecode caches can be recorded without still existing.
+            if file.suffix in {".pyc", ".pyo"} or "__pycache__" in file.parts:
+                continue
             path = Path(str(distribution.locate_file(file))).resolve(strict=True)
             relative = path.relative_to(prefix).as_posix()
             if path.suffix in {".pyc", ".pyo"} or "__pycache__" in path.parts:

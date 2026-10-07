@@ -374,3 +374,25 @@ def test_file_capture_preserves_identity_and_each_metadata_api_fence(tmp_path, m
     else:
         with pytest.raises(ValueError, match="changed while being captured"):
             _file_content(path)
+
+
+def test_absent_recorded_compiled_caches_do_not_change_installed_content(tmp_path):
+    site = installed(tmp_path, 4)
+    before = capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
+    record = site / "dependency-0.1.0.dist-info" / "RECORD"
+    with record.open("a") as stream:
+        stream.write("\ndependency/__pycache__/absent.cpython-310.pyc,,\n")
+        stream.write("dependency/generated.pyo,,\n")
+        stream.write("dependency/__pycache__/absent.other,,\n")
+    assert not (site / "dependency" / "__pycache__").exists()
+    assert capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path) == before
+
+
+@pytest.mark.parametrize("member", ["dependency/missing.py", "dependency/missing.bin"])
+def test_missing_retained_record_member_still_refuses_capture(tmp_path, member):
+    site = installed(tmp_path, 4)
+    record = site / "dependency-0.1.0.dist-info" / "RECORD"
+    with record.open("a") as stream:
+        stream.write(f"\n{member},,\n")
+    with pytest.raises(FileNotFoundError):
+        capture_runtime_content(distribution_paths=[str(site)], prefix=tmp_path)
