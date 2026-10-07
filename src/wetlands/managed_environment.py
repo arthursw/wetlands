@@ -448,9 +448,16 @@ class ManagedEnvironment:
                 )
                 pool = WorkerPool(self, runtime)
                 authkey = runtime_state.load_or_create_root_authkey(self._manager.root)
-                runtime.attach_workers(entries, authkey, timeout=timeout)
-            with self._lock:
-                self._pools.append(pool)
+                with self._lock:
+                    self._pools.append(pool)
+                try:
+                    runtime.attach_workers(entries, authkey, timeout=timeout)
+                except BaseException:
+                    if not runtime._workers and runtime._controller_id is None:
+                        with self._lock:
+                            self._pools.remove(pool)
+                        pool._closed = True
+                    raise
             return pool
 
     def _require_current_generation(self) -> None:

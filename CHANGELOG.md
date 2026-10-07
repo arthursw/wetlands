@@ -2,6 +2,11 @@
 
 All notable changes to Wetlands are documented here.
 
+## 2.6.1
+
+- Finish worker IPC readers before closing their captured connections during shutdown, retirement, persistent detach, and attach rollback.
+- Preserve worker, controller, and public manager retry ownership when a bounded reader handoff remains incomplete, while allowing idle persistent workers to detach and reconnect without stopping.
+
 ## 2.6.0
 
 - Add immutable `RuntimeContentReceipt` values captured from the managed interpreter before ready publication, separating scientific installed-content identity from recipe, lockfile, and generation fences.
